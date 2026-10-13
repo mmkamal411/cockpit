@@ -152,3 +152,22 @@ Branch: feature/child-education-ux (synced, HEAD = origin). Built the Settings a
 - `src/components/applet-content.tsx` — placeholder replaced; openApplet("settings") now renders the real SettingsApplet.
 
 **Verified:** `npx tsc --noEmit` — zero errors. ESLint: only the repo-standard data-fetch set-state-in-effect pattern (same as crew-applet etc.) + one no-location-assign warning on the deliberate full-reload sign-out. No console.logs, no dead code, no commented-out blocks. **NOT browser-verified** (no subagent browser): needs a signed-in staging session — open Settings from the station deck footer → all 7 panels render, search works, save a setting → reload shows it persisted; family panel link-code mint; layout reorder persists; export downloads; DangerZone flow. Migrations 027 + 028 still need Meheldi to run in the SQL editor (settings API 500s until 027 exists — panel shows plain-English retry states).
+
+## 2026-10-13 ~12:45 EDT — Phase A (Child Education UX): navigation foundation (subagent 0055449d)
+
+**Branch:** `feature/child-education-ux` — 4 commits, all pushed (d53178a, 849fa25, 46a6c00, 7337ff2).
+
+**Shipped (all Meheldi decisions D1–D5 applied):**
+1. **More tab killed on all 5 toolbar variants** (console, legacy, dash, hologlass, panoramic). Dead `MoreGlyph`s removed. The `more` applet stays registered for deep-link back-compat; nothing opens it anymore.
+2. **Conditional School tab** — renders iff the pilot has ≥1 linked `crew_members` (new shared `src/lib/use-crew-roster.ts`, one cached fetch per page load; D4: on child add, not after first sync). Shared `src/components/school-glyph.tsx` graduation-cap glyph sized per variant. Childless pilots see zero parenting pixels.
+3. **HomeStations 6-button grid** (`src/components/home-stations.tsx`) — 3-left/3-right cockpit instrument buttons below the glass pane; categories per plan §2.1 (My Day, Home & Money, Go & Explore left; Family & School [conditional], Health & Habits, Messages & Mail right). Lit state = real attention: bills due within 7d (`/api/bills`), classes below 90 across children. ≥44pt targets, real button semantics, labels always, 4.5:1 dimmed contrast, `prefers-reduced-motion` honored.
+4. **Category → subcategory → applet flow** — `openStationCategory()` / `openStationModule()` in `applet-bus.ts`; `station-category` overlay applet lists subcategories; unwired modules show honest "coming soon" panels (never blank). `/school` → `school` deep link added (replaces dead `/more`); `class-detail` registered as an applet (params `{member, class}`) so mission/class cards deep-link into it.
+5. **SchoolStation applet** (`src/components/applets/school-station.tsx`) — NOW strip → Today's mission (gap-sorted top 5, "X points to your goal") → Classes grid (`80.2 | B`, amber gap bars, tap → class page) → This week → Attendance → Check-in status (rhythm framing) → Messages. Multi-child chips. Missing tables (school_schedules/district_calendars/checkins) → honest "syncing…" states everywhere; amber never red; cool-down copy on grade displays.
+6. **Settings entries** — gear + "Settings" top-right on the home glass pane (primary); pilot avatar button in the panoramic toolbar strip (secondary). Both open the `settings` applet (real 7-panel build now in Phase D).
+7. **Consent copy** — rewrote the 2 stale "More → My sharing" pointers in Phase C's `src/components/consent-screen.tsx` to "Family & School → My sharing".
+
+**Verified:** `npx tsc --noEmit` — zero errors in all Phase A files. Dev-server smoke: `/home` → 307 (signed-out redirect, correct); no compile errors in any new file. NOT browser-verified (no live browser on subagents) — needs a signed-in staging session: toolbar School tab appears only with a linked child; station buttons → subcategory overlay → applets; school station sections.
+
+**Pre-existing issues (other teams' WIP on this shared branch, not mine):**
+- `GET /` 500s from Phase B's `class-detail.tsx` rewrite importing `@/lib/checkin-topics`, `@/lib/peer-tips`, `@/components/class-resources` (don't exist yet) — broken before my work.
+- `npx tsc` shows errors only in Phase C/D files — none in Phase A files.
