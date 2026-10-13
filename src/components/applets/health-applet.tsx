@@ -537,7 +537,7 @@ function LogSheet({
 
             <button
               type="button"
-              onClick={save}
+              onClick={() => save()}
               disabled={saving || !value.trim()}
               className="w-full rounded-xl border border-neon-green/40 bg-neon-green/10 py-3 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -974,7 +974,7 @@ function LabA1CForm({ onSaved }: { onSaved: () => void }) {
       {error && <p className="text-sm text-red-300">{error}</p>}
       <button
         type="button"
-        onClick={save}
+        onClick={() => save()}
         disabled={saving || !value.trim()}
         className="w-full rounded-xl border border-neon-green/40 bg-neon-green/10 py-2.5 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
       >
