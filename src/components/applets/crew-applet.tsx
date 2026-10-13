@@ -373,49 +373,9 @@ export function CrewApplet() {
       // Optional calendar/bell links + uploads captured in step 2 — sent to
       // the intake for verify+parse. A failure here never blocks the add;
       // the parent can add the links later from the member's profile.
-      const calLink = newCalendarUrl.trim();
-      const bellSchedules = newBellRows
-        .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
-        .filter((b) => b.url);
-      const uploads = newUploads;
-      if (calLink || bellSchedules.length > 0 || uploads.length > 0) {
-        const items: IntakeItem[] = [];
-        if (calLink)
-          items.push({
-            key: "calendar",
-            kind: "calendar",
-            label: "Calendar link",
-            url: calLink,
-          });
-        bellSchedules.forEach((b, i) =>
-          items.push({
-            key: `bell-${i}`,
-            kind: "bell",
-            label: b.label,
-            url: b.url,
-          }),
-        );
-        uploads.forEach((pick, i) =>
-          items.push({
-            key: `upload-${i}`,
-            kind: "upload",
-            label: pick.file.name,
-            file: pick.file,
-            uploadKind: pick.kind,
-          }),
-        );
-        setIntakeChecks(
-          items.map((item) => ({
-            key: item.key,
-            kind: item.kind,
-            label: item.label,
-            url: item.url,
-            fileName: item.file?.name,
-            file: item.file,
-            uploadKind: item.uploadKind,
-            state: item.kind === "upload" ? "uploading" : "verifying",
-          })),
-        );
+      const items = buildNewIntakeItems();
+      if (items.length > 0) {
+        setIntakeChecks(checksForItems(items));
         setIntakeRunning(true);
         try {
           await runSourceIntake({
@@ -458,49 +418,134 @@ export function CrewApplet() {
     }
   }
 
+  /** Build the full intake item list from the add-child step-2 fields. */
+  function buildNewIntakeItems(): IntakeItem[] {
+    const items: IntakeItem[] = [];
+    const calLink = newCalendarUrl.trim();
+    if (calLink)
+      items.push({
+        key: "calendar",
+        kind: "calendar",
+        label: "Calendar link",
+        url: calLink,
+      });
+    newBellRows
+      .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
+      .filter((b) => b.url)
+      .forEach((b, i) =>
+        items.push({ key: `bell-${i}`, kind: "bell", label: b.label, url: b.url }),
+      );
+    newUploads.forEach((pick, i) =>
+      items.push({
+        key: `upload-${i}`,
+        kind: "upload",
+        label: pick.file.name,
+        file: pick.file,
+        uploadKind: pick.kind,
+      }),
+    );
+    return items;
+  }
+
+  /** Build the full intake item list from the member-detail editor fields. */
+  function buildSrcIntakeItems(extraUpload?: SourceCheck): IntakeItem[] {
+    const items: IntakeItem[] = [];
+    const calUrl = srcCalendarUrl.trim();
+    if (calUrl)
+      items.push({
+        key: "calendar",
+        kind: "calendar",
+        label: "Calendar link",
+        url: calUrl,
+      });
+    srcBells
+      .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
+      .filter((b) => b.url)
+      .forEach((b, i) =>
+        items.push({ key: `bell-${i}`, kind: "bell", label: b.label, url: b.url }),
+      );
+    srcUploads.forEach((pick, i) =>
+      items.push({
+        key: `upload-${Date.now()}-${i}`,
+        kind: "upload",
+        label: pick.file.name,
+        file: pick.file,
+        uploadKind: pick.kind,
+      }),
+    );
+    if (extraUpload?.file) {
+      items.push({
+        key: extraUpload.key,
+        kind: "upload",
+        label: extraUpload.label,
+        file: extraUpload.file,
+        uploadKind: extraUpload.uploadKind,
+      });
+    }
+    return items;
+  }
+
+  /** Fresh "verifying" checks for an item list. */
+  function checksForItems(items: IntakeItem[]): SourceCheck[] {
+    return items.map((item) => ({
+      key: item.key,
+      kind: item.kind,
+      label: item.label,
+      url: item.url,
+      fileName: item.file?.name,
+      file: item.file,
+      uploadKind: item.uploadKind,
+      state: (item.kind === "upload" ? "uploading" : "verifying") as SourceCheck["state"],
+    }));
+  }
+
   /** Retry one failed intake source from the confirmation screen. */
   async function retryIntakeCheck(memberId: string, check: SourceCheck) {
     if (check.state !== "error" || retryingCheckKey) return;
     setRetryingCheckKey(check.key);
-    const item: IntakeItem = {
-      key: check.key,
-      kind: check.kind,
-      label: check.label,
-      url: check.url,
-      file: check.file,
-      uploadKind: check.uploadKind,
-    };
-    setIntakeChecks((prev) =>
-      prev.map((c) =>
-        c.key === check.key
-          ? { ...c, state: c.kind === "upload" ? "uploading" : "verifying", message: undefined }
-          : c,
-      ),
-    );
+    // Re-run the FULL payload: the backend replaces bell_schedules wholesale,
+    // so a partial retry would wipe the other saved links.
+    const items = buildNewIntakeItems();
+    // Keep the failed upload's file if the picks were cleared.
+    if (
+      check.kind === "upload" &&
+      check.file &&
+      !items.some((i) => i.file === check.file)
+    ) {
+      items.push({
+        key: check.key,
+        kind: "upload",
+        label: check.label,
+        file: check.file,
+        uploadKind: check.uploadKind,
+      });
+    }
+    setIntakeChecks(checksForItems(items));
     try {
       await runSourceIntake({
         memberId,
         district: district.trim() || null,
-        items: [item],
+        items,
         onCheck: (key, patch) =>
           setIntakeChecks((prev) =>
             prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
           ),
-        // On retry the links are already saved — never wipe them with a
-        // partial PUT if the intake endpoint isn't there yet.
-        legacySave: async () => {
-          setIntakeChecks((prev) =>
-            prev.map((c) =>
-              c.key === check.key
-                ? {
-                    ...c,
-                    state: "error",
-                    message:
-                      "The link checker isn't available right now — your saved links are unchanged. Try again later.",
-                  }
-                : c,
-            ),
+        // On retry the links are already saved — a full PUT keeps them intact
+        // if the intake endpoint isn't there.
+        legacySave: async (payload) => {
+          const putRes = await fetch(
+            `/api/crew/members/${memberId}/school-sources`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                district: payload.district,
+                calendar_source_url: payload.calendar_url,
+                bell_schedules: payload.bell_schedules,
+              }),
+            },
           );
+          if (!putRes.ok) throw new Error("save failed");
         },
       });
     } finally {
@@ -888,30 +933,7 @@ export function CrewApplet() {
     setSrcSaving(true);
     setSrcMessage(null);
     try {
-      const bells = srcBells
-        .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
-        .filter((b) => b.url);
-      const calUrl = srcCalendarUrl.trim() || null;
-      const items: IntakeItem[] = [];
-      if (calUrl)
-        items.push({
-          key: "calendar",
-          kind: "calendar",
-          label: "Calendar link",
-          url: calUrl,
-        });
-      bells.forEach((b, i) =>
-        items.push({ key: `bell-${i}`, kind: "bell", label: b.label, url: b.url }),
-      );
-      srcUploads.forEach((pick, i) =>
-        items.push({
-          key: `upload-${Date.now()}-${i}`,
-          kind: "upload",
-          label: pick.file.name,
-          file: pick.file,
-          uploadKind: pick.kind,
-        }),
-      );
+      const items = buildSrcIntakeItems();
       if (items.length === 0) {
         // Nothing to verify — save the district via the plain route.
         const res = await fetch(`/api/crew/members/${memberId}/school-sources`, {
@@ -930,18 +952,7 @@ export function CrewApplet() {
         await loadSchoolSources(memberId);
         return;
       }
-      setSrcChecks(
-        items.map((item) => ({
-          key: item.key,
-          kind: item.kind,
-          label: item.label,
-          url: item.url,
-          fileName: item.file?.name,
-          file: item.file,
-          uploadKind: item.uploadKind,
-          state: item.kind === "upload" ? "uploading" : "verifying",
-        })),
-      );
+      setSrcChecks(checksForItems(items));
       await runSourceIntake({
         memberId,
         district: srcDistrict.trim() || null,
@@ -991,49 +1002,38 @@ export function CrewApplet() {
   async function retrySrcCheck(memberId: string, check: SourceCheck) {
     if (check.state !== "error" || srcRetryingKey) return;
     setSrcRetryingKey(check.key);
-    const item: IntakeItem = {
-      key: check.key,
-      kind: check.kind,
-      label: check.label,
-      url: check.url,
-      file: check.file,
-      uploadKind: check.uploadKind,
-    };
-    setSrcChecks((prev) =>
-      prev.map((c) =>
-        c.key === check.key
-          ? {
-              ...c,
-              state: c.kind === "upload" ? "uploading" : "verifying",
-              message: undefined,
-            }
-          : c,
-      ),
+    // Re-run the FULL payload: the backend replaces bell_schedules wholesale,
+    // so a partial retry would wipe the other saved links.
+    const items = buildSrcIntakeItems(
+      check.kind === "upload" ? check : undefined,
     );
+    setSrcChecks(checksForItems(items));
     try {
       await runSourceIntake({
         memberId,
         district: srcDistrict.trim() || null,
-        items: [item],
+        items,
         onCheck: (key, patch) =>
           setSrcChecks((prev) =>
             prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
           ),
-        // On retry the links are already saved — never wipe them with a
-        // partial PUT if the intake endpoint isn't there yet.
-        legacySave: async () => {
-          setSrcChecks((prev) =>
-            prev.map((c) =>
-              c.key === check.key
-                ? {
-                    ...c,
-                    state: "error",
-                    message:
-                      "The link checker isn't available right now — your saved links are unchanged. Try again later.",
-                  }
-                : c,
-            ),
+        // The intake endpoint isn't deployed yet — fall back to the plain
+        // save so nothing the user typed is lost.
+        legacySave: async (payload) => {
+          const res = await fetch(
+            `/api/crew/members/${memberId}/school-sources`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                district: payload.district,
+                calendar_source_url: payload.calendar_url,
+                bell_schedules: payload.bell_schedules,
+              }),
+            },
           );
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error ?? "save failed");
         },
       });
     } finally {
@@ -1726,7 +1726,7 @@ export function CrewApplet() {
                     <input
                       value={srcDistrict}
                       onChange={(e) => setSrcDistrict(e.target.value)}
-                      placeholder="e.g. Cobb County School District"
+                      placeholder="e.g. Springfield School District"
                       autoComplete="off"
                       disabled={srcSaving}
                       className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
@@ -1802,22 +1802,6 @@ export function CrewApplet() {
                       idPrefix="edit"
                     />
                   </div>
-                  {srcChecks.length > 0 && (
-                    <div className="space-y-2">
-                      {srcChecks.map((check) => (
-                        <SourceCheckRow
-                          key={check.key}
-                          check={check}
-                          retrying={srcRetryingKey === check.key}
-                          onRetry={
-                            check.state === "error"
-                              ? () => retrySrcCheck(member.id, check)
-                              : undefined
-                          }
-                        />
-                      ))}
-                    </div>
-                  )}
                   <div className="flex gap-2 pt-1">
                     <button
                       type="button"
@@ -1836,6 +1820,27 @@ export function CrewApplet() {
                       {srcSaving ? "Saving…" : "Save"}
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Per-source intake results — stay visible after the editor closes. */}
+              {srcChecks.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+                    Link check results
+                  </p>
+                  {srcChecks.map((check) => (
+                    <SourceCheckRow
+                      key={check.key}
+                      check={check}
+                      retrying={srcRetryingKey === check.key}
+                      onRetry={
+                        check.state === "error"
+                          ? () => retrySrcCheck(member.id, check)
+                          : undefined
+                      }
+                    />
+                  ))}
                 </div>
               )}
 
@@ -2500,7 +2505,7 @@ export function CrewApplet() {
             <input
               value={district}
               onChange={(e) => setDistrict(e.target.value)}
-              placeholder="e.g. Cobb County School District"
+              placeholder="e.g. Springfield School District"
               autoComplete="off"
               className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
             />

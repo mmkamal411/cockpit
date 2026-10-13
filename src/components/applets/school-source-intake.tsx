@@ -7,10 +7,14 @@ import { useState } from "react";
  *
  * Used by the add-child flow (step 2) and the crew member detail editor.
  * Everything here is UI-only: the intake / upload endpoints live on the
- * backend (POST intake accepts { calendar_url, bell_schedules: [{label,url}] },
- * the upload endpoint stores photo/PDF in the `school-source-uploads` bucket).
- * Both return per-source results shaped like
- * { url, verified, parsed, message }.
+ * backend (POST intake accepts { district?, calendar_url?, bell_schedules?:
+ * [{label,url}] } and returns { ok, sources, results }; the upload endpoint
+ * takes multipart { file, kind, label } and stores photo/PDF in the
+ * `school-source-uploads` bucket).
+ * Per-source results look like
+ * { url, label, kind, verified, parsed, message, eventCount?, scheduleCount?,
+ *   periodCount? } — `parsed` is a boolean; the parsed payload itself is
+ * served by the content endpoint (parsed / parse_status / parse_note).
  */
 
 // ---------------------------------------------------------------------------
