@@ -4,10 +4,15 @@ import { cookies } from "next/headers";
 /** Server Supabase client (Server Components, Actions, Route Handlers). */
 export async function createClient() {
   const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
+  // Hardcoded fallback: Cloudflare Pages direct-upload deployments don't
+  // inherit project env vars into the worker runtime's process.env.
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    "https://hwnesewathbnfvoxtbqh.supabase.co";
+  const supabaseKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    "sb_publishable_-gpFmkywUHJ9G3Yg2tPueQ_0J4DjqL0";
+  return createServerClient(supabaseUrl, supabaseKey, {
       cookies: {
         getAll() {
           return cookieStore.getAll();

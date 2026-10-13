@@ -11,9 +11,14 @@ let browserClient: ReturnType<typeof createBrowserClient> | undefined;
 
 export function createClient() {
   if (browserClient) return browserClient;
-  browserClient = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-  );
+  // Hardcoded fallback: Cloudflare Pages direct-upload deployments don't
+  // inherit project env vars into the worker runtime's process.env.
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    "https://hwnesewathbnfvoxtbqh.supabase.co";
+  const supabaseKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    "sb_publishable_-gpFmkywUHJ9G3Yg2tPueQ_0J4DjqL0";
+  browserClient = createBrowserClient(supabaseUrl, supabaseKey);
   return browserClient;
 }
