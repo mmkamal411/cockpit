@@ -12,6 +12,39 @@ interface CrewMemberRow {
   birthdate: string | null;
   relationship: string;
   created_at: string;
+  school_sync?: {
+    sync_status: string;
+    last_synced_at: string | null;
+  };
+}
+
+/** True when a member's school connection needs the parent's attention. */
+function needsAttention(m: CrewMemberRow): boolean {
+  const s = m.school_sync;
+  if (!s) return false;
+  if (s.sync_status === "error" || s.sync_status === "auth_error") return true;
+  if (!s.last_synced_at) return false; // never synced but no error — not alarming
+  const ageMs = Date.now() - new Date(s.last_synced_at).getTime();
+  return ageMs > 24 * 60 * 60 * 1000;
+}
+
+/** Plain-English sync status for the roster. */
+function syncStatusText(m: CrewMemberRow): { text: string; tone: "ok" | "warn" | "idle" } {
+  const s = m.school_sync;
+  if (!s || !s.last_synced_at) {
+    return { text: "Not connected yet", tone: "idle" };
+  }
+  const ageMs = Date.now() - new Date(s.last_synced_at).getTime();
+  const mins = Math.round(ageMs / 60000);
+  const rel =
+    mins < 1 ? "just now" : mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.round(mins / 60)} hr ago` : `${Math.round(mins / 1440)} days ago`;
+  if (s.sync_status === "auth_error") {
+    return { text: "School login needs updating", tone: "warn" };
+  }
+  if (s.sync_status === "error" || ageMs > 24 * 60 * 60 * 1000) {
+    return { text: `Last synced ${rel} — might need attention`, tone: "warn" };
+  }
+  return { text: `Last synced ${rel}`, tone: "ok" };
 }
 
 /**
@@ -34,6 +67,12 @@ export function CrewApplet() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
+  // Re-auth form state (per crew member).
+  const [reauthFor, setReauthFor] = useState<string | null>(null);
+  const [reauthUsername, setReauthUsername] = useState("");
+  const [reauthPassword, setReauthPassword] = useState("");
+  const [reauthSaving, setReauthSaving] = useState(false);
+  const [reauthMessage, setReauthMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Load the pilot's crew roster on mount.
   useEffect(() => {
@@ -124,6 +163,71 @@ export function CrewApplet() {
     setPassword("");
     setSync(["Grades", "Assignments"]);
     setError("");
+    closeReauth();
+  }
+
+  function openReauth(memberId: string) {
+    setReauthFor(memberId);
+    setReauthUsername("");
+    setReauthPassword("");
+    setReauthMessage(null);
+  }
+
+  function closeReauth() {
+    setReauthFor(null);
+    setReauthUsername("");
+    setReauthPassword("");
+    setReauthMessage(null);
+  }
+
+  async function submitReauth(memberId: string) {
+    if (!reauthUsername.trim() || !reauthPassword) {
+      setReauthMessage({
+        ok: false,
+        text: "Enter both the username and password for the school portal.",
+      });
+      return;
+    }
+    setReauthSaving(true);
+    setReauthMessage(null);
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}/school-reauth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: reauthUsername.trim(),
+          password: reauthPassword,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setReauthMessage({
+          ok: false,
+          text: json.error ?? "That didn't work. Try again.",
+        });
+        return;
+      }
+      setReauthMessage({ ok: true, text: json.message });
+      // Clear the password from memory immediately.
+      setReauthPassword("");
+      // Refresh the roster so the status indicator updates.
+      const rosterRes = await fetch("/api/crew/members");
+      if (rosterRes.ok) {
+        const rosterJson = await rosterRes.json();
+        setRoster(rosterJson.members ?? []);
+        const updated = (rosterJson.members ?? []).find(
+          (m: CrewMemberRow) => m.id === memberId,
+        );
+        if (updated) setAdded((prev) => (prev && prev.id === memberId ? updated : prev));
+      }
+    } catch {
+      setReauthMessage({
+        ok: false,
+        text: "We couldn't reach the server. Check your connection and try again.",
+      });
+    } finally {
+      setReauthSaving(false);
+    }
   }
 
   if (loading) {
@@ -158,15 +262,119 @@ export function CrewApplet() {
             <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
               Your crew
             </p>
-            {roster.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5"
-              >
-                <span className="text-sm text-star">{m.name}</span>
-                <span className="text-xs text-dim">{m.relationship}</span>
-              </div>
-            ))}
+            {roster.map((m) => {
+              const status = syncStatusText(m);
+              const attention = needsAttention(m);
+              const dotColor =
+                status.tone === "ok"
+                  ? "bg-neon-green"
+                  : status.tone === "warn"
+                    ? "bg-neon-amber"
+                    : "bg-dim";
+              return (
+                <div key={m.id} className="space-y-2">
+                  <div className="flex items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        aria-hidden="true"
+                        className={`h-2 w-2 rounded-full ${dotColor}`}
+                      />
+                      <div>
+                        <div className="text-sm text-star">{m.name}</div>
+                        <div
+                          className={`text-xs ${status.tone === "warn" ? "text-neon-amber" : "text-dim"}`}
+                        >
+                          {status.text}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-dim">{m.relationship}</span>
+                      {attention && reauthFor !== m.id && (
+                        <button
+                          type="button"
+                          onClick={() => openReauth(m.id)}
+                          className="rounded-lg border border-neon-amber/40 bg-neon-amber/10 px-3 py-1.5 text-xs font-medium text-neon-amber transition-colors hover:bg-neon-amber/20"
+                        >
+                          Update login
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {reauthFor === m.id && (
+                    <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                      <p className="text-sm font-medium text-star">
+                        Update {m.name}&apos;s school login
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-dim">
+                        We&apos;ll test it against the school portal right now.
+                        It&apos;s only used for that check — never stored as
+                        plain text.
+                      </p>
+                      <div className="mt-3 space-y-2.5">
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium text-stardust">
+                            School portal username
+                          </span>
+                          <input
+                            value={reauthUsername}
+                            onChange={(e) => setReauthUsername(e.target.value)}
+                            placeholder="Student username or ID"
+                            autoComplete="off"
+                            disabled={reauthSaving}
+                            className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium text-stardust">
+                            School portal password
+                          </span>
+                          <input
+                            type="password"
+                            value={reauthPassword}
+                            onChange={(e) => setReauthPassword(e.target.value)}
+                            placeholder="Portal password"
+                            autoComplete="new-password"
+                            disabled={reauthSaving}
+                            className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                          />
+                        </label>
+                      </div>
+                      {reauthMessage && (
+                        <p
+                          role="alert"
+                          className={`mt-2.5 rounded-xl border px-4 py-2.5 text-sm ${
+                            reauthMessage.ok
+                              ? "border-neon-green/30 bg-neon-green/5 text-neon-green"
+                              : "border-neon-amber/30 bg-neon-amber/5 text-neon-amber"
+                          }`}
+                        >
+                          {reauthMessage.text}
+                        </p>
+                      )}
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={closeReauth}
+                          disabled={reauthSaving}
+                          className="rounded-xl border border-line bg-panel-2/60 px-4 py-2 text-sm font-medium text-stardust transition-colors hover:text-star disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => submitReauth(m.id)}
+                          disabled={reauthSaving}
+                          className="flex-1 rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+                        >
+                          {reauthSaving ? "Checking…" : "Check this login"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         <button

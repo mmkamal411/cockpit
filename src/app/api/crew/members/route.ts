@@ -32,7 +32,29 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json({ members: data });
+  // Attach school sync status for each member (drives the "needs attention"
+  // indicator and the re-auth form in the Crew applet).
+  const memberIds = (data ?? []).map((m) => m.id);
+  let statusByMember: Record<string, { sync_status: string; last_synced_at: string | null }> = {};
+  if (memberIds.length > 0) {
+    const { data: links } = await supabase
+      .from("crew_school_links")
+      .select("crew_member_id, sync_status, last_synced_at")
+      .in("crew_member_id", memberIds);
+    for (const link of links ?? []) {
+      statusByMember[link.crew_member_id] = {
+        sync_status: link.sync_status,
+        last_synced_at: link.last_synced_at,
+      };
+    }
+  }
+
+  const members = (data ?? []).map((m) => ({
+    ...m,
+    school_sync: statusByMember[m.id] ?? { sync_status: "idle", last_synced_at: null },
+  }));
+
+  return NextResponse.json({ members });
 }
 
 interface AddMemberBody {
