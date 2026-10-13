@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { HeroVista } from "@/components/pilot/hero-vista";
 import { GlassPane } from "@/components/glass-pane";
+import { HomeStations } from "@/components/home-stations";
 
 /** Session-gated: reads cookies per request — opt out of static-shell validation. */
 export const dynamic = "force-dynamic";
@@ -46,9 +47,12 @@ export default async function HomePage() {
   return (
     <div className="relative h-dvh overflow-hidden">
       <HeroVista pilotName={pilotName} />
-      {/* Glass pane floats over the vista, clear of the toolbar. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-4 pb-[104px] sm:justify-end sm:px-8 sm:pb-[110px]">
+      {/* Glass pane + station buttons float over the vista, clear of the
+          toolbar. The stack scrolls internally on short screens rather than
+          clipping — nothing ever renders as a dead blank region. */}
+      <div className="absolute inset-x-0 bottom-0 z-10 flex max-h-[calc(100dvh-72px)] flex-col items-center gap-3 overflow-y-auto px-4 pb-[104px] pt-2 sm:items-end sm:px-8 sm:pb-[110px]">
         <GlassPane />
+        <HomeStations />
       </div>
     </div>
   );
