@@ -24,6 +24,10 @@ export function writeLocal<T>(key: string, value: T): void {
   }
 }
 
+// The canonical to-do shape lives in use-todos.ts (type-only re-export, so the
+// runtime dependency stays one-way: use-todos -> local-store).
+export type { TodoItem } from "./use-todos";
+
 export interface GoalItem {
   id: string;
   text: string;

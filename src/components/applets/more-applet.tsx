@@ -10,13 +10,15 @@ interface Seedling {
   name: string;
   blurb: string;
   glow: string;
+  /** When set, tapping the seedling opens this applet instead of sitting idle. */
+  appletId?: string;
 }
 
 // Stations still being built — seedlings, not dead ends. Each one says what
 // it will do, so the full ship is visible from the first tap.
 const SEEDLINGS: Seedling[] = [
   { name: "Health", blurb: "Sleep, movement, and how your body is really doing.", glow: "#86efac" },
-  { name: "Money", blurb: "Bills, spending, and the quiet leaks in your budget.", glow: "#fcd34d" },
+  { name: "Money", blurb: "Bills, spending, and the quiet leaks in your budget.", glow: "#fcd34d", appletId: "bills" },
   { name: "Mail", blurb: "Every inbox, triaged — the important stuff floats up.", glow: "#67e8f9" },
   { name: "Shopping", blurb: "Lists that notice when you're running low.", glow: "#5eead4" },
   { name: "Travel", blurb: "Flights, stays, and trips that plan themselves.", glow: "#c4b5fd" },
@@ -101,20 +103,38 @@ export function MoreApplet() {
           Taking shape
         </h3>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {SEEDLINGS.map((s) => (
-            <div
-              key={s.name}
-              className="rounded-2xl border border-line bg-panel-2/40 p-4"
-              style={{ boxShadow: `inset 0 0 24px ${s.glow}0d` }}
-            >
-              <p className="flex items-center gap-2 text-sm font-semibold text-star">
-                <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: s.glow }} />
-                {s.name}
-              </p>
-              <p className="mt-0.5 text-xs leading-relaxed text-stardust">{s.blurb}</p>
-              <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-dim">Seedling · growing soon</p>
-            </div>
-          ))}
+          {SEEDLINGS.map((s) => {
+            const inner = (
+              <>
+                <p className="flex items-center gap-2 text-sm font-semibold text-star">
+                  <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: s.glow }} />
+                  {s.name}
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-stardust">{s.blurb}</p>
+                <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-dim">
+                  {s.appletId ? "Live · tap to open" : "Seedling · growing soon"}
+                </p>
+              </>
+            );
+            const cls =
+              "rounded-2xl border border-line bg-panel-2/40 p-4 text-left w-full transition-colors";
+            const style = { boxShadow: `inset 0 0 24px ${s.glow}0d` };
+            return s.appletId ? (
+              <button
+                key={s.name}
+                type="button"
+                onClick={() => openApplet(s.appletId!, {}, { replace: true })}
+                className={cls + " hover:border-neon-amber/40 cursor-pointer"}
+                style={style}
+              >
+                {inner}
+              </button>
+            ) : (
+              <div key={s.name} className={cls} style={style}>
+                {inner}
+              </div>
+            );
+          })}
         </div>
       </section>
     </div>

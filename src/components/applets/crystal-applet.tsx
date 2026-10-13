@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  detectPersona,
+  flipConfirmation,
+  PERSONA_LABEL,
+  stripDirective,
+  type Persona,
+} from "@/lib/chat/mode";
 
 const TUTOR_URL = (
   process.env.NEXT_PUBLIC_CRYSTAL_URL ||
@@ -8,9 +15,7 @@ const TUTOR_URL = (
   ""
 ).replace(/\/$/, "");
 
-type Persona = "crystal" | "fireball";
-
-interface ChatMessage {
+function greeting(): string {
   role: "user" | "assistant";
   text: string;
   /** Which persona answered (assistant messages only). */

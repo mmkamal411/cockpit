@@ -7,7 +7,9 @@ import { CrystalApplet } from "./applets/crystal-applet";
 import { ProgressApplet } from "./applets/progress-applet";
 import { MoreApplet } from "./applets/more-applet";
 import { CrewApplet } from "./applets/crew-applet";
+import { BillsApplet } from "./applets/bills-applet";
 import { WeatherApplet } from "./applets/weather-applet";
+import { CalendarApplet } from "./applets/calendar-applet";
 
 export interface AppletDef {
   /** Short plain-English name shown in the window chrome. */
@@ -51,11 +53,23 @@ export const APPLETS: Record<string, AppletDef> = {
     glow: "#86efac",
     render: () => <CrewApplet />,
   },
+  bills: {
+    name: "Bills",
+    readout: "BILLS",
+    glow: "#fcd34d",
+    render: () => <BillsApplet />,
+  },
   weather: {
     name: "Weather",
     readout: "WX",
     glow: "#67e8f9",
     render: () => <WeatherApplet />,
+  },
+  calendar: {
+    name: "Calendar",
+    readout: "CAL",
+    glow: "#f0abfc",
+    render: () => <CalendarApplet />,
   },
 };
 

@@ -11,27 +11,21 @@ import type {
   TodoItem,
 } from "@/lib/today-types";
 
-const TODOS_KEY = "cockpit.todos";
 const REFRESH_MS = 60_000;
 
 /** Today — the pilot's attention and agenda for right now.
  *
  * READ-ONLY briefing surface (overdue, schedule, due today, nudges, school)
  * composed server-side at /api/today. The quick-capture todo list below the
- * briefing is the device-local legacy list; Worker A is migrating todo logic
- * to the shared useTodos() hook — this file only restructures around it.
+ * briefing is powered by the shared useTodos() hook (Supabase + local fallback).
  */
 export function TodayApplet() {
   const [briefing, setBriefing] = useState<TodayBriefing | null>(null);
   const [briefingError, setBriefingError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
-  const [todos, setTodos] = useState<LocalTodoItem[]>(() => readLocal<LocalTodoItem[]>(TODOS_KEY, []));
+  const { todos, loading: todosLoading, addTodo: createTodo, toggleTodo: flipTodo } = useTodos();
   const [draft, setDraft] = useState("");
-
-  useEffect(() => {
-    writeLocal(TODOS_KEY, todos);
-  }, [todos]);
 
   const loadBriefing = useCallback(async () => {
     setBriefingError(null);
@@ -76,15 +70,15 @@ export function TodayApplet() {
     (briefing?.counts.events ?? 0) +
     (briefing?.counts.nudges ?? 0);
 
-  function addTodo() {
-    const text = draft.trim();
-    if (!text) return;
-    setTodos((prev) => [...prev, { id: newId(), text, done: false, createdAt: Date.now() }]);
+  async function addTodo() {
+    const parsed = parseTodo(draft);
+    if (!parsed.text) return;
     setDraft("");
+    await createTodo(parsed.text, parsed.dueAt !== undefined ? { dueAt: parsed.dueAt } : undefined);
   }
 
   function toggleTodo(id: string) {
-    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+    void flipTodo(id);
   }
 
   return (
@@ -109,7 +103,7 @@ export function TodayApplet() {
         onRetry={loadBriefing}
       />
 
-      {/* Device-local quick-capture list (Worker A's migration target — leave intact). */}
+      {/* Quick-capture list (shared useTodos hook). */}
       <div className="flex gap-2">
         <input
           value={draft}
@@ -165,7 +159,11 @@ export function TodayApplet() {
         </ul>
       )}
 
-      <p className="text-xs text-dim">Saved on this device. Cloud sync for your lists is being built.</p>
+      <p className="text-xs text-dim">
+        {todosLoading
+          ? "Loading your list…"
+          : "Your list syncs across your devices when you're signed in."}
+      </p>
     </div>
   );
 }

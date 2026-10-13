@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { newId, readLocal, writeLocal, type TodoItem } from "@/lib/local-store";
+import { parseTodo } from "@/lib/parse-todo";
+import { useTodos } from "@/lib/use-todos";
 import { openApplet } from "@/lib/applet-bus";
 
 const TODOS_KEY = "cockpit.todos";
@@ -52,7 +53,7 @@ export function GlassPane() {
   const [weather, setWeather] = useState<Weather | null>(null);
   const [weatherFailed, setWeatherFailed] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [todos, setTodos] = useState<TodoItem[]>(() => readLocal<TodoItem[]>(TODOS_KEY, []));
+  const { todos, addTodo: createTodo, toggleTodo: flipTodo } = useTodos();
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
@@ -82,10 +83,6 @@ export function GlassPane() {
     }
     return () => controller.abort();
   }, []);
-
-  useEffect(() => {
-    writeLocal(TODOS_KEY, todos);
-  }, [todos]);
 
   const now = new Date();
   const week = Array.from({ length: 7 }, (_, i) => {
