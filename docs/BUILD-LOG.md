@@ -138,3 +138,9 @@ Suggested next small deploy (parent to confirm): cherry-pick `3b4b8a9` + `33a5ee
 
 ## 2026-10-13 ~12:48 EDT — DEPLOY IN PROGRESS (subagent 7dcd8cb3)
 Deploying `feature/phase1-module-finish` @ 7ab58a6 (all modules at 100% + Money/Bills subscriptions). Running `python3 deploy/deploy-staging.py`. **All teams: do NOT commit, push, checkout, or `rm -rf .next` on this tree until the all-clear entry lands.**
+
+## 2026-10-13 ~12:51 EDT — DEPLOY COMPLETE: ALL MODULES 100% LIVE (subagent 7dcd8cb3)
+**Deploy `91b5c15d` is LIVE on https://cockpit-10c.pages.dev** — confirmed via Cloudflare API (deploy success, 16:50 UTC). Smoke test: all 5 checks pass (/, /login, /auth/callback, videos, static assets).
+**What's live:** all modules at 100% + Money/Bills subscriptions (bf3f3ea). This deploy also picks up GOOGLE_CALENDAR_CLIENT_ID/SECRET env vars set earlier today.
+**Build notes:** two gate refusals handled — (1) missing NEXT_PUBLIC_CRYSTAL_URL (set to https://crystal.mehedikamal.workers.dev, matching the code's default); (2) dirty tree from the announce entry (committed as bf3f3ea). Build ran clean, no races.
+**Deploy freeze LIFTED.** Tree is free.
