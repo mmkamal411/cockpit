@@ -47,6 +47,15 @@ SOURCE_WATCH_PATHS = ["src", "middleware.ts", "next.config.ts",
                       "open-next.config.ts", "package.json",
                       "package-lock.json", "wrangler.jsonc"]
 
+# Preview-props manifest branch that the OpenNext inlineLoadManifest patch must
+# emit into the server-function bundle. Next 16.4 unconditionally calls
+# loadManifest("/.next/server/preview-props.json") in the NextNodeServer
+# constructor; a bundle missing this inlined branch 500s every request
+# (Cloudflare 1101). Lesson 2026-10-13: the 03:29-04:19 UTC deploys shipped
+# without it because the adapter patch (patches/@opennextjs+cloudflare+*.patch)
+# was not applied in node_modules at build time - fail loudly if absent.
+PREVIEW_PROPS_BRANCH = 'endsWith("/server/preview-props.json")'
+
 # Build-time env vars baked into the Next.js bundle. Missing ones mean a
 # build that does not match the intended staging config — fail loudly.
 REQUIRED_BUILD_ENV = ["NEXT_PUBLIC_SUPABASE_URL",
@@ -131,8 +140,55 @@ def ensure_build_env(env):
 
 
 def build(env):
+    # Gate 0 (lesson 2026-10-13): the tree must be CLEAN - no more
+    # --commit-dirty builds. A dirty tree means the bundle does not match any
+    # commit and cannot be reproduced or bisected.
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=APP_DIR,
+        capture_output=True, text=True)
+    if dirty.returncode != 0:
+        sys.exit("REFUSING TO DEPLOY: `git status` failed - is this a git "
+                 "checkout?")
+    if dirty.stdout.strip():
+        sys.exit("REFUSING TO DEPLOY: working tree is dirty:\n"
+                 + dirty.stdout
+                 + "Commit or stash before deploying. Dirty builds caused "
+                   "the 2026-10-13 outage (unreproducible bundle).")
+
+    # Gate 1 (lesson 2026-10-13): always start from a clean .next/. A stale
+    # .next (or one produced by a different checkout/patch state) can silently
+    # change what the adapter inlines.
+    print("+ rm -rf .next", flush=True)
+    subprocess.run(["rm", "-rf", os.path.join(APP_DIR, ".next")],
+                   cwd=APP_DIR, check=True)
+
+    # Gate 2 (lesson 2026-10-13): make sure patch-package patches (notably the
+    # @opennextjs/cloudflare load-manifest patch that inlines
+    # preview-props.json) are actually applied in node_modules. node_modules
+    # installed before patches/ existed silently skips them.
+    run(["npx", "patch-package"], env=env)
+
     run(["npm", "run", "build"], env=env)
     run(["npx", "opennextjs-cloudflare", "build"], env=env)
+
+    # Gate 3 (lesson 2026-10-13): the built server-function bundle MUST
+    # contain the inlined preview-props manifest branch. Without it every
+    # request 500s (Cloudflare 1101) with
+    # "Unexpected loadManifest(/.next/server/preview-props.json) call!".
+    handler = os.path.join(APP_DIR, ".open-next", "server-functions",
+                           "default", "handler.mjs")
+    try:
+        with open(handler, encoding="utf-8", errors="replace") as f:
+            bundle = f.read()
+    except OSError:
+        sys.exit(f"REFUSING TO DEPLOY: built bundle not found at {handler}")
+    if PREVIEW_PROPS_BRANCH not in bundle:
+        sys.exit("REFUSING TO DEPLOY: built handler.mjs is missing the "
+                 f"inlined {PREVIEW_PROPS_BRANCH} branch - the adapter's "
+                 "load-manifest patch did not apply. Every request would "
+                 "500 (1101). Check patches/ and node_modules.")
+    print(f"Build gate OK: {PREVIEW_PROPS_BRANCH} present in handler.mjs",
+          flush=True)
 
 
 def main():
@@ -168,7 +224,8 @@ def main():
     # Keep in sync with the Pages project's production branch in the
     # dashboard (default "main" for new projects).
     r = run(["npx", "wrangler", "pages", "deploy", ".pages-deploy",
-             "--project-name", PROJECT, "--branch=main", "--commit-dirty=true"],
+             "--project-name", PROJECT, "--branch=main",
+             "--commit-dirty=false"],  # lesson 2026-10-13: gate above is authoritative
             env=env, check=False)
     if r.returncode != 0:
         sys.exit(r.returncode)
