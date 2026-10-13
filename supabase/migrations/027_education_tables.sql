@@ -4,9 +4,11 @@
 --
 --   school_schedules  — bell schedules, district-keyed (Walton, Cobb, etc.)
 --   district_calendars — district calendar events (no-school days, etc.)
---   checkins          — daily check-ins, two channels (shared + "just for me")
 --   class_resources   — per-class resources (links + uploads, 13 types)
 --   pilot_settings    — JSONB settings store (7 instrument stations)
+--
+-- NOTE: checkins table is defined in 027_checkins_class_resources.sql (Phase B)
+-- and is intentionally NOT redefined here to avoid a schema collision.
 --
 -- DECISIONS APPLIED (Meheldi 2026-10-13 12:26 EDT):
 --   D1: check-in VISIBLE by default (shared); private opt-in exists
@@ -84,43 +86,10 @@ alter table public.district_calendars enable row level security;
 create policy district_calendars_read_all on public.district_calendars
   for select using (auth.role() = 'authenticated');
 
+-- 3. checkins — SKIPPED: defined in 027_checkins_class_resources.sql (Phase B).
+--    That file's schema is canonical (API built against it). This file does
+--    not redefine it to avoid a collision.
 -- ---------------------------------------------------------------------------
--- 3. checkins — daily check-ins, two channels.
---    D1: shared (parent-visible) is the DEFAULT; "just for me" is opt-in.
---    D3: full text visible to parent for 13-15.
--- ---------------------------------------------------------------------------
-create table public.checkins (
-  id             uuid    primary key default gen_random_uuid(),
-  crew_member_id uuid    not null references public.crew_members(id) on delete cascade,
-  pilot_id       uuid    not null references public.pilots(id) on delete cascade,
-  -- Check-in date (one row per child per day per channel).
-  checkin_date   date    not null default current_date,
-  -- Channel: 'shared' (parent-visible, default) or 'private' ("just for me").
-  channel        text    not null default 'shared'
-    check (channel in ('shared', 'private')),
-  -- The 3 questions: what worked / what's confusing / what's due next.
-  what_worked    text,
-  whats_confusing text,
-  whats_due_next text,
-  -- Optional free-text note.
-  note           text,
-  -- Quick-tap chips selected (e.g. ['geometry', 'test-tomorrow']).
-  chips          text[]  not null default '{}',
-  -- Extracted topics for Path-to-90 wiring ("You flagged this").
-  topics         text[]  not null default '{}',
-  created_at     timestamptz not null default now(),
-  unique (crew_member_id, checkin_date, channel)
-);
-
-comment on table public.checkins is
-  'Daily check-ins. D1: shared channel is default (parent-visible); private = "just for me". D3: full text visible to parent for 13-15.';
-comment on column public.checkins.topics is
-  'Extracted topics (extractTopicsFromCheckin) — wired to Path-to-90 as "You flagged this" tags.';
-
-alter table public.checkins enable row level security;
-create policy checkins_pilot_all on public.checkins
-  for all using (auth.uid() = pilot_id) with check (auth.uid() = pilot_id);
-grant select, insert, update, delete on public.checkins to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 4. class_resources — per-class resources (links + uploads).
