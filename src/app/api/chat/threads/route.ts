@@ -62,6 +62,16 @@ export async function GET() {
 export async function POST(req: Request) {
   const auth = await requirePilot();
   if (!auth) return NextResponse.json(UNAUTH, { status: 401 });
+  // Self-heal the pilot row (same reasoning as POST /api/chat): without it
+  // the thread insert fails its FK and "new conversation" is permanently
+  // broken for that pilot.
+  try {
+    await auth.supabase
+      .from("pilots")
+      .upsert({ id: auth.pilotId }, { onConflict: "id" });
+  } catch {
+    /* worst case the insert below fails as before */
+  }
   try {
     let title: string | null = null;
     try {
