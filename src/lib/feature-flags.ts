@@ -15,4 +15,4 @@ export const TOOLBAR_VARIANT: ToolbarVariant = "legacy";
 
 /** Which "More" surface is live. "legacy" = the original More list. */
 export type StationDeckVariant = "legacy" | "bays" | "ecam" | "grid";
-export const STATION_DECK_VARIANT: StationDeckVariant = "legacy";
+export const STATION_DECK_VARIANT: StationDeckVariant = "grid";
