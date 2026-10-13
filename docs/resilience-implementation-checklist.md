@@ -99,6 +99,19 @@ The missing piece for new user onboarding.
 
 ---
 
+## Phase 6b: Child Login Flow (Week 7)
+
+Dawson (15, shared agency tier) needs his own sign-in. Backend exists (link_codes table, API route), UI does not.
+
+- [ ] 6-digit link code generation UI (parent side, 15-min expiry)
+- [ ] Child sign-in page (enter code → verify → create session)
+- [ ] Email verification path (child signs in with school email matching crew record + consent screen)
+- [ ] Child dashboard view (grades, Path-to-90, check-ins — scoped by sharing rules)
+- [ ] Age-tier enforcement (under 13: no login; 13-15: shared agency + 7-day cooling; 16-17: instant revoke; 18+: adult prompt)
+- [ ] "Go independent" graduation flow (18+)
+
+---
+
 ## Phase 7: Testing (Week 8)
 
 - [ ] Transport fallback: kill REST, verify SOAP takes over
