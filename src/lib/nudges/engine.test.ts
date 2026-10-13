@@ -19,7 +19,6 @@ import {
   CATEGORY_BASE_SCORES,
   type NudgeCandidate,
   type NudgePreferences,
-  type NudgeTier,
 // @ts-expect-error TS5097: explicit .ts extension required for Node's
 // type-stripping test runner (node src/lib/nudges/engine.test.ts).
 } from "./engine.ts";
