@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { formatBellTime } from "@/lib/school-bell";
+
 /**
  * Shared UI + client logic for the school-sources intake feature.
  *
@@ -819,40 +821,40 @@ export function SourceCheckRow({
   );
 }
 
-/** Parsed bell schedule rendered as a readable period table. */
-export function ParsedBellTable({
-  periods,
-  label,
-}: {
-  periods: BellPeriod[];
-  label?: string;
-}) {
+/** Parsed bell schedule rendered as a clean 3-column period table. */
+export function ParsedBellTable({ periods }: { periods: BellPeriod[] }) {
   if (periods.length === 0) return null;
   return (
-    <div className="rounded-xl border border-neon-green/20 bg-panel-2/60 px-4 py-3">
-      <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
-        What we read{label ? ` — ${label}` : ""}
-      </p>
-      <table className="mt-2 w-full border-collapse text-sm">
+    <div className="overflow-hidden rounded-xl border border-line bg-panel-2/60">
+      <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="text-left text-xs text-dim">
-            <th scope="col" className="pb-1 pr-3 font-medium">
+          <tr className="border-b border-line/70 text-left text-xs text-dim">
+            <th scope="col" className="whitespace-nowrap px-4 py-2.5 font-medium">
               Period
             </th>
-            <th scope="col" className="pb-1 pr-3 font-medium">
-              Starts
+            <th scope="col" className="whitespace-nowrap px-4 py-2.5 font-medium">
+              Start
             </th>
-            <th scope="col" className="pb-1 font-medium">
-              Ends
+            <th scope="col" className="whitespace-nowrap px-4 py-2.5 font-medium">
+              End
             </th>
           </tr>
         </thead>
         <tbody>
           {periods.map((p, i) => (
-            <tr key={i} className="border-t border-line/60 text-stardust">
-              <td className="py-1.5 pr-3 text-star">{p.name}</td>
-              <td className="py-1.5 pr-3">{p.start || "—"}</td>
-              <td className="py-1.5">{p.end || "—"}</td>
+            <tr
+              key={i}
+              className={`text-stardust ${i % 2 === 1 ? "bg-white/[0.03]" : ""}`}
+            >
+              <td className="whitespace-nowrap px-4 py-2 text-star">
+                {p.name || `Period ${i + 1}`}
+              </td>
+              <td className="whitespace-nowrap px-4 py-2">
+                {p.start ? formatBellTime(p.start) : "—"}
+              </td>
+              <td className="whitespace-nowrap px-4 py-2">
+                {p.end ? formatBellTime(p.end) : "—"}
+              </td>
             </tr>
           ))}
         </tbody>

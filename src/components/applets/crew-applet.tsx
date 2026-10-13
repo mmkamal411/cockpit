@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { ClassDetail } from "./class-detail";
 import { DistrictCalendar } from "./district-calendar";
-import { pageLooksLikeBell } from "@/lib/school-sources";
+import { bellTabLabel } from "@/lib/school-bell";
 import {
   BellRowInput,
   BellScheduleRows,
@@ -328,7 +328,6 @@ export function CrewApplet() {
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   const [bellsOpen, setBellsOpen] = useState(false);
   const [bellTab, setBellTab] = useState(0);
-  const [bellHtml, setBellHtml] = useState<Record<number, string>>({});
   const [bellMeta, setBellMeta] = useState<
     Record<number, { url: string; fetchedAt: string | null }>
   >({});
@@ -1205,7 +1204,6 @@ export function CrewApplet() {
     setCalEvents([]);
     setBellsOpen(false);
     setBellTab(0);
-    setBellHtml({});
     setBellMeta({});
     setBellLoading(false);
     setBellError("");
@@ -1218,7 +1216,6 @@ export function CrewApplet() {
     setCalUrl("");
     setCalFetchedAt(null);
     setCalError("");
-    setBellHtml({});
     setBellMeta({});
     setBellParsed({});
     setBellParseStatus({});
@@ -1325,9 +1322,10 @@ export function CrewApplet() {
     }
   }
 
-  /** Fetch one bell schedule's snapshot HTML + parsed payload, cached per tab. */
+  /** Fetch one bell schedule's parsed payload, cached per tab. Raw page HTML
+      is never rendered in the Bell section — parsed period rows only. */
   async function ensureBellContent(memberId: string, index: number, force = false) {
-    if (!force && (bellHtml[index] !== undefined || bellLoading || bellError)) return;
+    if (!force && (bellParsed[index] !== undefined || bellLoading || bellError)) return;
     setBellLoading(true);
     setBellError("");
     try {
@@ -1336,7 +1334,6 @@ export function CrewApplet() {
       );
       const json = await res.json();
       if (json.ok) {
-        setBellHtml((prev) => ({ ...prev, [index]: json.html ?? "" }));
         setBellMeta((prev) => ({
           ...prev,
           [index]: { url: json.url ?? "", fetchedAt: json.fetched_at ?? null },
@@ -1725,6 +1722,8 @@ export function CrewApplet() {
       bellTab,
     );
     const activeBellParseStatus = bellParseStatus[bellTab] ?? null;
+    const bellSourceUrl =
+      bellMeta[bellTab]?.url || srcSources?.bell_schedules[bellTab]?.url || "";
     return (
       <div className="space-y-5">
         <div>
@@ -2506,7 +2505,7 @@ export function CrewApplet() {
                   aria-expanded={bellsOpen}
                   className="flex w-full items-center justify-between text-left"
                 >
-                  <span className="text-sm font-medium text-star">Bell schedules</span>
+                  <span className="text-sm font-medium text-star">Walton High School Bell Schedules</span>
                   <svg
                     width="14"
                     height="14"
@@ -2532,7 +2531,7 @@ export function CrewApplet() {
                     ) : (
                       <>
                         <div
-                          className="flex flex-wrap gap-1.5"
+                          className="flex flex-wrap gap-2"
                           role="tablist"
                           aria-label="Bell schedules"
                         >
@@ -2547,34 +2546,43 @@ export function CrewApplet() {
                                 setBellError("");
                                 ensureBellContent(member.id, i);
                               }}
-                              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                              className={`rounded-full px-4 py-1.5 text-xs font-medium transition-colors ${
                                 bellTab === i
-                                  ? "border-neon-green/50 bg-neon-green/10 text-neon-green"
-                                  : "border-line bg-panel-2/60 text-stardust hover:text-star"
+                                  ? "bg-neon-green font-semibold text-black"
+                                  : "bg-white/10 text-stardust hover:text-star"
                               }`}
                             >
-                              {b.label || `Schedule ${i + 1}`}
+                              {bellTabLabel(b.label, i)}
                             </button>
                           ))}
                         </div>
-                        <div role="tabpanel" className="mt-2 space-y-2">
+                        <div role="tabpanel" className="mt-3">
                           {sourcesBusy ? (
                             <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
                               <Spinner label="Reading the school's page…" />
                             </div>
                           ) : activeBellPeriods.length > 0 ? (
-                            <ParsedBellTable
-                              periods={activeBellPeriods}
-                              label={
-                                srcSources?.bell_schedules[bellTab]?.label
-                              }
-                            />
+                            <>
+                              <ParsedBellTable periods={activeBellPeriods} />
+                              {bellSourceUrl && (
+                                <p className="mt-2 text-xs text-dim">
+                                  Source:{" "}
+                                  <a
+                                    href={bellSourceUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-neon-green underline transition-opacity hover:opacity-80"
+                                  >
+                                    {domainOf(bellSourceUrl)}
+                                  </a>
+                                </p>
+                              )}
+                            </>
                           ) : activeBellParseStatus === "pending" ? (
                             <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
                               Saved — we&apos;ll read this schedule shortly.
                             </p>
-                          ) : null}
-                          {bellLoading ? (
+                          ) : bellLoading ? (
                             <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
                               Pulling that schedule in…
                             </p>
@@ -2592,31 +2600,6 @@ export function CrewApplet() {
                               >
                                 {srcRefreshing ? "Checking…" : "Try again"}
                               </button>
-                            </div>
-                          ) : bellHtml[bellTab] !== undefined &&
-                            activeBellPeriods.length === 0 &&
-                            pageLooksLikeBell(bellHtml[bellTab]) ? (
-                            <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
-                              <div
-                                className="school-source-content applet-scroll max-h-96 overflow-y-auto"
-                                dangerouslySetInnerHTML={{ __html: bellHtml[bellTab] }}
-                              />
-                              {bellMeta[bellTab]?.url && (
-                                <p className="mt-2 border-t border-line pt-2 text-xs text-dim">
-                                  Source:{" "}
-                                  <a
-                                    href={bellMeta[bellTab].url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-neon-green underline transition-opacity hover:opacity-80"
-                                  >
-                                    {domainOf(bellMeta[bellTab].url)} ↗
-                                  </a>
-                                  {timeAgo(bellMeta[bellTab].fetchedAt) && (
-                                    <> · pulled {timeAgo(bellMeta[bellTab].fetchedAt)}</>
-                                  )}
-                                </p>
-                              )}
                             </div>
                           ) : (
                             <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
