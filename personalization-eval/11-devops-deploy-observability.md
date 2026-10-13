@@ -30,7 +30,7 @@ Key structural facts:
 
 - **Direct upload, NOT Git-connected.** The Pages project was created once in the dashboard (Upload assets). There is no CI: no GitHub Actions (no `.github/` directory exists), no branch previews, no automatic deploys on push. Every deploy is a human (or agent) running the script.
 - **The Pages project serves production on `--branch=main`.** The deploy treats a `--branch=main` upload as the production deployment.
-- **⚠️ Audit finding — smoke-test URL mismatch.** `DEPLOY.md` names the target `https://cockpit.pages.dev`, but `deploy-staging.py` sets `STAGING_URL = "https://cockpit-10c.pages.dev"` and smoke-tests that URL after deploying `--project-name cockpit --branch=main`. One of these is wrong: either the production deployment lands on `cockpit.pages.dev` and the smoke test is checking a stale/different deployment, or the project's real URL is `cockpit-10c.pages.dev` and `DEPLOY.md` is stale. **Before the personalization rollout, verify which URL a `--branch=main` deploy actually serves and make the smoke test target exactly that URL.** A smoke test against the wrong URL is worse than none — it certifies the wrong artifact.
+- **⚠️ Audit finding — smoke-test URL mismatch.** `DEPLOY.md` names the target `https://cockpit.pages.dev`, but `deploy-staging.py` sets `STAGING_URL = "https://cockpit-10c.pages.dev"` and smoke-tests that URL after deploying `--project-name cockpit --branch=main`. One of these is wrong: either the production deployment lands on `cockpit.pages.dev` and the smoke test is checking a stale/different deployment, or the project's real URL is `cockpit-10c.pages.dev` and `DEPLOY.md` is stale. **Before the personalization rollout, verify which URL a `--branch=main` deploy actually serves and make the smoke test target exactly that URL.** A smoke test against the wrong URL is worse than none — it certifies the wrong artifact. **RESOLVED 2026-10-13: `https://cockpit-10c.pages.dev` is the canonical staging URL (Meheldi confirmed); DEPLOY.md, both deploy scripts, and docs are locked to it.**
 - **Staging is currently red.** Per `STATUS.md` (2026-10-13 ~01:20 EDT): 500s on `/`, `/login`, `/auth/callback`; a separate deep-dive team is on it. Nothing in this plan ships to users until staging is green and the smoke test passes.
 
 ### 1.2 Environment-variable management
@@ -322,7 +322,7 @@ The cheapest architectural decision in this whole plan is aggressive signal rete
 
 ## 7. Open questions / risks for the parent orchestrator
 
-1. **Smoke-test URL mismatch (§1.1)** — confirm whether production is `cockpit.pages.dev` or `cockpit-10c.pages.dev` before any personalization deploy; the smoke test currently may be certifying the wrong artifact.
+1. **Smoke-test URL mismatch (§1.1)** — ~~confirm whether production is `cockpit.pages.dev` or `cockpit-10c.pages.dev` before any personalization deploy; the smoke test currently may be certifying the wrong artifact.~~ **RESOLVED 2026-10-13: `https://cockpit-10c.pages.dev` is canonical (Meheldi confirmed); locked everywhere.**
 2. **Staging is red** (500s, deep-dive team active) — all phases above are gated on green staging + passing smoke test.
 3. **Cron-trigger account cap** — verify the Cloudflare account's used cron triggers (free = 5/account across all workers) before committing to the scheduler-worker design.
 4. **Mehedi's manual migration step** — 018+ keeps the established SQL-editor process; the runbook needs the pre-run snapshot export and the verify queries bundled in the migration file header.

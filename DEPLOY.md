@@ -1,6 +1,6 @@
 # Cockpit deploy pipeline
 
-Target: **https://cockpit.pages.dev** (Cloudflare Pages project `cockpit`).
+Target: **https://cockpit-10c.pages.dev** (canonical staging URL, confirmed by Meheldi 2026-10-13).
 
 ## Deploy command
 
@@ -45,7 +45,9 @@ project.**
 
 1. Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** →
    **Upload assets** (direct upload, not Git-connected). Name the project
-   **`cockpit`**. This gives `https://cockpit.pages.dev`.
+   **`cockpit`**. This serves the canonical staging URL
+   `https://cockpit-10c.pages.dev` (do NOT use `cockpit.pages.dev` — that is a
+   different/stale URL).
 2. Project **Settings** → **Environment variables** → **Production**:
    - `NEXT_PUBLIC_SUPABASE_URL` = `https://hwnesewathbnfvoxtbqh.supabase.co`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` =

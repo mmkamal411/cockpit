@@ -1,7 +1,7 @@
 /**
  * Bills business logic tests.
  *
- * Run: npx tsx src/lib/bills/logic.test.ts
+ * Run: node src/lib/bills/logic.test.ts   (Node ≥ 22 strips types natively)
  * (Staging is down, so these pure-function tests are the verification gate.)
  */
 import {
@@ -13,7 +13,7 @@ import {
   nextOccurrenceDate,
   dueLabel,
   validateBillInput,
-} from "./logic";
+} from "./logic.ts";
 
 let passed = 0;
 let failed = 0;

@@ -11,7 +11,7 @@ import {
   totalAnnualCost,
   validateSubscriptionInput,
   sortByRenewal,
-} from "./logic";
+} from "./logic.ts";
 
 let passed = 0;
 let failed = 0;
