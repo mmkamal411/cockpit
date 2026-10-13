@@ -5,8 +5,6 @@ import { parseTodo } from "@/lib/parse-todo";
 import { useTodos } from "@/lib/use-todos";
 import { openApplet } from "@/lib/applet-bus";
 
-const TODOS_KEY = "cockpit.todos";
-
 // Fallback position when the pilot hasn't shared location — the ship's
 // home port label stays honest about it.
 const FALLBACK = { lat: 33.9526, lon: -84.5499, label: "Marietta, GA" };
