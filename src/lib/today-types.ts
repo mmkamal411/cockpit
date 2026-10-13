@@ -4,17 +4,9 @@
 // schedule, todos due today, active nudges, and crew school items. Full
 // todo CRUD belongs to the To-dos applet / useTodos() hook (Worker A).
 
-// TODO(Worker A): once src/lib/use-todos.ts lands, import TodoItem from
-// "@/lib/use-todos" and delete this local definition. The shape below is
-// intentionally compatible with the Supabase `todos` table
-// (title -> text, due_at -> dueAt) so the swap is a one-line change.
-export interface TodoItem {
-  id: string;
-  text: string;
-  done: boolean;
-  dueAt: number | null;
-  createdAt: number;
-}
+// TodoItem is owned by Worker A (src/lib/use-todos.ts) — the shared shape
+// used by both the to-do manager and this briefing surface.
+export type { TodoItem } from "@/lib/use-todos";
 
 export interface CalendarEvent {
   id: string;
