@@ -193,7 +193,7 @@ export const STATIONS: StationDef[] = [
     blurb: "Every recurring charge, in one place.",
     glow: "#fcd34d",
     bay: "money",
-    appletId: null,
+    appletId: "subscriptions",
   },
   {
     id: "shopping",
