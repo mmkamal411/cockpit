@@ -1,0 +1,42 @@
+# Cockpit CI — green-first and simple.
+#
+# build:     typecheck + lint + unit tests (no secrets needed).
+# rls-tests: Row-Level Security assertions against the cockpit-ci Supabase
+#            project. Gated on the GitHub `ci` environment so the Supabase
+#            secrets are only injected for this job (see docs/CI-SECRETS.md).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: build (tsc, eslint, unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx eslint
+      - run: npm test
+
+  rls-tests:
+    name: rls-tests (cockpit-ci Supabase)
+    runs-on: ubuntu-latest
+    needs: build
+    environment: ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/ci/rls-tests.mjs
+        env:
+          CI_SUPABASE_URL: ${{ secrets.CI_SUPABASE_URL }}
+          CI_SUPABASE_ANON_KEY: ${{ secrets.CI_SUPABASE_ANON_KEY }}
+          CI_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.CI_SUPABASE_SERVICE_ROLE_KEY }}

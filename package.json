@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "patch-package",
+    "test": "node scripts/ci/unit-tests.mjs",
     "test:producers": "esbuild src/lib/nudges/producers/producers.test.ts --bundle --platform=node --format=esm --outfile=/tmp/cockpit-producers.test.mjs --log-level=error && node /tmp/cockpit-producers.test.mjs"
   },
   "dependencies": {
