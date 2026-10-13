@@ -15,12 +15,12 @@ Status values: `EVALUATING` → `PHASE_0_IN_PROGRESS` → `PHASE_1_IN_PROGRESS` 
 - [x] A2 (HIGH): envelope-encrypt Google Calendar refresh tokens (KMS/data key) — DONE 2026-10-13 (commit 0c10bda). AES-256-GCM via `src/lib/token-crypto.ts`, key from `CALENDAR_TOKEN_KEY` env (fail closed). **Needs `CALENDAR_TOKEN_KEY` set in Cloudflare Pages env vars before calendar OAuth goes live.**
 - [x] A3 (HIGH): `redeem_share_invite` — use `auth.uid()`/JWT email, require email match, revoke anon grant — DONE 2026-10-13 (migration 018, commit 0c10bda). `/invite/[token]` page updated to the 1-param signature.
 - [x] A4 (MEDIUM): `find_pilot_by_email` — inline into share-creation RPC with ownership check — DONE 2026-10-13 (migration 018, commit 0c10bda) as list-scoped resolution: `find_pilot_by_email(p_email, p_list_id)` verifies the caller owns the list; uniform null otherwise. Shares route updated.
-- [ ] A5 (MEDIUM): admin `view-as` — require both auth layers (not in security-squad scope; left for the full Phase 0 wave)
-- [ ] W1 (HIGH): Crystal worker `/chat` + `/quiz` — add shared-secret auth; kill client-direct browser→worker path
-- [ ] C1 (HIGH): fix app↔worker context contract drift; privacy sign-off on field inventory before enabling
+- [x] A5 (MEDIUM): admin `view-as` — require both auth layers — DONE 2026-10-13 (Phase 0 squad: `requireAdminBothLayers` = ADMIN_EMAILS allowlist + `is_admin` DB RPC, fail-closed, plain-English 403)
+- [x] W1 (HIGH): Crystal worker `/chat` + `/quiz` shared-secret auth — DONE 2026-10-13 (Phase 0 squad: app attaches `Authorization: Bearer CRYSTAL_WORKER_SECRET` server-side, fail-closed when unset; zero client-direct worker URL hits; worker-side v2 contract + 400s in d-dash repo `phase0/w1-worker-secret-auth`, needs wrangler secret + redeploy)
+- [x] C1 (HIGH): context contract v2 + privacy sign-off — DONE 2026-10-13 (Phase 0 squad: canonical `src/lib/chat/contract.ts` + CONTRACT.md field inventory; **P0 fixed: child names/relationships no longer sent to worker**; loud ContractViolationError guards)
 - [x] Fix `bills/logic.test.ts` + `health/glucose.test.ts` (extensionless imports) — DONE 2026-10-13: explicit `.ts` extensions (repo convention); same-class fix applied to `subscriptions/logic.test.ts` and the `nudges/producers` sources so the whole suite runs under plain Node.
 - [x] Resolve smoke-test URL mismatch (`cockpit-10c.pages.dev` vs `cockpit.pages.dev`) — DONE 2026-10-13: **https://cockpit-10c.pages.dev is canonical** (Meheldi confirmed); locked in DEPLOY.md, `deploy-staging.py`, `smoke-test-staging.py`, `src/lib/nudges/PRODUCERS.md`.
-- [ ] Re-audit A1–A5 after fixes; `npm test` green
+- [x] Re-audit A1–A5 after fixes; `npm test` green — DONE 2026-10-13 (coordinator re-audit: all five verified in code; 207/207 tests green; tsc + eslint clean)
 
 ## Phase 1 — Foundation
 - [ ] Migration 018 applied (signals, aggregates, pilot_preferences, layout_versions, corrections, feature_flags) with RLS + indexes
