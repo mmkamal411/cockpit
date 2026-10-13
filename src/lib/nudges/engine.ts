@@ -232,9 +232,10 @@ export function applyQuietHours(
   if (wraps && parts.minutes >= start) day = addDays(day, 1); // end is tomorrow
 
   let target = utcForLocalWall(day.year, day.month, day.day, Math.floor(end / 60), end % 60, timezone);
-  if (target.getTime() <= now.getTime()) {
-    const next = addDays(day, 1);
-    target = utcForLocalWall(next.year, next.month, next.day, Math.floor(end / 60), end % 60, timezone);
+  // Never return a time in the past: roll forward to the next day's quiet end.
+  while (target.getTime() <= now.getTime()) {
+    day = addDays(day, 1);
+    target = utcForLocalWall(day.year, day.month, day.day, Math.floor(end / 60), end % 60, timezone);
   }
   return target;
 }

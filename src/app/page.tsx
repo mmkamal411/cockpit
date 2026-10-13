@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { LandingHero } from "@/components/landing-hero";
 
 /** Session-gated: reads cookies per request — opt out of static-shell validation. */
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 /** Public landing. Signed-in pilots go straight to their bridge. */
 export default async function LandingPage() {

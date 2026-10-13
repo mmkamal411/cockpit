@@ -9,7 +9,7 @@ import { Pill } from "@/components/admin/ui";
  *
  * Session-gated: reads cookies per request — opt out of static-shell validation.
  */
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Admin — Cockpit",
