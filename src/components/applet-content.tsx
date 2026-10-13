@@ -12,6 +12,7 @@ import { WeatherApplet } from "./applets/weather-applet";
 import { CalendarApplet } from "./applets/calendar-applet";
 import { ShoppingApplet } from "./applets/shopping-applet";
 import { HealthApplet } from "./applets/health-applet";
+import { NudgeCenterApplet } from "./applets/nudge-center-applet";
 
 export interface AppletDef {
   /** Short plain-English name shown in the window chrome. */
@@ -84,6 +85,12 @@ export const APPLETS: Record<string, AppletDef> = {
     readout: "MED",
     glow: "#86efac",
     render: () => <HealthApplet />,
+  },
+  nudges: {
+    name: "Nudge Center",
+    readout: "NUDGE",
+    glow: "#fcd34d",
+    render: () => <NudgeCenterApplet />,
   },
 };
 
