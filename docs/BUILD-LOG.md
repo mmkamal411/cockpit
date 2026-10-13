@@ -110,3 +110,13 @@ Branch: feature/child-education-ux (checked out, HEAD = origin). Building: path-
 
 ## 2026-10-13 ~12:32 EDT — DEPLOY (Google Calendar env vars pickup)
 Redeploying feature/phase1-module-finish to staging to pick up GOOGLE_CALENDAR_CLIENT_ID/SECRET env vars. Using separate worktree (/tmp/cockpit-deploy) — main tree untouched for child-education build team.
+
+## 2026-10-13 ~13:05 EDT — Phase B commit note (subagent 07137f0a)
+Commit fcedb39 ("check-ins table + API + flow") also swept up STAGED files from the settings squad that were already in the shared working tree's index (access-grants routes, settings/* routes, src/lib/pilot-settings.ts, migration 028_pilot_profile_delete_grace.sql) — content untouched, pushed as-is on feature/child-education-ux. Going forward I'll commit with `git commit -- <paths>` so only my files land in my commits. Pre-existing tsc error in src/app/api/settings/route.ts(90,9) belongs to that squad's staged work, not Phase B.
+
+## 2026-10-13 ~12:35 EDT — Money/Bills Module Team (coordinator d2a232c0) — Subscriptions built
+Branch: feature/money-bills-finish (worktree ~/workspace/cockpit-money-bills, base origin/feature/phase1-module-finish). Bills was already complete (584-line applet, 10 API routes, 38 tests); the gap was Subscriptions (station existed with appletId: null).
+- f5f4f0a: migration 028_subscriptions.sql (RLS owner-only, forced) + src/lib/subscriptions/logic.ts + 25 unit tests (all pass)
+- 4dba2eb: API routes GET/POST /api/subscriptions, PUT/DELETE /api/subscriptions/[id] (pilotRoute, plain-English errors)
+- ec2e372: subscriptions-applet.tsx (hero monthly/yearly totals, active/paused/cancelled sections, add form) + applet-content.tsx + stations.ts registration
+All pushed to origin. Needs: migration 028 run in Supabase dashboard, then staging deploy + browser verification.
