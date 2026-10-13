@@ -28,7 +28,7 @@ export function TodayApplet() {
   const [briefingAuthExpired, setBriefingAuthExpired] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
 
-  const { todos, loading, syncError, retrySync, addTodo, toggleTodo, deleteTodo } = useTodos();
+  const { todos, loading, addTodo, toggleTodo, deleteTodo } = useTodos();
   const [draft, setDraft] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -151,19 +151,6 @@ export function TodayApplet() {
         authExpired={briefingAuthExpired}
         onRetry={loadBriefing}
       />
-
-      {syncError !== null && (
-        <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-center">
-          <p className="text-sm text-star">{syncError}</p>
-          <button
-            type="button"
-            onClick={() => void retrySync()}
-            className="mt-2 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-1.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
-          >
-            Try syncing again
-          </button>
-        </div>
-      )}
 
       {/* Quick-capture to-dos — cloud-synced when signed in, on this device otherwise. */}
       <div>
