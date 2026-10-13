@@ -27,6 +27,19 @@ export interface ShareInviteEmail {
 
 export interface EmailSender {
   sendShareInvite(email: ShareInviteEmail): Promise<void>;
+  sendTodoReminder(email: TodoReminderEmail): Promise<void>;
+}
+
+/** A to-do reminder: due soon or due now. */
+export interface TodoReminderEmail {
+  /** Pilot's email address. */
+  to: string;
+  /** The to-do's text. */
+  todoText: string;
+  /** Plain-English due label, e.g. "Today at 3:00 PM". */
+  dueLabel: string;
+  /** Name of the list the to-do lives in. */
+  listName: string;
 }
 
 /**
@@ -44,6 +57,19 @@ export class LogEmailSender implements EmailSender {
         subject,
         text,
         html,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  }
+
+  async sendTodoReminder(email: TodoReminderEmail): Promise<void> {
+    console.log(
+      JSON.stringify({
+        event: "email.todo_reminder",
+        to: email.to,
+        todoText: email.todoText,
+        dueLabel: email.dueLabel,
+        listName: email.listName,
         timestamp: new Date().toISOString(),
       }),
     );
