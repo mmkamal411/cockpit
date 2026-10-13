@@ -58,8 +58,8 @@ export function TodayApplet({ params }: { params?: Record<string, string> }) {
   // Initial briefing load + refresh ticks. This is the standard
   // data-fetch-on-mount pattern (the effect only *starts* the fetch;
   // state settles asynchronously when the network responds).
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadBriefing();
   }, [loadBriefing, refreshTick]);
 
