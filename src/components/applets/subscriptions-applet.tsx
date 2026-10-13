@@ -88,6 +88,7 @@ export function SubscriptionsApplet() {
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"list" | "add">("list");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
   // Add-subscription form state
   const [fName, setFName] = useState("");
@@ -147,8 +148,10 @@ export function SubscriptionsApplet() {
     }
   }
 
-  async function removeSub(id: string, name: string) {
-    if (!window.confirm(`Remove "${name}"? You can always add it back.`)) return;
+  async function removeSub(id: string) {
+    // Two-tap inline confirm (no native window.confirm — it blocks the main
+    // thread and freezes the page in some browsers/automation).
+    setConfirmRemoveId(null);
     setBusyId(id);
     try {
       await api(`/api/subscriptions/${id}`, { method: "DELETE" });
@@ -158,6 +161,43 @@ export function SubscriptionsApplet() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  /** Two-tap inline remove button — no native dialogs. */
+  function removeButton(id: string, extraClass = "") {
+    if (confirmRemoveId === id) {
+      return (
+        <>
+          <span className="text-xs text-dim">Remove?</span>
+          <button
+            type="button"
+            disabled={busyId === id}
+            onClick={() => setConfirmRemoveId(null)}
+            className={`text-xs text-dim underline-offset-2 hover:text-star hover:underline disabled:opacity-50 ${extraClass}`}
+          >
+            Keep it
+          </button>
+          <button
+            type="button"
+            disabled={busyId === id}
+            onClick={() => removeSub(id)}
+            className={`text-xs font-medium text-red-400 underline-offset-2 hover:underline disabled:opacity-50 ${extraClass}`}
+          >
+            {busyId === id ? "Removing…" : "Yes, remove"}
+          </button>
+        </>
+      );
+    }
+    return (
+      <button
+        type="button"
+        disabled={busyId === id}
+        onClick={() => setConfirmRemoveId(id)}
+        className={`text-xs text-dim underline-offset-2 hover:text-red-400 hover:underline disabled:opacity-50 ${extraClass}`}
+      >
+        Remove
+      </button>
+    );
   }
 
   async function addSubscription(e: React.FormEvent) {
@@ -431,14 +471,7 @@ export function SubscriptionsApplet() {
                           >
                             Cancel
                           </button>
-                          <button
-                            type="button"
-                            disabled={busyId === s.id}
-                            onClick={() => removeSub(s.id, s.name)}
-                            className="min-h-[44px] text-xs text-dim underline-offset-2 hover:text-red-400 hover:underline disabled:opacity-50"
-                          >
-                            Remove
-                          </button>
+                          {removeButton(s.id, "min-h-[44px]")}
                         </div>
                       </li>
                     ))}
@@ -479,14 +512,7 @@ export function SubscriptionsApplet() {
                           >
                             {busyId === s.id ? "…" : "Resume"}
                           </button>
-                          <button
-                            type="button"
-                            disabled={busyId === s.id}
-                            onClick={() => removeSub(s.id, s.name)}
-                            className="min-h-[44px] text-xs text-dim underline-offset-2 hover:text-red-400 hover:underline disabled:opacity-50"
-                          >
-                            Remove
-                          </button>
+                          {removeButton(s.id, "min-h-[44px]")}
                         </div>
                       </li>
                     ))}
@@ -510,14 +536,7 @@ export function SubscriptionsApplet() {
                           <p className="truncate text-sm text-stardust">{s.name}</p>
                           <p className="text-xs text-dim">{costLabel(s)}</p>
                         </div>
-                        <button
-                          type="button"
-                          disabled={busyId === s.id}
-                          onClick={() => removeSub(s.id, s.name)}
-                          className="min-h-[44px] shrink-0 text-xs text-dim underline-offset-2 hover:text-red-400 hover:underline disabled:opacity-50"
-                        >
-                          Remove
-                        </button>
+                        {removeButton(s.id, "min-h-[44px] shrink-0")}
                       </li>
                     ))}
                   </ul>

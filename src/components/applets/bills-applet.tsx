@@ -76,6 +76,7 @@ export function BillsApplet() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
   // Add-bill form state
   const [fName, setFName] = useState("");
@@ -163,7 +164,9 @@ export function BillsApplet() {
   }
 
   async function removeBill(id: string) {
-    if (!window.confirm("Remove this bill? You can always add it back.")) return;
+    // Two-tap inline confirm (no native window.confirm — it blocks the main
+    // thread and freezes the page in some browsers/automation).
+    setConfirmRemoveId(null);
     setBusyId(id);
     try {
       await api("/api/bills/" + id, { method: "DELETE" });
@@ -549,14 +552,36 @@ export function BillsApplet() {
                               >
                                 Remind me in 3 days
                               </button>
-                              <button
-                                type="button"
-                                disabled={busyId === b.id}
-                                onClick={() => removeBill(b.id)}
-                                className="text-xs text-dim underline-offset-2 hover:text-red-400 hover:underline disabled:opacity-50"
-                              >
-                                Remove
-                              </button>
+                              {confirmRemoveId === b.id ? (
+                                <>
+                                  <span className="text-xs text-dim">Remove this bill?</span>
+                                  <button
+                                    type="button"
+                                    disabled={busyId === b.id}
+                                    onClick={() => setConfirmRemoveId(null)}
+                                    className="text-xs text-dim underline-offset-2 hover:text-star hover:underline disabled:opacity-50"
+                                  >
+                                    Keep it
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busyId === b.id}
+                                    onClick={() => removeBill(b.id)}
+                                    className="text-xs font-medium text-red-400 underline-offset-2 hover:underline disabled:opacity-50"
+                                  >
+                                    {busyId === b.id ? "Removing…" : "Yes, remove"}
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={busyId === b.id}
+                                  onClick={() => setConfirmRemoveId(b.id)}
+                                  className="text-xs text-dim underline-offset-2 hover:text-red-400 hover:underline disabled:opacity-50"
+                                >
+                                  Remove
+                                </button>
+                              )}
                               {b.issuer_url && (
                                 <a
                                   href={b.issuer_url}
