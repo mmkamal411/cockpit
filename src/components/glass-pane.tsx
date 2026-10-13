@@ -145,7 +145,7 @@ export function GlassPane() {
   function addTodo() {
     const text = draft.trim();
     if (!text) return;
-    setTodos((prev) => [...prev, { id: newId(), text, done: false, createdAt: Date.now(), dueAt: null }]);
+    setTodos((prev) => [...prev, { id: newId(), text, done: false, createdAt: Date.now(), updatedAt: Date.now(), dueAt: null }]);
     setDraft("");
   }
 

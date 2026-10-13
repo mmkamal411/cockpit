@@ -60,7 +60,10 @@ export async function GET() {
       })),
     ];
 
-    return NextResponse.json({ lists });
+    return NextResponse.json({
+      lists,
+      me: { id: user.id, email: user.email ?? null },
+    });
   } catch {
     return serverError();
   }

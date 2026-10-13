@@ -24,6 +24,30 @@ const UUID_RE =
 
 type Priority = "p1" | "p2" | "p3" | "p4";
 
+interface TodoRow {
+  id: string;
+  pilot_id: string;
+  title: string;
+  done: boolean;
+  created_at: string;
+  completed_at: string | null;
+  updated_at: string;
+  deleted_at: string | null;
+  due_at: string | null;
+  priority: Priority | null;
+  labels: string[] | null;
+  notes: string | null;
+  source: "manual" | "calendar" | "mail";
+  list_id: string | null;
+  parent_todo_id: string | null;
+  section: string | null;
+  assigned_to_pilot_id: string | null;
+  recurrence: string | null;
+  reminder_at: string | null;
+  google_task_id: string | null;
+  google_tasklist_id: string | null;
+}
+
 interface TodoBody {
   text?: unknown;
   dueAt?: unknown;
@@ -173,7 +197,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
     if (error) throw error;
     if (!data) return NextResponse.json(GONE, { status: 404 });
-    return NextResponse.json(rowToItem(data));
+    return NextResponse.json(rowToItem(data as unknown as TodoRow));
   } catch {
     return NextResponse.json(
       { error: "Couldn't update your to-do. Please try again in a moment." },
@@ -200,7 +224,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
     if (error) throw error;
     if (!data) return NextResponse.json(GONE, { status: 404 });
-    return NextResponse.json({ ok: true, todo: rowToItem(data) });
+    return NextResponse.json({ ok: true, todo: rowToItem(data as unknown as TodoRow) });
   } catch {
     return NextResponse.json(
       { error: "Couldn't delete your to-do. Please try again in a moment." },

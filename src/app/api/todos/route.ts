@@ -182,7 +182,7 @@ export async function GET() {
       .order("created_at", { ascending: false });
 
     if (error) throw error;
-    return NextResponse.json(((data ?? []) as TodoRow[]).map(rowToItem));
+    return NextResponse.json(((data ?? []) as unknown as TodoRow[]).map(rowToItem));
   } catch {
     return NextResponse.json(
       { error: "Couldn't load your to-dos. Please try again in a moment." },
@@ -224,7 +224,7 @@ export async function POST(req: Request) {
       .eq("id", id)
       .maybeSingle();
     if (existing) {
-      return NextResponse.json(rowToItem(existing as TodoRow), { status: 200 });
+      return NextResponse.json(rowToItem(existing as unknown as TodoRow), { status: 200 });
     }
 
     const { data, error } = await auth.supabase
@@ -250,7 +250,7 @@ export async function POST(req: Request) {
       .single();
 
     if (error) throw error;
-    return NextResponse.json(rowToItem(data as TodoRow), { status: 201 });
+    return NextResponse.json(rowToItem(data as unknown as TodoRow), { status: 201 });
   } catch {
     return NextResponse.json(
       { error: "Couldn't save your to-do. Please try again in a moment." },

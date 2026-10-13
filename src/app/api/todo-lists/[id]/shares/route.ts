@@ -64,6 +64,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
         email: s.shared_with_email,
         permission: s.permission,
         accepted: s.shared_with_pilot_id !== null,
+        pilotId: s.shared_with_pilot_id,
         created_at: s.created_at,
       })),
     });
