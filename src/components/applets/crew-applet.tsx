@@ -7,12 +7,14 @@ import {
   BellRowInput,
   BellScheduleRows,
   IntakeItem,
+  IntakeSourceResult,
   ParsedBellTable,
   ParsedCalendarNote,
   SourceCheck,
   SourceCheckRow,
   SourceUpload,
   Spinner,
+  UploadPick,
   normalizeBellPeriods,
   normalizeCalendarSummary,
   runSourceIntake,
@@ -72,6 +74,9 @@ interface SchoolSourceSnapshot {
   fetched_at: string | null;
   status: string | null;
   error_note: string | null;
+  parsed_at?: string | null;
+  parse_status?: string | null;
+  parse_note?: string | null;
 }
 
 interface BellSourceSnapshot extends SchoolSourceSnapshot {
@@ -196,7 +201,7 @@ export function CrewApplet() {
   const [newBellRows, setNewBellRows] = useState<BellRowInput[]>([
     { label: "Daily", url: "" },
   ]);
-  const [newUploadFiles, setNewUploadFiles] = useState<File[]>([]);
+  const [newUploads, setNewUploads] = useState<UploadPick[]>([]);
   const [newUploadError, setNewUploadError] = useState("");
   const [sourcesNote, setSourcesNote] = useState("");
   // Per-source intake status shown on the confirmation screen after adding.
@@ -261,15 +266,19 @@ export function CrewApplet() {
   const [srcDistrict, setSrcDistrict] = useState("");
   const [srcCalendarUrl, setSrcCalendarUrl] = useState("");
   const [srcBells, setSrcBells] = useState<BellScheduleEntry[]>([]);
-  const [srcUploadFiles, setSrcUploadFiles] = useState<File[]>([]);
+  const [srcUploads, setSrcUploads] = useState<UploadPick[]>([]);
   const [srcUploadError, setSrcUploadError] = useState("");
   const [srcSaving, setSrcSaving] = useState(false);
   const [srcRefreshing, setSrcRefreshing] = useState(false);
   const [srcMessage, setSrcMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  // Per-source intake checks + parsed digital results, keyed by source URL.
+  // Per-source intake checks + parsed digital payloads from the content endpoint.
   const [srcChecks, setSrcChecks] = useState<SourceCheck[]>([]);
-  const [srcParsed, setSrcParsed] = useState<Record<string, unknown>>({});
   const [srcRetryingKey, setSrcRetryingKey] = useState<string | null>(null);
+  const [calParsed, setCalParsed] = useState<unknown>(null);
+  const [calParseStatus, setCalParseStatus] = useState<string | null>(null);
+  const [calParseNote, setCalParseNote] = useState<string | null>(null);
+  const [bellParsed, setBellParsed] = useState<Record<number, unknown>>({});
+  const [bellParseStatus, setBellParseStatus] = useState<Record<number, string>>({});
   const [calHtml, setCalHtml] = useState<string | null>(null);
   const [calUrl, setCalUrl] = useState("");
   const [calFetchedAt, setCalFetchedAt] = useState<string | null>(null);
@@ -368,8 +377,8 @@ export function CrewApplet() {
       const bellSchedules = newBellRows
         .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
         .filter((b) => b.url);
-      const files = newUploadFiles;
-      if (calLink || bellSchedules.length > 0 || files.length > 0) {
+      const uploads = newUploads;
+      if (calLink || bellSchedules.length > 0 || uploads.length > 0) {
         const items: IntakeItem[] = [];
         if (calLink)
           items.push({
@@ -386,12 +395,13 @@ export function CrewApplet() {
             url: b.url,
           }),
         );
-        files.forEach((file, i) =>
+        uploads.forEach((pick, i) =>
           items.push({
             key: `upload-${i}`,
             kind: "upload",
-            label: file.name,
-            file,
+            label: pick.file.name,
+            file: pick.file,
+            uploadKind: pick.kind,
           }),
         );
         setIntakeChecks(
@@ -402,6 +412,7 @@ export function CrewApplet() {
             url: item.url,
             fileName: item.file?.name,
             file: item.file,
+            uploadKind: item.uploadKind,
             state: item.kind === "upload" ? "uploading" : "verifying",
           })),
         );
@@ -415,7 +426,6 @@ export function CrewApplet() {
               setIntakeChecks((prev) =>
                 prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
               ),
-            onParsed: () => {},
             legacySave: async (payload) => {
               const putRes = await fetch(
                 `/api/crew/members/${member.id}/school-sources`,
@@ -458,6 +468,7 @@ export function CrewApplet() {
       label: check.label,
       url: check.url,
       file: check.file,
+      uploadKind: check.uploadKind,
     };
     setIntakeChecks((prev) =>
       prev.map((c) =>
@@ -475,7 +486,6 @@ export function CrewApplet() {
           setIntakeChecks((prev) =>
             prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
           ),
-        onParsed: () => {},
         // On retry the links are already saved — never wipe them with a
         // partial PUT if the intake endpoint isn't there yet.
         legacySave: async () => {
@@ -509,7 +519,7 @@ export function CrewApplet() {
     setSync(["Grades", "Assignments"]);
     setNewCalendarUrl("");
     setNewBellRows([{ label: "Daily", url: "" }]);
-    setNewUploadFiles([]);
+    setNewUploads([]);
     setNewUploadError("");
     setIntakeChecks([]);
     setIntakeRunning(false);
@@ -711,14 +721,18 @@ export function CrewApplet() {
     setSrcDistrict("");
     setSrcCalendarUrl("");
     setSrcBells([]);
-    setSrcUploadFiles([]);
+    setSrcUploads([]);
     setSrcUploadError("");
     setSrcSaving(false);
     setSrcRefreshing(false);
     setSrcMessage(null);
     setSrcChecks([]);
-    setSrcParsed({});
     setSrcRetryingKey(null);
+    setCalParsed(null);
+    setCalParseStatus(null);
+    setCalParseNote(null);
+    setBellParsed({});
+    setBellParseStatus({});
     setCalHtml(null);
     setCalUrl("");
     setCalFetchedAt(null);
@@ -741,6 +755,8 @@ export function CrewApplet() {
     setCalError("");
     setBellHtml({});
     setBellMeta({});
+    setBellParsed({});
+    setBellParseStatus({});
     setBellError("");
     setBellTab(0);
     try {
@@ -769,25 +785,6 @@ export function CrewApplet() {
           calendar: calendarSnap,
           bells: bellSnaps as BellSourceSnapshot[],
         });
-        // Pick up any parsed digital results the backend attached to snapshots.
-        const parsed: Record<string, unknown> = {};
-        const calParsed =
-          calendarSnap && typeof calendarSnap === "object"
-            ? (calendarSnap as Record<string, unknown>).parsed
-            : undefined;
-        if (sources?.calendar_source_url && calParsed !== undefined) {
-          parsed[sources.calendar_source_url] = calParsed;
-        }
-        const bellUrls = sources?.bell_schedules ?? [];
-        bellSnaps.forEach((snap, i) => {
-          const p =
-            snap && typeof snap === "object"
-              ? (snap as Record<string, unknown>).parsed
-              : undefined;
-          const url = bellUrls[i]?.url;
-          if (url && p !== undefined) parsed[url] = p;
-        });
-        setSrcParsed(parsed);
         if (sources?.calendar_source_url) await loadCalendarContent(memberId);
       } else {
         setSrcMessage({
@@ -808,6 +805,9 @@ export function CrewApplet() {
   async function loadCalendarContent(memberId: string) {
     setCalLoading(true);
     setCalError("");
+    setCalParsed(null);
+    setCalParseStatus(null);
+    setCalParseNote(null);
     try {
       const res = await fetch(
         `/api/crew/members/${memberId}/school-sources/content?kind=calendar`,
@@ -817,6 +817,13 @@ export function CrewApplet() {
         setCalHtml(json.html ?? "");
         setCalUrl(json.url ?? "");
         setCalFetchedAt(json.fetched_at ?? null);
+        setCalParsed(json.parsed ?? null);
+        setCalParseStatus(
+          typeof json.parse_status === "string" ? json.parse_status : null,
+        );
+        setCalParseNote(
+          typeof json.parse_note === "string" ? json.parse_note : null,
+        );
       } else {
         setCalError(json.error ?? "The calendar page didn't load.");
       }
@@ -827,7 +834,7 @@ export function CrewApplet() {
     }
   }
 
-  /** Fetch one bell schedule's snapshot HTML, cached per tab index. */
+  /** Fetch one bell schedule's snapshot HTML + parsed payload, cached per tab. */
   async function ensureBellContent(memberId: string, index: number, force = false) {
     if (!force && (bellHtml[index] !== undefined || bellLoading || bellError)) return;
     setBellLoading(true);
@@ -842,6 +849,12 @@ export function CrewApplet() {
         setBellMeta((prev) => ({
           ...prev,
           [index]: { url: json.url ?? "", fetchedAt: json.fetched_at ?? null },
+        }));
+        setBellParsed((prev) => ({ ...prev, [index]: json.parsed ?? null }));
+        setBellParseStatus((prev) => ({
+          ...prev,
+          [index]:
+            typeof json.parse_status === "string" ? json.parse_status : "pending",
         }));
       } else {
         setBellError(json.error ?? "That bell schedule didn't load.");
@@ -862,7 +875,7 @@ export function CrewApplet() {
       url: b.url,
     }));
     setSrcBells(bells.length > 0 ? bells : [{ label: "Daily", url: "" }]);
-    setSrcUploadFiles([]);
+    setSrcUploads([]);
     setSrcUploadError("");
     setSrcChecks([]);
     setSrcRetryingKey(null);
@@ -874,7 +887,6 @@ export function CrewApplet() {
   async function saveSchoolSources(memberId: string) {
     setSrcSaving(true);
     setSrcMessage(null);
-    const intakeParsed: Record<string, unknown> = {};
     try {
       const bells = srcBells
         .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
@@ -891,12 +903,13 @@ export function CrewApplet() {
       bells.forEach((b, i) =>
         items.push({ key: `bell-${i}`, kind: "bell", label: b.label, url: b.url }),
       );
-      srcUploadFiles.forEach((file, i) =>
+      srcUploads.forEach((pick, i) =>
         items.push({
           key: `upload-${Date.now()}-${i}`,
           kind: "upload",
-          label: file.name,
-          file,
+          label: pick.file.name,
+          file: pick.file,
+          uploadKind: pick.kind,
         }),
       );
       if (items.length === 0) {
@@ -925,6 +938,7 @@ export function CrewApplet() {
           url: item.url,
           fileName: item.file?.name,
           file: item.file,
+          uploadKind: item.uploadKind,
           state: item.kind === "upload" ? "uploading" : "verifying",
         })),
       );
@@ -936,11 +950,6 @@ export function CrewApplet() {
           setSrcChecks((prev) =>
             prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
           ),
-        // Accumulate here; merged back after loadSchoolSources re-reads
-        // snapshots so intake results aren't clobbered.
-        onParsed: (url, parsed) => {
-          intakeParsed[url] = parsed;
-        },
         // The intake endpoint isn't deployed yet — fall back to the plain
         // save so nothing the user typed is lost.
         legacySave: async (payload) => {
@@ -964,11 +973,9 @@ export function CrewApplet() {
         ok: true,
         text: "Saved — the results are under each link above.",
       });
-      setSrcUploadFiles([]);
+      setSrcUploads([]);
       setSrcEditing(false);
       await loadSchoolSources(memberId);
-      if (Object.keys(intakeParsed).length > 0)
-        setSrcParsed((prev) => ({ ...prev, ...intakeParsed }));
       if (bellsOpen) await ensureBellContent(memberId, 0, true);
     } catch (e) {
       setSrcMessage({
@@ -990,6 +997,7 @@ export function CrewApplet() {
       label: check.label,
       url: check.url,
       file: check.file,
+      uploadKind: check.uploadKind,
     };
     setSrcChecks((prev) =>
       prev.map((c) =>
@@ -1011,8 +1019,6 @@ export function CrewApplet() {
           setSrcChecks((prev) =>
             prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
           ),
-        onParsed: (url, parsed) =>
-          setSrcParsed((prev) => ({ ...prev, [url]: parsed })),
         // On retry the links are already saved — never wipe them with a
         // partial PUT if the intake endpoint isn't there yet.
         legacySave: async () => {
@@ -1046,31 +1052,20 @@ export function CrewApplet() {
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "refresh failed");
-      const results: {
-        label: string;
-        status: string;
-        error_note?: string;
-        url?: string;
-        parsed?: unknown;
-      }[] = json.results ?? [];
-      const failed = results.filter((r) => r.status !== "ok");
+      const results: IntakeSourceResult[] = Array.isArray(json.results)
+        ? json.results
+        : [];
+      const failed = results.filter((r) => !r.verified);
       setSrcMessage({
         ok: failed.length === 0,
         text:
           failed.length === 0
             ? `Checked ${results.length} ${results.length === 1 ? "page" : "pages"} — all fresh.`
             : `${failed.length} of ${results.length} didn't load: ${failed
-                .map((f) => `${f.label} — ${f.error_note ?? "try again"}`)
+                .map((f) => `${f.label || "Link"} — ${f.message ?? "try again"}`)
                 .join("; ")}`,
       });
-      // Merge any parsed digital results the refresh carried.
-      const refreshParsed: Record<string, unknown> = {};
-      for (const r of results) {
-        if (r.url && r.parsed !== undefined) refreshParsed[r.url] = r.parsed;
-      }
       await loadSchoolSources(memberId);
-      if (Object.keys(refreshParsed).length > 0)
-        setSrcParsed((prev) => ({ ...prev, ...refreshParsed }));
       if (bellsOpen) {
         setBellError("");
         await ensureBellContent(memberId, bellTab, true);
@@ -1246,19 +1241,18 @@ export function CrewApplet() {
         : status.tone === "warn"
           ? "bg-neon-amber"
           : "bg-dim";
-    // Digital (parsed) school-source results, keyed by source URL.
+    // Digital (parsed) school-source results from the content endpoint.
     const sourcesBusy = srcSaving || srcRefreshing;
     const calSourceUrl = srcSources?.calendar_source_url ?? null;
-    const calSummary = calSourceUrl
-      ? normalizeCalendarSummary(srcParsed[calSourceUrl])
-      : null;
+    const calSummary = normalizeCalendarSummary(calParsed);
     const showCalDigital =
       calSourceUrl !== null &&
-      (sourcesBusy || calSummary?.eventCount !== null || !!calSummary?.summary);
-    const activeBell = srcSources?.bell_schedules[bellTab];
-    const activeBellPeriods = activeBell
-      ? normalizeBellPeriods(srcParsed[activeBell.url])
-      : [];
+      (sourcesBusy ||
+        calSummary.eventCount !== null ||
+        !!calSummary.summary ||
+        !!calParseNote);
+    const activeBellPeriods = normalizeBellPeriods(bellParsed[bellTab]);
+    const activeBellParseStatus = bellParseStatus[bellTab] ?? null;
     return (
       <div className="space-y-5">
         <div>
@@ -1785,18 +1779,21 @@ export function CrewApplet() {
                   )}
                   <div className="border-t border-line pt-2.5">
                     <SourceUpload
-                      files={srcUploadFiles}
-                      onAdd={(picked) => {
+                      files={srcUploads}
+                      onAdd={(picked, kind) => {
                         const bad = picked.map(validateUploadFile).find(Boolean);
                         if (bad) {
                           setSrcUploadError(bad);
                           return;
                         }
                         setSrcUploadError("");
-                        setSrcUploadFiles((prev) => [...prev, ...picked]);
+                        setSrcUploads((prev) => [
+                          ...prev,
+                          ...picked.map((file) => ({ file, kind })),
+                        ]);
                       }}
                       onRemove={(i) =>
-                        setSrcUploadFiles((prev) =>
+                        setSrcUploads((prev) =>
                           prev.filter((_, idx) => idx !== i),
                         )
                       }
@@ -1853,12 +1850,20 @@ export function CrewApplet() {
                       <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
                         <Spinner label="Reading the school's page…" />
                       </div>
-                    ) : (
+                    ) : calSummary.eventCount !== null || calSummary.summary ? (
                       <ParsedCalendarNote
-                        eventCount={calSummary?.eventCount ?? null}
-                        summary={calSummary?.summary ?? null}
+                        eventCount={calSummary.eventCount}
+                        summary={calSummary.summary}
                       />
-                    ))}
+                    ) : calParseStatus === "pending" ? (
+                      <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                        Saved — we&apos;ll read the calendar shortly.
+                      </p>
+                    ) : calParseNote ? (
+                      <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                        {calParseNote}
+                      </p>
+                    ) : null)}
                   {calLoading ? (
                     <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
                       Pulling the calendar in…
@@ -1994,14 +1999,18 @@ export function CrewApplet() {
                             <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
                               <Spinner label="Reading the school's page…" />
                             </div>
-                          ) : (
-                            activeBellPeriods.length > 0 && (
-                              <ParsedBellTable
-                                periods={activeBellPeriods}
-                                label={activeBell?.label}
-                              />
-                            )
-                          )}
+                          ) : activeBellPeriods.length > 0 ? (
+                            <ParsedBellTable
+                              periods={activeBellPeriods}
+                              label={
+                                srcSources?.bell_schedules[bellTab]?.label
+                              }
+                            />
+                          ) : activeBellParseStatus === "pending" ? (
+                            <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                              Saved — we&apos;ll read this schedule shortly.
+                            </p>
+                          ) : null}
                           {bellLoading ? (
                             <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
                               Pulling that schedule in…
@@ -2528,18 +2537,21 @@ export function CrewApplet() {
             </div>
             <div className="mt-3 border-t border-line pt-3">
               <SourceUpload
-                files={newUploadFiles}
-                onAdd={(picked) => {
+                files={newUploads}
+                onAdd={(picked, kind) => {
                   const bad = picked.map(validateUploadFile).find(Boolean);
                   if (bad) {
                     setNewUploadError(bad);
                     return;
                   }
                   setNewUploadError("");
-                  setNewUploadFiles((prev) => [...prev, ...picked]);
+                  setNewUploads((prev) => [
+                    ...prev,
+                    ...picked.map((file) => ({ file, kind })),
+                  ]);
                 }}
                 onRemove={(i) =>
-                  setNewUploadFiles((prev) => prev.filter((_, idx) => idx !== i))
+                  setNewUploads((prev) => prev.filter((_, idx) => idx !== i))
                 }
                 error={newUploadError}
                 idPrefix="new"

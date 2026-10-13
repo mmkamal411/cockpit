@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useState } from "react";
 
 /**
  * Shared UI + client logic for the school-sources intake feature.
@@ -41,6 +41,8 @@ export interface SourceCheck {
   fileName?: string;
   /** The actual file, kept so a failed upload can be retried. */
   file?: File;
+  /** For uploads: what kind of page the file holds. */
+  uploadKind?: "calendar" | "bell";
   state: SourceCheckState;
   /** Plain-English detail shown under the status. */
   message?: string;
@@ -53,14 +55,31 @@ export interface IntakeItem {
   label: string;
   url?: string;
   file?: File;
+  /** For uploads: what kind of page the file holds. */
+  uploadKind?: "calendar" | "bell";
 }
 
-/** One per-source result from the intake / upload endpoints. */
+/** One per-source result from the intake / refresh endpoints. */
 export interface IntakeSourceResult {
   url: string;
+  label?: string;
+  kind?: string;
   verified: boolean;
-  parsed?: unknown;
+  /**
+   * Digital output was produced and stored (boolean). The parsed payload
+   * itself is served by the content endpoint, not here.
+   */
+  parsed: boolean;
   message?: string | null;
+  eventCount?: number;
+  scheduleCount?: number;
+  periodCount?: number;
+}
+
+/** A file the user picked, plus what kind of page it is. */
+export interface UploadPick {
+  file: File;
+  kind: "calendar" | "bell";
 }
 
 /** One parsed bell-schedule period. */
@@ -143,15 +162,20 @@ export async function postSourceIntake(
   return { notFound: false, results: intakeResultsOf(json) };
 }
 
-/** Upload one file; the endpoint verifies+parses it like a URL source. */
+/** Upload one file; the endpoint stores it and reports plain-English status. */
 export async function uploadSourceFile(
   memberId: string,
   file: File,
   label: string,
-): Promise<{ notFound: boolean; result: IntakeSourceResult | null }> {
+  kind: "calendar" | "bell",
+): Promise<{
+  notFound: boolean;
+  result: { verified: boolean; parsed: boolean; message?: string | null } | null;
+}> {
   const form = new FormData();
   form.append("file", file);
   form.append("label", label);
+  form.append("kind", kind);
   const res = await fetch(
     `/api/crew/members/${memberId}/school-sources/upload`,
     { method: "POST", body: form },
@@ -165,10 +189,15 @@ export async function uploadSourceFile(
         : "The upload didn't go through. Try again.";
     throw new Error(msg);
   }
-  const first = intakeResultsOf(json)[0];
+  const o =
+    json && typeof json === "object" ? (json as Record<string, unknown>) : {};
   return {
     notFound: false,
-    result: first ?? (json as IntakeSourceResult),
+    result: {
+      verified: o.ok === true,
+      parsed: o.parsed === true,
+      message: typeof o.message === "string" ? o.message : null,
+    },
   };
 }
 
@@ -176,28 +205,62 @@ export async function uploadSourceFile(
 // Parsed-result normalization (defensive: the parser may shape data loosely)
 // ---------------------------------------------------------------------------
 
-/** Pull a readable period list out of a `parsed` payload, whatever its shape. */
+/** Pull a readable period list out of a bell `parsed` payload.
+ * Handles DigitalBellSchedule[] ({label, periods:[{name,start,end}]}) as well
+ * as bare period arrays or {periods:[...]}. Defensive: unknown shapes yield []. */
 export function normalizeBellPeriods(parsed: unknown): BellPeriod[] {
   if (!parsed || typeof parsed !== "object") return [];
   const o = parsed as Record<string, unknown>;
-  const raw = Array.isArray(o.periods)
-    ? o.periods
-    : Array.isArray(o.schedule)
-      ? o.schedule
-      : Array.isArray(o.bells)
-        ? o.bells
-        : [];
+  let schedules: unknown[];
+  if (Array.isArray(parsed)) schedules = parsed;
+  else if (Array.isArray(o.schedules)) schedules = o.schedules;
+  else schedules = [parsed];
   const out: BellPeriod[] = [];
-  for (const p of raw) {
-    if (!p || typeof p !== "object") continue;
-    const r = p as Record<string, unknown>;
-    const name = asString(r.name ?? r.label ?? r.period ?? r.title);
-    const start = asString(r.start ?? r.start_time ?? r.begin ?? r.from);
-    const end = asString(r.end ?? r.end_time ?? r.finish ?? r.to);
-    if (!name && !start && !end) continue;
-    out.push({ name: name || "Period", start, end });
+  const multi = schedules.length > 1;
+  for (const s of schedules) {
+    if (!s || typeof s !== "object") continue;
+    const sched = s as Record<string, unknown>;
+    // A bare period object (not wrapped in a schedule).
+    const looksLikePeriod =
+      typeof sched.name === "string" || typeof sched.start === "string";
+    const periods = looksLikePeriod
+      ? [sched]
+      : Array.isArray(sched.periods)
+        ? sched.periods
+        : [];
+    const schedLabel = asString(sched.label);
+    for (const p of periods) {
+      if (!p || typeof p !== "object") continue;
+      const r = p as Record<string, unknown>;
+      const name = asString(r.name ?? r.label ?? r.period ?? r.title);
+      const start = asString(r.start ?? r.start_time ?? r.begin ?? r.from);
+      const end = asString(r.end ?? r.end_time ?? r.finish ?? r.to);
+      if (!name && !start && !end) continue;
+      out.push({
+        name:
+          multi && schedLabel
+            ? `${schedLabel} · ${name || "Period"}`
+            : name || "Period",
+        start,
+        end,
+      });
+    }
   }
   return out;
+}
+
+/** Count the events in a calendar `parsed` payload (DigitalCalendarEvent[]). */
+export function countCalendarEvents(parsed: unknown): number | null {
+  if (!parsed) return null;
+  if (Array.isArray(parsed)) return parsed.length;
+  if (typeof parsed === "object") {
+    const o = parsed as Record<string, unknown>;
+    if (Array.isArray(o.events)) return o.events.length;
+    const n = o.event_count ?? o.events_saved ?? o.total_events ?? o.count;
+    if (typeof n === "number" && Number.isFinite(n))
+      return Math.max(0, Math.round(n));
+  }
+  return null;
 }
 
 /** Pull the calendar event count / summary out of a `parsed` payload. */
@@ -205,15 +268,12 @@ export function normalizeCalendarSummary(parsed: unknown): {
   eventCount: number | null;
   summary: string | null;
 } {
-  if (!parsed || typeof parsed !== "object")
-    return { eventCount: null, summary: null };
-  const o = parsed as Record<string, unknown>;
-  const n = o.event_count ?? o.events_saved ?? o.total_events ?? o.count;
-  return {
-    eventCount:
-      typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.round(n)) : null,
-    summary: asString(o.summary ?? o.note) || null,
-  };
+  const eventCount = countCalendarEvents(parsed);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const o = parsed as Record<string, unknown>;
+    return { eventCount, summary: asString(o.summary ?? o.note) || null };
+  }
+  return { eventCount, summary: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -229,8 +289,6 @@ export interface RunIntakeOptions {
   items: IntakeItem[];
   /** Patch one check's state/message. */
   onCheck: (key: string, patch: Partial<SourceCheck>) => void;
-  /** Store one source's parsed payload (keyed by URL upstream). */
-  onParsed: (url: string, parsed: unknown) => void;
   /**
    * Plain-save fallback used when the intake endpoint isn't deployed yet.
    * Receives the full URL payload so nothing the user typed is lost.
@@ -249,7 +307,7 @@ export interface RunIntakeOptions {
  * retry path.
  */
 export async function runSourceIntake(opts: RunIntakeOptions): Promise<void> {
-  const { memberId, items, onCheck, onParsed, legacySave } = opts;
+  const { memberId, items, onCheck, legacySave } = opts;
   const district = opts.district ?? null;
 
   const urlItems = items.filter((i) => i.kind !== "upload");
@@ -264,6 +322,7 @@ export async function runSourceIntake(opts: RunIntakeOptions): Promise<void> {
         memberId,
         file,
         item.label,
+        item.uploadKind ?? "calendar",
       );
       if (notFound) {
         onCheck(item.key, {
@@ -273,26 +332,17 @@ export async function runSourceIntake(opts: RunIntakeOptions): Promise<void> {
         });
         continue;
       }
-      if (result) {
-        if (result.url && result.parsed !== undefined)
-          onParsed(result.url, result.parsed);
-        if (result.verified) {
-          onCheck(item.key, {
-            state: "saved",
-            message: result.message ?? "Uploaded and readable.",
-          });
-        } else {
-          onCheck(item.key, {
-            state: "error",
-            message:
-              result.message ??
-              "We couldn't read that file. A clear photo of the printed page works best.",
-          });
-        }
+      if (result && result.verified) {
+        onCheck(item.key, {
+          state: "saved",
+          message: result.message ?? "Uploaded.",
+        });
       } else {
         onCheck(item.key, {
           state: "error",
-          message: "The upload didn't go through. Try again.",
+          message:
+            (result && result.message) ||
+            "We couldn't read that file. A clear photo of the printed page works best.",
         });
       }
     } catch (e) {
@@ -353,7 +403,6 @@ export async function runSourceIntake(opts: RunIntakeOptions): Promise<void> {
         });
         continue;
       }
-      if (result.parsed !== undefined) onParsed(result.url, result.parsed);
       if (result.verified) {
         onCheck(item.key, {
           state: "saved",
@@ -525,15 +574,16 @@ export function SourceUpload({
   idPrefix,
   error,
 }: {
-  files: File[];
-  onAdd: (files: File[]) => void;
+  /** Files already picked, with what kind of page each one holds. */
+  files: UploadPick[];
+  onAdd: (files: File[], kind: "calendar" | "bell") => void;
   onRemove: (index: number) => void;
   disabled?: boolean;
   idPrefix: string;
   error?: string;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const inputId = `${idPrefix}-source-upload`;
+  const [kind, setKind] = useState<"calendar" | "bell">("calendar");
   return (
     <div>
       <p className="text-xs font-medium text-stardust">Or upload instead</p>
@@ -541,6 +591,34 @@ export function SourceUpload({
         Snap a photo of the printed bell schedule or calendar — a photo or PDF
         works.
       </p>
+      <div
+        role="radiogroup"
+        aria-label="What the upload shows"
+        className="mt-2 flex gap-1.5"
+      >
+        {(
+          [
+            { value: "calendar", label: "Calendar" },
+            { value: "bell", label: "Bell schedule" },
+          ] as const
+        ).map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={kind === opt.value}
+            onClick={() => setKind(opt.value)}
+            disabled={disabled}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+              kind === opt.value
+                ? "border-neon-green/50 bg-neon-green/10 text-neon-green"
+                : "border-line bg-panel-2/60 text-stardust hover:text-star"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
       <label
         htmlFor={inputId}
         className="mt-2 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm font-medium text-stardust transition-colors hover:text-star focus-within:border-neon-green/60"
@@ -561,7 +639,6 @@ export function SourceUpload({
         </svg>
         Upload a photo or PDF
         <input
-          ref={inputRef}
           id={inputId}
           type="file"
           accept="image/*,application/pdf"
@@ -571,7 +648,7 @@ export function SourceUpload({
           className="sr-only"
           onChange={(e) => {
             const picked = Array.from(e.target.files ?? []);
-            if (picked.length > 0) onAdd(picked);
+            if (picked.length > 0) onAdd(picked, kind);
             // Reset so the same file can be picked again after removal.
             e.target.value = "";
           }}
@@ -579,21 +656,22 @@ export function SourceUpload({
       </label>
       {files.length > 0 && (
         <ul className="mt-2 space-y-1.5" aria-label="Files to upload">
-          {files.map((f, i) => (
+          {files.map((pick, i) => (
             <li
-              key={`${f.name}-${f.size}-${i}`}
+              key={`${pick.file.name}-${pick.file.size}-${i}`}
               className="flex items-center justify-between gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm"
             >
               <span className="min-w-0 truncate text-stardust">
-                {f.name}
+                {pick.file.name}
                 <span className="ml-2 text-xs text-dim">
-                  {(f.size / 1024).toFixed(0)} KB
+                  {(pick.file.size / 1024).toFixed(0)} KB ·{" "}
+                  {pick.kind === "bell" ? "bell schedule" : "calendar"}
                 </span>
               </span>
               <button
                 type="button"
                 onClick={() => onRemove(i)}
-                aria-label={`Remove ${f.name}`}
+                aria-label={`Remove ${pick.file.name}`}
                 disabled={disabled}
                 className="shrink-0 rounded-lg px-2 py-1 text-xs text-dim transition-colors hover:text-red-400 disabled:opacity-50"
               >
