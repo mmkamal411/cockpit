@@ -1,19 +1,21 @@
 # Personalization Stack — Progress Tracker
 
-**STATUS: EVALUATING**
+**STATUS: PHASE_0_IN_PROGRESS**
 
 This is the living checklist for the personalization stack build. The build team updates the per-phase checkboxes; the hourly monitor parses the `STATUS:` line above.
 
 Status values: `EVALUATING` → `PHASE_0_IN_PROGRESS` → `PHASE_1_IN_PROGRESS` → `PHASE_2_IN_PROGRESS` → `PHASE_3_IN_PROGRESS` → `PHASE_4_IN_PROGRESS` → `PHASE_5_IN_PROGRESS` → `COMPLETE`.
 
+**Numbering note (2026-10-13):** migration `018_security_phase0.sql` takes 018 (it gates the build). The personalization data-layer draft in `personalization-eval/09-dbadmin-schema-rls.md` (§8, "018_personalization.sql") moves to **019**. Update the filename + header when that migration is written.
+
 ---
 
 ## Phase 0 — Security & integrity fixes (GATING)
-- [ ] A1 (CRITICAL): drop anon policies on `crew_grade_syncs`; revoke anon grant on `rpc_get_latest_crew_grade_sync`; add caller check for `authenticated`
-- [ ] A2 (HIGH): envelope-encrypt Google Calendar refresh tokens (KMS/data key)
-- [ ] A3 (HIGH): `redeem_share_invite` — use `auth.uid()`/JWT email, require email match, revoke anon grant
-- [ ] A4 (MEDIUM): `find_pilot_by_email` — inline into share-creation RPC with ownership check
-- [ ] A5 (MEDIUM): admin `view-as` — require both auth layers
+- [x] A1 (CRITICAL): drop anon policies on `crew_grade_syncs`; revoke anon grant on `rpc_get_latest_crew_grade_sync`; add caller check for `authenticated` — DONE 2026-10-13 (migration 018, commit 0c10bda). Workers move to per-crew-member secrets (`crew_sync_worker_secrets` + `rotate_crew_worker_secret()`); push RPC requires `p_data.worker_secret`; get-latest RPC checks steward/grantee/secret. Laptop + ParentVUE scripts updated to send the secret. **Awaiting Meheldi running 018 in SQL editor, then anon-denial re-verification.**
+- [x] A2 (HIGH): envelope-encrypt Google Calendar refresh tokens (KMS/data key) — DONE 2026-10-13 (commit 0c10bda). AES-256-GCM via `src/lib/token-crypto.ts`, key from `CALENDAR_TOKEN_KEY` env (fail closed). **Needs `CALENDAR_TOKEN_KEY` set in Cloudflare Pages env vars before calendar OAuth goes live.**
+- [x] A3 (HIGH): `redeem_share_invite` — use `auth.uid()`/JWT email, require email match, revoke anon grant — DONE 2026-10-13 (migration 018, commit 0c10bda). `/invite/[token]` page updated to the 1-param signature.
+- [x] A4 (MEDIUM): `find_pilot_by_email` — inline into share-creation RPC with ownership check — DONE 2026-10-13 (migration 018, commit 0c10bda) as list-scoped resolution: `find_pilot_by_email(p_email, p_list_id)` verifies the caller owns the list; uniform null otherwise. Shares route updated.
+- [ ] A5 (MEDIUM): admin `view-as` — require both auth layers (not in security-squad scope; left for the full Phase 0 wave)
 - [ ] W1 (HIGH): Crystal worker `/chat` + `/quiz` — add shared-secret auth; kill client-direct browser→worker path
 - [ ] C1 (HIGH): fix app↔worker context contract drift; privacy sign-off on field inventory before enabling
 - [ ] Fix `bills/logic.test.ts` + `health/glucose.test.ts` (extensionless imports)
