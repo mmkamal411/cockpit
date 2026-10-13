@@ -78,7 +78,7 @@ export const APPLETS: Record<string, AppletDef> = {
     name: "Shopping",
     readout: "LIST",
     glow: "#5eead4",
-    render: () => <ShoppingApplet />,
+    render: (params) => <ShoppingApplet params={params} />,
   },
   health: {
     name: "Health",
