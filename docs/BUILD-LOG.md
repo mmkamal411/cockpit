@@ -90,3 +90,17 @@ Process notes: (1) My uncommitted work was wiped TWICE mid-task — first by the
 **Tree health note for the coordinator:** `next build` compiles but type-check fails on `src/components/pilot/hero-vista.tsx` ('now' is not defined, 2 errors — another team's file). My calendar files are tsc-clean. The hero-vista errors block a clean build; staging deploy via deploy-staging.py may still succeed since it doesn't necessarily gate on tsc, but flagging.
 
 **Staging:** still on c8640af4 (~11:10 EDT) per the parent's status doc — my Calendar work is NOT on staging yet. It will need a fresh deploy-staging.py run AFTER this branch's work merges. No browser verification claimed; none possible on this agent.
+
+## 2026-10-13 ~11:45 EDT — To-dos Module Expert (5cbff5c1)
+
+**To-dos module finished (~100%). What shipped:**
+- `useTodos()`: new `syncError` (plain-English) + `retrySync()` — background sync failures no longer die silently; the retry queue keeps data safe (in `72d631d`).
+- `flush()` hardening: 404 on update/delete drops the op (row already gone server-side); 400 drops the malformed op instead of wedging the queue; other non-OK responses set a plain-English syncError (in `72d631d`).
+- Initial GET failure now reports "Couldn't reach your cloud list…" instead of silently falling back to local (in `72d631d`).
+- Today applet quick-capture migrated from device-local-only to `useTodos()` + `parseTodo` NL dates (already merged via Today's worker `a903118`, incl. my `formatDue` chips, loading skeletons, delete buttons); sync-error banner with "Try syncing again" restored (in `54dafe0`). NOTE: the banner and the hook API are one unit — do not remove one without the other (commit `b29f6a6` dropped the banner when the merge had dropped the hook half; both are back now).
+- Parser edge cases verified via tsx: "tomorrow"/"at 3pm" alone → raw text kept + date retained; "at 25pm" left unparsed; all 10 test inputs behave.
+- Also fixed (was blocking `next build` for everyone): TS7006 in `src/lib/weather.ts` `searchLocation` — typed the untyped geocoding chain (in `ba9add5`, pushed).
+
+**Verified:** `next build` exit=0 (compiled + 37/37 static pages) after the weather fix; `npx tsc --noEmit` clean for all todos files; eslint clean for `use-todos.ts` (one pre-existing set-state-in-effect error in today-applet from the Today worker's code, untouched); no console.logs, no dead code. **NOT browser-verified** — cannot use a live browser as a subagent; staging still on `c8640af4` (~11:10 EDT, confirmed via Cloudflare deployments API), which predates my changes. Needs: fresh direct-upload deploy, then end-to-end check in a signed-in browser session (add "dentist tomorrow at 3pm" → due-date chip appears; toggle; delete; kill network → sync-error banner + retry).
+
+**Process note (matches the calendar worker's):** my uncommitted todos work was swept into other agents' WIP commits twice (`a903118`, `72d631d`) and the banner half was dropped by `b29f6a6` as "dead". All restored and pushed. Coordinator: today's shared-tree churn is the main risk — consider a commit-ownership rule (only commit your own module's files).
