@@ -33,7 +33,7 @@
 | **Staging 500s** | 🔴 Deep-dive team (edge runtime + build + error audit) investigating. Blocks ALL browser verification. |
 | **Migrations 003–014** | Bundled → `~/workspace/your_files/cockpit-migrations-003-to-014.sql` (one copy-paste). 001+002 already applied. **Mehedi: run this.** |
 | **ParentVUE fallback** | ✅ Rebuilt 2026-10-13. Pull script tested 7/7, merge spec written (`~/workspace/cockpit-sync/parent/`). Staged locally — blocked on Supabase egress + Dawson's crew_member_id (needs Mehedi sign-in). 4x-daily cron drafted, awaiting approval. |
-| **Sync installer** | Docs revised: no certs for v1, parent's computer, hourly sync + boot sync. Phase 1 locked. (`~/workspace/cockpit-installer/`) |
+| **Sync installer** | Docs revised: no CA certs for v1 (Mac: free self-signed for Keychain stability — Mehedi approved), parent's computer, hourly sync + boot sync. Phase 1 locked. (`~/workspace/cockpit-installer/`) |
 | **Hourly updates** | Crons `phase1-progress-update` + `phase2-progress-update` firing hourly. |
 | **Laptop deployment** | Python expert deploying to MacBook/Windows; blocked on Dawson's crew UUID (needs staging). |
 
