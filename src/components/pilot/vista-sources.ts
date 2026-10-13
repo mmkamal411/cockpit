@@ -50,6 +50,7 @@ export const ROTATION_VIDEOS: string[] = [
   "/videos/vista-nebula-blue-2.mp4", // dense star clusters, blue veils
   "/videos/vista-ref-blue-1.mp4", // deep blue, teal wisps (Meheldi's reference)
   "/videos/vista-ref-blue-2.mp4", // denser starfield variation
+  "/videos/vista-ref-blue-3.mp4", // dramatic nebula formations
 ];
 
 /**
