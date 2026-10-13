@@ -31,7 +31,8 @@
 | Workstream | Status |
 |---|---|
 | **Staging 500s** | 🔴 Deep-dive team (edge runtime + build + error audit) investigating. Blocks ALL browser verification. |
-| **Migrations 003–014** | Bundled → `~/workspace/your_files/cockpit-migrations-003-to-014.sql` (one copy-paste). 001+002 already applied. **Mehedi: run this.** |
+| **Migrations 003–015** | ✅ **APPLIED 2026-10-13 ~01:30 EDT** — verified via REST: all tables exist (bills, chat_threads, calendar_events, nudge_preferences, path_to_90_checks, link_codes, health_streaks, etc.). 016 (shopping shares) pending build. |
+| **Supabase egress** | ✅ **CLEARED ~01:30 EDT** — VM→Supabase reachable again after block since 2026-10-12 22:40 EDT. ParentVUE pushes, watchdog, and all background Supabase jobs unblocked. |
 | **ParentVUE fallback** | ✅ Rebuilt 2026-10-13. Pull script tested 7/7, merge spec written (`~/workspace/cockpit-sync/parent/`). Staged locally — blocked on Supabase egress + Dawson's crew_member_id (needs Mehedi sign-in). 4x-daily cron drafted, awaiting approval. |
 | **Sync installer** | Docs revised: no CA certs for v1 (Mac: free self-signed for Keychain stability — Mehedi approved), parent's computer, hourly sync + boot sync. Phase 1 locked. (`~/workspace/cockpit-installer/`) |
 | **Hourly updates** | Crons `phase1-progress-update` + `phase2-progress-update` firing hourly. |
