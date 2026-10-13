@@ -6,7 +6,8 @@
 
 // TodoItem is owned by Worker A (src/lib/use-todos.ts) — the shared shape
 // used by both the to-do manager and this briefing surface.
-export type { TodoItem } from "@/lib/use-todos";
+import type { TodoItem } from "@/lib/use-todos";
+export type { TodoItem };
 
 export interface CalendarEvent {
   id: string;
