@@ -6,10 +6,10 @@
  *
  * District-agnostic: every message is plain English, never names a district.
  *
- * Parser wiring: the digital parsers live in ./school-source-parsers, owned
- * by the parsing squad. They are loaded with a dynamic import so this module
- * compiles and runs before that file lands; until it does, pages are
- * verified and snapshotted and honestly marked parse_status='pending'.
+ * Parser wiring: the digital parsers live in ./school-source-parsers
+ * (parsing squad, cherry-picked onto this branch) and are statically
+ * imported — a missing module fails the build loudly instead of silently
+ * degrading at runtime.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -54,40 +54,15 @@ export interface ParsedPage<T> {
   error?: string;
 }
 
-export interface SchoolSourceParsers {
-  parseCalendarPage(
-    html: string,
-    url: string,
-  ): ParsedPage<DigitalCalendarEvent[]> | Promise<ParsedPage<DigitalCalendarEvent[]>>;
-  parseBellSchedulePage(
-    html: string,
-    url: string,
-  ): ParsedPage<DigitalBellSchedule[]> | Promise<ParsedPage<DigitalBellSchedule[]>>;
-}
-
 /**
- * Load the parsing squad's module. Returns null when it isn't on the tree
- * yet — callers must mark the snapshot parse_status='pending' and say so in
- * plain English. Never throws.
+ * The parsing squad's module (cherry-picked onto this branch as 9b580e7).
+ * Static import: the parsers are a build-time dependency now, so a missing
+ * module fails the build loudly instead of silently degrading at runtime.
  */
-export async function loadParsers(): Promise<SchoolSourceParsers | null> {
-  try {
-    // Non-literal specifier on purpose: tsc must not fail before the parsing
-    // squad's file exists, and the bundler turns this into a lazy chunk that
-    // simply isn't there until they land it.
-    const specifier = "./school-source-parsers";
-    const mod = (await import(specifier)) as Partial<SchoolSourceParsers>;
-    if (
-      typeof mod.parseCalendarPage === "function" &&
-      typeof mod.parseBellSchedulePage === "function"
-    ) {
-      return mod as SchoolSourceParsers;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
+import {
+  parseCalendarPage as parseCalendarPageImpl,
+  parseBellSchedulePage as parseBellSchedulePageImpl,
+} from "./school-source-parsers";
 
 // ---------------------------------------------------------------------------
 // Pipeline
@@ -138,14 +113,8 @@ function cleanText(value: unknown, maxLen: number): string | null {
 }
 
 function parseStatusFor(
-  result: ParsedPage<unknown> | null,
+  result: ParsedPage<unknown>,
 ): { status: "pending" | "ok" | "partial" | "error"; note: string } {
-  if (!result) {
-    return {
-      status: "pending",
-      note: "The reading tools aren't installed yet — this page is saved and will be read automatically once they are.",
-    };
-  }
   if (!result.ok) {
     return {
       status: "error",
@@ -189,31 +158,62 @@ interface SnapshotWrite {
   parse_note: string | null;
 }
 
+// Template code leaks out of client-rendered pages when a parser matches
+// markup instead of real content (e.g. Angular expressions inside a calendar
+// app shell). A title carrying any of these is never a real event — drop it
+// rather than store fabricated rows. Patterns are code-only constructs that
+// don't occur in human-written school event titles.
+const TEMPLATE_CODE_RES = [
+  /\{\{|\}\}/, // mustache / Angular placeholders
+  /&&|\|\||===|!==/, // JS operators
+  /\bvm\.\w+/i, // Angular view-model references
+  /\$index|\$event/, // Angular scope variables
+  /["']\)>/, // HTML fragment tails like ")">
+  /\bng-(if|repeat|click|show|hide|class|model|init|bind)\b/i, // Angular directives
+];
+
+function looksLikeTemplateCode(title: string): boolean {
+  return TEMPLATE_CODE_RES.some((re) => re.test(title));
+}
+
 async function storeCalendarEvents(
   supabase: SupabaseClient,
   crewMemberId: string,
   sourceUrl: string,
   events: DigitalCalendarEvent[],
-): Promise<number> {
+): Promise<{ stored: number; droppedTemplateRows: number }> {
   const rows = [];
+  let droppedTemplateRows = 0;
   for (const event of events) {
     const title = cleanText(event?.title, 300);
     const date = typeof event?.date === "string" ? event.date.trim() : "";
     if (!title || !isRealDate(date)) continue;
+    if (looksLikeTemplateCode(title)) {
+      droppedTemplateRows++;
+      continue;
+    }
     const endDate =
       typeof event?.endDate === "string" && isRealDate(event.endDate.trim())
         ? event.endDate.trim()
         : null;
+    const location = cleanText(event?.location, 300);
+    const description = cleanText(event?.description, 2000);
     rows.push({
       crew_member_id: crewMemberId,
       title,
       event_date: date,
       end_date: endDate,
-      location: cleanText(event?.location, 300),
-      description: cleanText(event?.description, 2000),
+      location: location && !looksLikeTemplateCode(location) ? location : null,
+      description:
+        description && !looksLikeTemplateCode(description) ? description : null,
       source_url: sourceUrl,
     });
   }
+
+  // Nothing valid to store (all rows filtered as template code, or the page
+  // simply listed no events): keep the member's existing events rather than
+  // wiping them on a bad read.
+  if (rows.length === 0) return { stored: 0, droppedTemplateRows };
 
   // Replace the member's events with this fresh parse (only called after a
   // successful parse, so a failed refresh never wipes good data).
@@ -223,7 +223,6 @@ async function storeCalendarEvents(
     .eq("crew_member_id", crewMemberId);
   if (deleteError) throw deleteError;
 
-  if (rows.length === 0) return 0;
   // Insert in small batches; a single bad row shouldn't sink the batch.
   const BATCH = 100;
   let stored = 0;
@@ -234,14 +233,13 @@ async function storeCalendarEvents(
     if (insertError) throw insertError;
     stored += Math.min(BATCH, rows.length - i);
   }
-  return stored;
+  return { stored, droppedTemplateRows };
 }
 
 async function processGroup(
   supabase: SupabaseClient,
   crewMemberId: string,
   group: { kind: SourceKind; url: string; jobs: SourceJob[] },
-  parsers: SchoolSourceParsers | null,
 ): Promise<SourceOutcome[]> {
   const now = new Date().toISOString();
   const firstJob = group.jobs[0];
@@ -286,31 +284,49 @@ async function processGroup(
     let scheduleCount = 0;
     let periodCount = 0;
 
-    if (!parsers) {
-      const pending = parseStatusFor(null);
-      write.parse_status = pending.status;
-      write.parse_note = pending.note;
-    } else {
+    {
       try {
         if (group.kind === "calendar") {
-          const result = await parsers.parseCalendarPage(html, group.url);
+          // Calendar pages may be JS app shells — prefer an advertised ICS
+          // feed, which is parseable server-side.
+          const { result, viaFeed } = await parseCalendarSource(html, group.url);
           const mapped = parseStatusFor(result);
           write.parse_status = mapped.status;
-          write.parse_note = mapped.note;
+          write.parse_note =
+            viaFeed && (mapped.status === "ok" || mapped.status === "partial")
+              ? `Read from the school's calendar feed. ${mapped.note}`
+              : mapped.note;
           if (result.ok && Array.isArray(result.data)) {
             parsedJson = result.data;
             parsedAt = now;
             if (mapped.status === "ok" || mapped.status === "partial") {
-              eventCount = await storeCalendarEvents(
+              const { stored, droppedTemplateRows } = await storeCalendarEvents(
                 supabase,
                 crewMemberId,
                 group.url,
                 result.data,
               );
+              eventCount = stored;
+              if (droppedTemplateRows > 0 && eventCount > 0) {
+                write.parse_note =
+                  `${write.parse_note} Skipped ${droppedTemplateRows} ` +
+                  `${droppedTemplateRows === 1 ? "row" : "rows"} that looked like page template code, not real events.`;
+              }
             }
           }
+          // Honest JS-shell handling: a client-rendered calendar carries no
+          // real events in the server response (template placeholders like
+          // {{...}} are not events). Never fabricate — say so in plain
+          // English instead.
+          if (eventCount === 0 && !viaFeed && hasClientRenderMarkers(html)) {
+            write.parse_status = "error";
+            write.parse_note =
+              "This calendar loads its events with JavaScript, so we couldn't read them yet. The saved copy is here if you'd like to look.";
+            parsedJson = null;
+            parsedAt = null;
+          }
         } else {
-          const result = await parsers.parseBellSchedulePage(html, group.url);
+          const result = await parseBellSchedulePageImpl(html, group.url);
           const mapped = parseStatusFor(result);
           write.parse_status = mapped.status;
           write.parse_note = mapped.note;
@@ -390,7 +406,6 @@ export async function processSources(
   crewMemberId: string,
   jobs: SourceJob[],
 ): Promise<SourceOutcome[]> {
-  const parsers = await loadParsers();
   const groups = new Map<string, { kind: SourceKind; url: string; jobs: SourceJob[] }>();
   for (const job of jobs) {
     const key = `${job.kind}::${job.url}`;
@@ -400,7 +415,7 @@ export async function processSources(
   }
   const outcomes: SourceOutcome[] = [];
   for (const group of groups.values()) {
-    outcomes.push(...(await processGroup(supabase, crewMemberId, group, parsers)));
+    outcomes.push(...(await processGroup(supabase, crewMemberId, group)));
   }
   return outcomes;
 }
@@ -484,44 +499,43 @@ export async function processUpload(input: UploadInput): Promise<UploadOutcome> 
       ? "Image saved — text reading isn't available yet, so this one needs a human look."
       : "This PDF looks like scanned images — there's no text to read, so it needs a human look.";
   } else {
-    const parsers = await loadParsers();
-    if (!parsers) {
-      const pending = parseStatusFor(null);
-      parseStatus = pending.status;
-      parseNote = pending.note;
-    } else {
-      try {
-        if (pageKind === "calendar") {
-          const result = await parsers.parseCalendarPage(contentHtml, url);
-          const mapped = parseStatusFor(result);
-          parseStatus = mapped.status;
-          parseNote = `Read from the PDF's text layer. ${mapped.note}`;
-          if (result.ok && Array.isArray(result.data)) {
-            parsedJson = result.data;
-            parsedAt = now;
-            if (parseStatus === "ok" || parseStatus === "partial") {
-              eventCount = await storeCalendarEvents(supabase, crewMemberId, url, result.data);
-            }
-          }
-        } else {
-          const result = await parsers.parseBellSchedulePage(contentHtml, url);
-          const mapped = parseStatusFor(result);
-          parseStatus = mapped.status;
-          parseNote = `Read from the PDF's text layer. ${mapped.note}`;
-          if (result.ok && Array.isArray(result.data)) {
-            parsedJson = result.data;
-            parsedAt = now;
-            scheduleCount = result.data.length;
-            periodCount = result.data.reduce(
-              (sum, s) => sum + (Array.isArray(s?.periods) ? s.periods.length : 0),
-              0,
+    try {
+      if (pageKind === "calendar") {
+        const result = await parseCalendarPageImpl(contentHtml, url);
+        const mapped = parseStatusFor(result);
+        parseStatus = mapped.status;
+        parseNote = `Read from the PDF's text layer. ${mapped.note}`;
+        if (result.ok && Array.isArray(result.data)) {
+          parsedJson = result.data;
+          parsedAt = now;
+          if (parseStatus === "ok" || parseStatus === "partial") {
+            const { stored } = await storeCalendarEvents(
+              supabase,
+              crewMemberId,
+              url,
+              result.data,
             );
+            eventCount = stored;
           }
         }
-      } catch {
-        parseStatus = "error";
-        parseNote = "The reader hit a problem with this file. The saved copy is still here.";
+      } else {
+        const result = await parseBellSchedulePageImpl(contentHtml, url);
+        const mapped = parseStatusFor(result);
+        parseStatus = mapped.status;
+        parseNote = `Read from the PDF's text layer. ${mapped.note}`;
+        if (result.ok && Array.isArray(result.data)) {
+          parsedJson = result.data;
+          parsedAt = now;
+          scheduleCount = result.data.length;
+          periodCount = result.data.reduce(
+            (sum, s) => sum + (Array.isArray(s?.periods) ? s.periods.length : 0),
+            0,
+          );
+        }
       }
+    } catch {
+      parseStatus = "error";
+      parseNote = "The reader hit a problem with this file. The saved copy is still here.";
     }
   }
 
@@ -755,4 +769,227 @@ export function escapeHtmlText(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+// ---------------------------------------------------------------------------
+// Calendar feeds: many district calendar pages are client-rendered JS app
+// shells — the server response carries zero events. When the page advertises
+// an iCal/ICS subscription feed we fetch and parse that instead (ICS is
+// plain text and fully parseable server-side). When there is no feed and the
+// page is a JS shell, we say so honestly and never fabricate events.
+// ---------------------------------------------------------------------------
+
+const ICS_TIMEOUT_MS = 20_000;
+const MAX_ICS_BYTES = 2 * 1024 * 1024;
+const MAX_FEED_EVENTS = 500;
+
+function resolveHttpUrl(value: string, baseUrl: string): string | null {
+  try {
+    const resolved = new URL(value.trim(), baseUrl);
+    if (resolved.protocol === "http:" || resolved.protocol === "https:") {
+      return resolved.href;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find an advertised iCal/ICS subscription feed in the page HTML:
+ * <link type="text/calendar" href="..."> or <a href="....ics...">.
+ */
+export function findIcsFeedUrl(html: string, baseUrl: string): string | null {
+  const linkRe = /<link\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(html)) !== null) {
+    const tag = m[0];
+    if (/type\s*=\s*["']?text\/calendar/i.test(tag)) {
+      const href = /href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+      const url = href && resolveHttpUrl(href[1] ?? href[2] ?? href[3] ?? "", baseUrl);
+      if (url) return url;
+    }
+  }
+  const anchorRe = /<a\b[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+  while ((m = anchorRe.exec(html)) !== null) {
+    const href = (m[1] ?? m[2] ?? m[3] ?? "").trim();
+    if (/\.ics(\?|#|$)/i.test(href) || /[?&](ical|ics)=/i.test(href)) {
+      const url = resolveHttpUrl(href, baseUrl);
+      if (url) return url;
+    }
+  }
+  return null;
+}
+
+/**
+ * Heuristic: does this page carry client-rendering markers? True when the
+ * markup contains template placeholders or framework root elements —
+ * {{...}} mustache/Angular slots, ng-app, app-root, React roots, Next data.
+ * Used only as a tiebreaker when a calendar page yields zero events: the
+ * callers never treat it as proof on its own.
+ */
+export function hasClientRenderMarkers(html: string): boolean {
+  return (
+    /\{\{[^}\n]{1,80}\}\}/.test(html) ||
+    /<app-root\b/i.test(html) ||
+    /\bng-app\b/i.test(html) ||
+    /data-reactroot/i.test(html) ||
+    /__NEXT_DATA__/.test(html)
+  );
+}
+
+interface IcsFetchResult {
+  ok: boolean;
+  text?: string;
+}
+
+async function fetchIcsFeed(url: string): Promise<IcsFetchResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ICS_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        Accept: "text/calendar,text/plain,*/*",
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false };
+    const text = await res.text();
+    if (!text || text.length > MAX_ICS_BYTES) return { ok: false };
+    // Honest verify: it must actually look like a calendar feed.
+    if (!/BEGIN:VCALENDAR/i.test(text)) return { ok: false };
+    return { ok: true, text };
+  } catch {
+    return { ok: false };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function unescapeIcsText(value: string): string {
+  return value
+    .replace(/\\n/gi, "\n")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\")
+    .trim();
+}
+
+function icsDateToYmd(value: string): string | null {
+  // DATE:20261015 | DATE-TIME:20261015T093000 | ...T093000Z — date part first.
+  const m = /^(\d{4})(\d{2})(\d{2})/.exec(value.trim());
+  if (!m) return null;
+  const ymd = `${m[1]}-${m[2]}-${m[3]}`;
+  return isRealDate(ymd) ? ymd : null;
+}
+
+/**
+ * Minimal RFC 5545 reader: VEVENT SUMMARY / DTSTART / DTEND / LOCATION /
+ * DESCRIPTION. Skips events without a valid start date. Never invents rows.
+ */
+export function parseIcsEvents(icsText: string): DigitalCalendarEvent[] {
+  // Unfold continuation lines (a space/tab first char continues the line).
+  const rawLines = icsText.split(/\r?\n/);
+  const lines: string[] = [];
+  for (const raw of rawLines) {
+    if (/^[ \t]/.test(raw) && lines.length > 0) {
+      lines[lines.length - 1] += raw.slice(1);
+    } else {
+      lines.push(raw);
+    }
+  }
+
+  const events: DigitalCalendarEvent[] = [];
+  let current: Record<string, string> | null = null;
+  for (const line of lines) {
+    const upper = line.toUpperCase();
+    if (upper === "BEGIN:VEVENT") {
+      current = {};
+      continue;
+    }
+    if (upper === "END:VEVENT") {
+      if (current) {
+        const date = icsDateToYmd((current["DTSTART"] ?? "").split(";").pop() ?? "");
+        const title = unescapeIcsText(current["SUMMARY"] ?? "").replace(/\s+/g, " ").trim();
+        if (date && title && events.length < MAX_FEED_EVENTS) {
+          const endRaw = (current["DTEND"] ?? "").split(";").pop() ?? "";
+          const endDate = icsDateToYmd(endRaw);
+          events.push({
+            title: title.slice(0, 300),
+            date,
+            ...(endDate && endDate !== date ? { endDate } : {}),
+            ...(current["LOCATION"]
+              ? { location: unescapeIcsText(current["LOCATION"]).replace(/\s+/g, " ").trim().slice(0, 300) || undefined }
+              : {}),
+            ...(current["DESCRIPTION"]
+              ? { description: unescapeIcsText(current["DESCRIPTION"]).replace(/\s+/g, " ").trim().slice(0, 2000) || undefined }
+              : {}),
+          });
+        }
+      }
+      current = null;
+      continue;
+    }
+    if (current) {
+      const colon = line.indexOf(":");
+      if (colon > 0) {
+        const name = line.slice(0, colon).split(";")[0].toUpperCase();
+        if (["SUMMARY", "DTSTART", "DTEND", "LOCATION", "DESCRIPTION"].includes(name)) {
+          current[name] = (current[name] ? current[name] + " " : "") + line.slice(colon + 1);
+        }
+      }
+    }
+  }
+  return events;
+}
+
+export interface CalendarParseOutcome {
+  result: ParsedPage<DigitalCalendarEvent[]>;
+  viaFeed: boolean;
+  feedUrl: string | null;
+}
+
+/**
+ * Parse a calendar source: prefer an advertised ICS feed (parseable
+ * server-side); otherwise run the HTML parser. Never fabricates events.
+ */
+export async function parseCalendarSource(
+  html: string,
+  url: string,
+): Promise<CalendarParseOutcome> {
+  const feedUrl = findIcsFeedUrl(html, url);
+  if (feedUrl) {
+    const feed = await fetchIcsFeed(feedUrl);
+    if (feed.ok && feed.text) {
+      const events = parseIcsEvents(feed.text);
+      if (events.length > 0) {
+        return {
+          result: { ok: true, data: events, confidence: "high", warnings: [] },
+          viaFeed: true,
+          feedUrl,
+        };
+      }
+      return {
+        result: {
+          ok: false,
+          data: [],
+          confidence: "low",
+          warnings: [],
+          error: "The school's calendar feed didn't list any events.",
+        },
+        viaFeed: true,
+        feedUrl,
+      };
+    }
+    // The advertised feed didn't answer — fall through to the page itself.
+  }
+  return {
+    result: await parseCalendarPageImpl(html, url),
+    viaFeed: false,
+    feedUrl: null,
+  };
 }
