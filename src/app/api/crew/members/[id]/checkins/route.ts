@@ -11,17 +11,35 @@ function isMissingTable(error: { code?: string; message?: string } | null): bool
   );
 }
 
-async function stewardOnly(
+type AccessRole = "steward" | "child" | null;
+
+/**
+ * Who may touch a crew member's check-ins: the steward pilot, or the linked
+ * child pilot themselves (Phase C — the child owns their check-in).
+ * RLS (checkins_steward_shared_all / checkins_child_self) enforces the
+ * channel rules underneath; this just decides who gets past the door.
+ */
+async function accessFor(
   crewMemberId: string,
   pilotId: string,
-): Promise<{ ok: boolean; supabase: Awaited<ReturnType<typeof createClient>> }> {
+): Promise<{ role: AccessRole; supabase: Awaited<ReturnType<typeof createClient>> }> {
   const supabase = await createClient();
   const { data: member } = await supabase
     .from("crew_members")
     .select("id, pilot_id")
     .eq("id", crewMemberId)
     .single();
-  return { ok: member?.pilot_id === pilotId, supabase };
+  if (!member) return { role: null, supabase };
+  if (member.pilot_id === pilotId) return { role: "steward", supabase };
+  const { data: pilot } = await supabase
+    .from("pilots")
+    .select("child_crew_member_id")
+    .eq("id", pilotId)
+    .single();
+  if ((pilot?.child_crew_member_id as string | null) === crewMemberId) {
+    return { role: "child", supabase };
+  }
+  return { role: null, supabase };
 }
 
 /**
@@ -40,8 +58,8 @@ export async function GET(
   const className = request.nextUrl.searchParams.get("class") ?? "";
   const days = Math.min(90, Math.max(1, Number(request.nextUrl.searchParams.get("days")) || 14));
 
-  const { ok, supabase } = await stewardOnly(crewMemberId, pilotId);
-  if (!ok) {
+  const { role, supabase } = await accessFor(crewMemberId, pilotId);
+  if (!role) {
     return NextResponse.json(
       { error: "Couldn't find that crew member." },
       { status: 404 },
@@ -113,8 +131,8 @@ export async function POST(
     );
   }
 
-  const { ok, supabase } = await stewardOnly(crewMemberId, pilotId);
-  if (!ok) {
+  const { role, supabase } = await accessFor(crewMemberId, pilotId);
+  if (!role) {
     return NextResponse.json(
       { error: "Couldn't find that crew member." },
       { status: 404 },
@@ -145,7 +163,7 @@ export async function POST(
       due_next: dueNext,
       note: note || null,
       channel,
-      created_by: "pilot",
+      created_by: role === "child" ? "crew" : "pilot",
     })
     .select(
       "id, class_name, checkin_date, worked_on, confusing, due_next, note, channel, created_by, created_at",

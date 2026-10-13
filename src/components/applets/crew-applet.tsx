@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ClassDetail } from "./class-detail";
+import { InviteToCockpit } from "@/components/invite-to-cockpit";
 
 const SYNC_OPTIONS = ["Grades", "Attendance", "Assignments", "School messages"];
 
@@ -713,6 +714,13 @@ export function CrewApplet() {
             </div>
           )}
         </div>
+
+        {/* Invite to Cockpit — link-code claim flow (13+) or stewardship note (under 13) */}
+        <InviteToCockpit
+          memberId={member.id}
+          memberName={member.name}
+          birthdate={member.birthdate}
+        />
 
         {/* Classes & grades */}
         <div className="space-y-2">

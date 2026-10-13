@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPilotId, unauthorized } from "@/lib/crew/auth";
+import { ageTier } from "@/lib/child/age-tier";
 
 const CODE_TTL_MINUTES = 15;
 
@@ -28,13 +29,25 @@ export async function POST(
 
   const { data: member } = await supabase
     .from("crew_members")
-    .select("id, pilot_id")
+    .select("id, pilot_id, name, birthdate")
     .eq("id", crewMemberId)
     .single();
   if (member?.pilot_id !== pilotId) {
     return NextResponse.json(
       { error: "Couldn't find that crew member." },
       { status: 404 },
+    );
+  }
+
+  // Under-13 gate (COPPA): no accounts, stewardship only. The invite UI
+  // already hides the button; this is the server-side enforcement.
+  if (ageTier((member.birthdate as string | null) ?? null) === "under13") {
+    const firstName = ((member.name as string) ?? "your child").split(" ")[0];
+    return NextResponse.json(
+      {
+        error: `Cockpit accounts start at 13 — for now, you manage everything about ${firstName}'s school right here.`,
+      },
+      { status: 403 },
     );
   }
 
@@ -50,11 +63,16 @@ export async function POST(
     Date.now() + CODE_TTL_MINUTES * 60 * 1000,
   ).toISOString();
 
-  const { error } = await supabase.from("link_codes").insert({
-    crew_member_id: crewMemberId,
-    code,
-    expires_at: expiresAt,
-  });
+  const { data: inserted, error } = await supabase
+    .from("link_codes")
+    .insert({
+      crew_member_id: crewMemberId,
+      code,
+      expires_at: expiresAt,
+      created_by: pilotId,
+    })
+    .select("id")
+    .single();
 
   if (error) {
     console.error(
@@ -68,6 +86,18 @@ export async function POST(
       { error: "Couldn't create a code right now. Try again." },
       { status: 500 },
     );
+  }
+
+  // Audit: the consent timeline starts when the code is minted.
+  try {
+    await supabase.from("consent_events").insert({
+      crew_member_id: crewMemberId,
+      actor_pilot_id: pilotId,
+      event: "code_generated",
+      detail: { code_id: (inserted?.id as string) ?? null },
+    });
+  } catch {
+    /* audit is best-effort; the code itself was minted */
   }
 
   return NextResponse.json(

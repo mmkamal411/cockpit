@@ -150,6 +150,7 @@ export async function GET(
     due_date: parseDue(a.due),
     score: a.score ?? null,
     percent: a.percent ?? null,
+    max_points: a.max_points ?? null,
     category: a.category ?? null,
     notes: a.notes ?? "",
   }));
@@ -177,6 +178,16 @@ export async function GET(
     })
     .slice(0, 5);
 
+  // All graded assignments, oldest first — powers the deterministic
+  // Path-to-90 math (category averages, zero detection, opportunity bars).
+  const graded = withDue
+    .filter((a) => a.score !== null)
+    .sort((a, b) => {
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return a.due_date.getTime() - b.due_date.getTime();
+    });
+
   const name = entry.class ?? entry.name ?? className;
 
   return NextResponse.json({
@@ -194,6 +205,7 @@ export async function GET(
     missing,
     upcoming,
     recent,
+    graded,
     synced_at: latest.synced_at,
   });
 }

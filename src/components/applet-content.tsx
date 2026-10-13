@@ -13,34 +13,16 @@ import { CalendarApplet } from "./applets/calendar-applet";
 import { ShoppingApplet } from "./applets/shopping-applet";
 import { HealthApplet } from "./applets/health-applet";
 import { NudgeCenterApplet } from "./applets/nudge-center-applet";
+import { SettingsApplet } from "./applets/settings-applet";
 import { SchoolStation } from "./applets/school-station";
 import { ClassDetail } from "./applets/class-detail";
 import { StationCategoryOverlay } from "./home-stations";
 import { openApplet } from "@/lib/applet-bus";
 
 /**
- * Settings placeholder — the full User Settings module (Profile,
- * Integrations, Notifications, Privacy & Data, Appearance, Account) is
- * being built separately. This keeps openApplet("settings") safe to call
- * from the station deck's pinned footer in the meantime.
+ * Settings — the 7 user-facing settings panels (Phase D of the
+ * child-education build). openApplet("settings") renders SettingsApplet.
  */
-function SettingsPlaceholderApplet() {
-  return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-teal">
-          Ship systems
-        </p>
-        <h2 className="mt-1 text-xl font-semibold text-star">Settings</h2>
-        <p className="mt-1 text-sm leading-relaxed text-stardust">
-          Your settings station is taking shape — profile, integrations,
-          notifications, privacy, appearance, and account controls are on
-          the way.
-        </p>
-      </div>
-    </div>
-  );
-}
 
 export interface AppletDef {
   /** Short plain-English name shown in the window chrome. */
@@ -124,7 +106,7 @@ export const APPLETS: Record<string, AppletDef> = {
     name: "Settings",
     readout: "SYS",
     glow: "#67e8f9",
-    render: () => <SettingsPlaceholderApplet />,
+    render: () => <SettingsApplet />,
   },
   school: {
     name: "School",

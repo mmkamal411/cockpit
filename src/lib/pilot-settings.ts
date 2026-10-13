@@ -160,7 +160,7 @@ export const SETTING_BLURBS: Record<string, string> = {
   sensitivity: "How eager alerts are. Low means only the sure things; high means Crystal mentions the maybes too.",
   proactive_help: "Off: Crystal only answers when you ask. Gentle: occasional helpful nudges. Eager: Crystal brings things up before you ask.",
   learn_from_corrections: "When you correct Crystal, it's allowed to quietly get better at that thing next time.",
-  home_stations: "Drag your home stations into the order you want them. What you open most should sit on top.",
+  home_stations: "Tap the up/down arrows to put your home screen in the order you want. What you open most should sit on top — the preview above updates live.",
   hero_widgets: "The small cards pinned to your opening view — pick the ones you glance at every day.",
   neon_accent: "The neon glow color used across your cockpit. Purely cosmetic, entirely yours.",
   reduce_motion: "Calms the animations down — videos and drifts become gentle fades. Easier on the eyes and the battery.",

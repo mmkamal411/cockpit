@@ -107,7 +107,7 @@ export function ConsentScreen({
           <p className="mt-4 rounded-xl border border-neon-cyan/30 bg-neon-cyan/5 px-4 py-3 text-xs leading-relaxed text-stardust">
             <span className="font-medium text-neon-cyan">You&apos;re an adult:</span>{" "}
             you&apos;re in control. What {stewardName} could see before stays
-            visible — change it anytime in <span className="text-star">More → My sharing</span>.
+            visible — change it anytime in <span className="text-star">Family & School → My sharing</span>.
           </p>
         )}
 
@@ -133,7 +133,7 @@ export function ConsentScreen({
         </div>
         <p className="mt-4 text-center text-xs leading-relaxed text-dim">
           You can change any of this later in{" "}
-          <span className="text-stardust">More → My sharing</span>. Nothing is
+          <span className="text-stardust">Family & School → My sharing</span>. Nothing is
           permanent.
         </p>
       </div>

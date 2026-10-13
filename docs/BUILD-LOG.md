@@ -120,3 +120,6 @@ Branch: feature/money-bills-finish (worktree ~/workspace/cockpit-money-bills, ba
 - 4dba2eb: API routes GET/POST /api/subscriptions, PUT/DELETE /api/subscriptions/[id] (pilotRoute, plain-English errors)
 - ec2e372: subscriptions-applet.tsx (hero monthly/yearly totals, active/paused/cancelled sections, add form) + applet-content.tsx + stations.ts registration
 All pushed to origin. Needs: migration 028 run in Supabase dashboard, then staging deploy + browser verification.
+
+## 2026-10-13 ~12:38 EDT — DEPLOY COMPLETE (Google Calendar env vars pickup)
+Deploy 2e0ac2f2 live on cockpit-10c.pages.dev. Smoke test passed (all 5 checks). Google Calendar OAuth env vars now active. Built from feature/phase1-module-finish @ 60af80a via separate worktree (main tree untouched).

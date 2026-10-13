@@ -74,21 +74,21 @@ export async function PUT(req: Request) {
         { status: 400 },
       );
     }
-    const ns = body.namespace;
+    const ns = body.namespace as SettingsNamespace;
     const supabase = await createClient();
 
-    const { data: existing } = await supabase
+    const { data: existing } = (await supabase
       .from("pilot_settings")
       .select("settings")
       .eq("pilot_id", pilotId)
       .eq("namespace", ns)
-      .maybeSingle();
+      .maybeSingle()) as { data: { settings: Record<string, unknown> } | null };
 
     const sanitized = sanitizeNamespace(ns, body.settings ?? {});
     const merged = mergeSettings(
       mergeSettings(
         DEFAULT_SETTINGS[ns] as Record<string, unknown>,
-        (existing?.settings ?? {}) as Record<string, unknown>,
+        existing?.settings ?? {},
       ),
       sanitized as Record<string, unknown>,
     );
