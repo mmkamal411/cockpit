@@ -6,6 +6,8 @@ import { getPilotId, unauthorized } from "@/lib/crew/auth";
  * GET /api/crew/members/[id]/path-to-90?class=<name>
  * Checkbox state for a class's Path-to-90 actions. Server-side so it
  * follows the pilot (and the child) across devices.
+ * Grant-scoped: the steward pilot, or a live grades-scope grant
+ * (matches the path_checks_grantee_select RLS policy).
  */
 export async function GET(
   request: NextRequest,
@@ -23,7 +25,20 @@ export async function GET(
     .select("id, pilot_id")
     .eq("id", crewMemberId)
     .single();
-  if (member?.pilot_id !== pilotId) {
+  let hasAccess = member?.pilot_id === pilotId;
+  if (!hasAccess) {
+    const { data: grant } = await supabase
+      .from("crew_access_grants")
+      .select("id")
+      .eq("crew_member_id", crewMemberId)
+      .eq("grantee_pilot_id", pilotId)
+      .is("revoked_at", null)
+      .filter("scope->>grades", "eq", "true")
+      .limit(1)
+      .single();
+    hasAccess = !!grant;
+  }
+  if (!hasAccess) {
     return NextResponse.json(
       { error: "Couldn't find that crew member." },
       { status: 404 },
