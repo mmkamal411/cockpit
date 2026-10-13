@@ -13,6 +13,8 @@ const ERROR_COPY: Record<string, string> = {
   email_invalid: "That email address doesn't look right. Check it and try again.",
   email_failed: "We couldn't send the sign-in link. Check your connection and try again.",
   oauth_failed: "Google sign-in didn't complete. Please try again.",
+  provision:
+    "We couldn't finish setting up your account. Sign in once more — that usually completes the setup.",
 };
 
 function LoginForm() {
