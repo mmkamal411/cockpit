@@ -47,6 +47,66 @@ interface SchoolMessage {
   date: string | null;
 }
 
+interface BellScheduleEntry {
+  label: string;
+  url: string;
+}
+
+interface SchoolSourceSnapshot {
+  url: string;
+  fetched_at: string | null;
+  status: string | null;
+  error_note: string | null;
+}
+
+interface BellSourceSnapshot extends SchoolSourceSnapshot {
+  label: string;
+}
+
+interface SchoolSources {
+  district: string | null;
+  calendar_source_url: string | null;
+  bell_schedules: BellScheduleEntry[];
+  last_checked_at: string | null;
+  check_status: string | null;
+  check_note: string | null;
+}
+
+/** Scoped dark-theme styles for sanitized district calendar / bell-schedule HTML. */
+const SCHOOL_SOURCE_STYLES = `
+.school-source-content { color: #eef6fa; font-size: 0.875rem; line-height: 1.55; overflow-wrap: anywhere; }
+.school-source-content h1, .school-source-content h2, .school-source-content h3, .school-source-content h4 { color: #eef6fa; font-weight: 600; margin: 0.75rem 0 0.25rem; }
+.school-source-content p, .school-source-content ul, .school-source-content ol { margin: 0.5rem 0; }
+.school-source-content ul, .school-source-content ol { padding-left: 1.25rem; }
+.school-source-content table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+.school-source-content th, .school-source-content td { padding: 0.45rem 0.65rem; border: 1px solid rgb(255 255 255 / 0.1); color: #eef6fa; text-align: left; vertical-align: top; }
+.school-source-content th { font-weight: 600; background: rgb(255 255 255 / 0.05); }
+.school-source-content a { color: #86efac; text-decoration: underline; }
+.school-source-content img { max-width: 100%; height: auto; }
+`;
+
+/** "3 hr ago" style relative time for source check stamps. */
+function timeAgo(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return null;
+  if (ms < 60000) return "just now";
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  return `${Math.round(hrs / 24)} days ago`;
+}
+
+/** Hostname for "Source: example.com" attribution lines. */
+function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 /** Pick the most meaningful GPA the sync carried, with its label. */
 function pickGpa(gpa: GpaInfo | null): { value: number; label: string } | null {
   if (!gpa) return null;
@@ -116,6 +176,11 @@ export function CrewApplet() {
   const [password, setPassword] = useState("");
   const [sync, setSync] = useState<string[]>(["Grades", "Assignments"]);
   const [added, setAdded] = useState<CrewMemberRow | null>(null);
+  // Optional school calendar + bell schedule captured in step 2.
+  const [newCalendarUrl, setNewCalendarUrl] = useState("");
+  const [newBellLabel, setNewBellLabel] = useState("Daily");
+  const [newBellUrl, setNewBellUrl] = useState("");
+  const [sourcesNote, setSourcesNote] = useState("");
   const [roster, setRoster] = useState<CrewMemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -163,6 +228,33 @@ export function CrewApplet() {
   const [removeError, setRemoveError] = useState("");
   // Class detail drill-down: when set, shows one class's full page.
   const [selectedClassName, setSelectedClassName] = useState<string | null>(null);
+  // School calendar + bell schedules (member detail view).
+  const [srcLoading, setSrcLoading] = useState(false);
+  const [srcSources, setSrcSources] = useState<SchoolSources | null>(null);
+  const [srcSnapshots, setSrcSnapshots] = useState<{
+    calendar: SchoolSourceSnapshot | null;
+    bells: BellSourceSnapshot[];
+  }>({ calendar: null, bells: [] });
+  const [srcEditing, setSrcEditing] = useState(false);
+  const [srcDistrict, setSrcDistrict] = useState("");
+  const [srcCalendarUrl, setSrcCalendarUrl] = useState("");
+  const [srcBells, setSrcBells] = useState<BellScheduleEntry[]>([]);
+  const [srcSaving, setSrcSaving] = useState(false);
+  const [srcRefreshing, setSrcRefreshing] = useState(false);
+  const [srcMessage, setSrcMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [calHtml, setCalHtml] = useState<string | null>(null);
+  const [calUrl, setCalUrl] = useState("");
+  const [calFetchedAt, setCalFetchedAt] = useState<string | null>(null);
+  const [calLoading, setCalLoading] = useState(false);
+  const [calError, setCalError] = useState("");
+  const [bellsOpen, setBellsOpen] = useState(false);
+  const [bellTab, setBellTab] = useState(0);
+  const [bellHtml, setBellHtml] = useState<Record<number, string>>({});
+  const [bellMeta, setBellMeta] = useState<
+    Record<number, { url: string; fetchedAt: string | null }>
+  >({});
+  const [bellLoading, setBellLoading] = useState(false);
+  const [bellError, setBellError] = useState("");
 
   // Load the pilot's crew roster on mount.
   useEffect(() => {
@@ -190,6 +282,14 @@ export function CrewApplet() {
       cancelled = true;
     };
   }, []);
+
+  // Load school calendar + bell schedule sources whenever a member's detail opens.
+  useEffect(() => {
+    if (!selectedMemberId) return;
+    resetSchoolSources();
+    loadSchoolSources(selectedMemberId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMemberId]);
 
   function toggleSync(option: string) {
     setSync((prev) =>
@@ -231,6 +331,32 @@ export function CrewApplet() {
       const member: CrewMemberRow = json.member;
       setRoster((prev) => [...prev, member]);
       setAdded(member);
+      setSourcesNote("");
+      // Optional calendar/bell links captured in step 2 — saved against the
+      // new member. A failure here never blocks the add; the parent can add
+      // the links later from the member's profile.
+      const calLink = newCalendarUrl.trim();
+      const bellLink = newBellUrl.trim();
+      if (calLink || bellLink) {
+        const bellSchedules = bellLink
+          ? [{ label: newBellLabel.trim() || "Daily", url: bellLink }]
+          : [];
+        try {
+          await fetch(`/api/crew/members/${member.id}/school-sources`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              district: district.trim() || null,
+              calendar_source_url: calLink || null,
+              bell_schedules: bellSchedules,
+            }),
+          });
+        } catch {
+          setSourcesNote(
+            "Their profile is saved, but the calendar links didn't save. You can add them from their profile.",
+          );
+        }
+      }
       // NOTE: school credentials (district/username/password) are NOT sent
       // to the server here. The desktop sync installer handles credential
       // capture into the OS keychain. This flow records the roster only.
@@ -252,6 +378,10 @@ export function CrewApplet() {
     setUsername("");
     setPassword("");
     setSync(["Grades", "Assignments"]);
+    setNewCalendarUrl("");
+    setNewBellLabel("Daily");
+    setNewBellUrl("");
+    setSourcesNote("");
     setError("");
     closeReauth();
     closeConnect();
@@ -435,6 +565,230 @@ export function CrewApplet() {
       setClassesMessage("Couldn't load classes right now.");
     } finally {
       setClassesLoading(false);
+    }
+  }
+
+  // ----- School calendar & bell schedules -----
+
+  function resetSchoolSources() {
+    setSrcLoading(false);
+    setSrcSources(null);
+    setSrcSnapshots({ calendar: null, bells: [] });
+    setSrcEditing(false);
+    setSrcDistrict("");
+    setSrcCalendarUrl("");
+    setSrcBells([]);
+    setSrcSaving(false);
+    setSrcRefreshing(false);
+    setSrcMessage(null);
+    setCalHtml(null);
+    setCalUrl("");
+    setCalFetchedAt(null);
+    setCalLoading(false);
+    setCalError("");
+    setBellsOpen(false);
+    setBellTab(0);
+    setBellHtml({});
+    setBellMeta({});
+    setBellLoading(false);
+    setBellError("");
+  }
+
+  /** Fetch saved sources + snapshots; pulls calendar content when a URL is saved. */
+  async function loadSchoolSources(memberId: string) {
+    setSrcLoading(true);
+    setCalHtml(null);
+    setCalUrl("");
+    setCalFetchedAt(null);
+    setCalError("");
+    setBellHtml({});
+    setBellMeta({});
+    setBellError("");
+    setBellTab(0);
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}/school-sources`);
+      const json = await res.json();
+      let sources: SchoolSources | null = null;
+      if (res.ok) {
+        sources = json.sources
+          ? {
+              district: json.sources.district ?? null,
+              calendar_source_url: json.sources.calendar_source_url ?? null,
+              bell_schedules: Array.isArray(json.sources.bell_schedules)
+                ? json.sources.bell_schedules
+                : [],
+              last_checked_at: json.sources.last_checked_at ?? null,
+              check_status: json.sources.check_status ?? null,
+              check_note: json.sources.check_note ?? null,
+            }
+          : null;
+        setSrcSources(sources);
+        setSrcSnapshots({
+          calendar: json.snapshots?.calendar ?? null,
+          bells: Array.isArray(json.snapshots?.bells) ? json.snapshots.bells : [],
+        });
+        if (sources?.calendar_source_url) await loadCalendarContent(memberId);
+      } else {
+        setSrcMessage({
+          ok: false,
+          text: json.error ?? "Couldn't load the school calendar settings.",
+        });
+      }
+    } catch {
+      setSrcMessage({
+        ok: false,
+        text: "We couldn't reach the server. Check your connection and try again.",
+      });
+    } finally {
+      setSrcLoading(false);
+    }
+  }
+
+  async function loadCalendarContent(memberId: string) {
+    setCalLoading(true);
+    setCalError("");
+    try {
+      const res = await fetch(
+        `/api/crew/members/${memberId}/school-sources/content?kind=calendar`,
+      );
+      const json = await res.json();
+      if (json.ok) {
+        setCalHtml(json.html ?? "");
+        setCalUrl(json.url ?? "");
+        setCalFetchedAt(json.fetched_at ?? null);
+      } else {
+        setCalError(json.error ?? "The calendar page didn't load.");
+      }
+    } catch {
+      setCalError("We couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setCalLoading(false);
+    }
+  }
+
+  /** Fetch one bell schedule's snapshot HTML, cached per tab index. */
+  async function ensureBellContent(memberId: string, index: number, force = false) {
+    if (!force && (bellHtml[index] !== undefined || bellLoading || bellError)) return;
+    setBellLoading(true);
+    setBellError("");
+    try {
+      const res = await fetch(
+        `/api/crew/members/${memberId}/school-sources/content?kind=bell&index=${index}`,
+      );
+      const json = await res.json();
+      if (json.ok) {
+        setBellHtml((prev) => ({ ...prev, [index]: json.html ?? "" }));
+        setBellMeta((prev) => ({
+          ...prev,
+          [index]: { url: json.url ?? "", fetchedAt: json.fetched_at ?? null },
+        }));
+      } else {
+        setBellError(json.error ?? "That bell schedule didn't load.");
+      }
+    } catch {
+      setBellError("We couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setBellLoading(false);
+    }
+  }
+
+  /** Prefill the editor from the saved sources and open it. */
+  function openSourcesEditor() {
+    setSrcDistrict(srcSources?.district ?? "");
+    setSrcCalendarUrl(srcSources?.calendar_source_url ?? "");
+    const bells = (srcSources?.bell_schedules ?? []).map((b) => ({
+      label: b.label,
+      url: b.url,
+    }));
+    setSrcBells(bells.length > 0 ? bells : [{ label: "Daily", url: "" }]);
+    setSrcMessage(null);
+    setSrcEditing(true);
+  }
+
+  function addBellRow() {
+    setSrcBells((prev) =>
+      prev.length >= 5 ? prev : [...prev, { label: "", url: "" }],
+    );
+  }
+
+  function removeBellRow(i: number) {
+    setSrcBells((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
+  function updateBellRow(i: number, field: "label" | "url", value: string) {
+    setSrcBells((prev) =>
+      prev.map((b, idx) => (idx === i ? { ...b, [field]: value } : b)),
+    );
+  }
+
+  /** Save the sources form, then re-pull sources + content. */
+  async function saveSchoolSources(memberId: string) {
+    setSrcSaving(true);
+    setSrcMessage(null);
+    try {
+      const bells = srcBells
+        .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
+        .filter((b) => b.url);
+      const res = await fetch(`/api/crew/members/${memberId}/school-sources`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          district: srcDistrict.trim() || null,
+          calendar_source_url: srcCalendarUrl.trim() || null,
+          bell_schedules: bells,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "save failed");
+      setSrcMessage({ ok: true, text: "Saved — pulling the latest pages now." });
+      setSrcEditing(false);
+      await loadSchoolSources(memberId);
+      if (bellsOpen) await ensureBellContent(memberId, 0, true);
+    } catch (e) {
+      setSrcMessage({
+        ok: false,
+        text: e instanceof Error ? e.message : "Couldn't save those links. Try again.",
+      });
+    } finally {
+      setSrcSaving(false);
+    }
+  }
+
+  /** Re-check the saved pages now, then reload sources + content. */
+  async function refreshSchoolSources(memberId: string) {
+    setSrcRefreshing(true);
+    setSrcMessage(null);
+    try {
+      const res = await fetch(
+        `/api/crew/members/${memberId}/school-sources/refresh`,
+        { method: "POST" },
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "refresh failed");
+      const results: { label: string; status: string; error_note?: string }[] =
+        json.results ?? [];
+      const failed = results.filter((r) => r.status !== "ok");
+      setSrcMessage({
+        ok: failed.length === 0,
+        text:
+          failed.length === 0
+            ? `Checked ${results.length} ${results.length === 1 ? "page" : "pages"} — all fresh.`
+            : `${failed.length} of ${results.length} didn't load: ${failed
+                .map((f) => `${f.label} — ${f.error_note ?? "try again"}`)
+                .join("; ")}`,
+      });
+      await loadSchoolSources(memberId);
+      if (bellsOpen) {
+        setBellError("");
+        await ensureBellContent(memberId, bellTab, true);
+      }
+    } catch (e) {
+      setSrcMessage({
+        ok: false,
+        text: e instanceof Error ? e.message : "Couldn't refresh right now. Try again.",
+      });
+    } finally {
+      setSrcRefreshing(false);
     }
   }
 
@@ -1019,6 +1373,367 @@ export function CrewApplet() {
           </div>
         )}
 
+        {/* School calendar & bell schedules */}
+        <div className="space-y-2">
+          <style>{SCHOOL_SOURCE_STYLES}</style>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+              School calendar &amp; bell schedules
+            </p>
+            {!srcLoading && (
+              <button
+                type="button"
+                onClick={() => (srcEditing ? setSrcEditing(false) : openSourcesEditor())}
+                className="shrink-0 rounded-lg border border-line bg-panel-2/60 px-3 py-1.5 text-xs font-medium text-stardust transition-colors hover:text-star"
+              >
+                {srcEditing ? "Done editing" : "Edit school sources"}
+              </button>
+            )}
+          </div>
+
+          {srcLoading ? (
+            <p className="text-sm text-stardust">Loading calendar &amp; bell schedules…</p>
+          ) : (
+            <>
+              {srcMessage && (
+                <p
+                  role={srcMessage.ok ? "status" : "alert"}
+                  className={`rounded-xl border px-4 py-2.5 text-sm ${
+                    srcMessage.ok
+                      ? "border-neon-green/30 bg-neon-green/5 text-neon-green"
+                      : "border-neon-amber/30 bg-neon-amber/5 text-neon-amber"
+                  }`}
+                >
+                  {srcMessage.text}
+                </p>
+              )}
+              {srcSources && (
+                <p className="text-xs text-dim">
+                  {srcSources.last_checked_at
+                    ? `Last checked ${timeAgo(srcSources.last_checked_at) ?? "recently"}`
+                    : "Not checked yet"}
+                  {srcSources.check_status ? ` · ${srcSources.check_status}` : ""}
+                  {srcSources.check_note ? ` — ${srcSources.check_note}` : ""}
+                </p>
+              )}
+
+              {srcEditing && (
+                <div className="space-y-2.5 rounded-xl border border-line bg-panel px-4 py-3">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-stardust">
+                      School district
+                    </span>
+                    <input
+                      value={srcDistrict}
+                      onChange={(e) => setSrcDistrict(e.target.value)}
+                      placeholder="e.g. Cobb County School District"
+                      autoComplete="off"
+                      disabled={srcSaving}
+                      className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                    />
+                  </label>
+                  <div>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-stardust">
+                        District calendar page URL
+                      </span>
+                      <input
+                        value={srcCalendarUrl}
+                        onChange={(e) => setSrcCalendarUrl(e.target.value)}
+                        placeholder="https://…/calendars"
+                        autoComplete="off"
+                        inputMode="url"
+                        disabled={srcSaving}
+                        className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                      />
+                    </label>
+                    {srcSnapshots.calendar && (
+                      <p
+                        className={`mt-1 text-xs ${
+                          srcSnapshots.calendar.status === "ok"
+                            ? "text-dim"
+                            : "text-neon-amber"
+                        }`}
+                      >
+                        {srcSnapshots.calendar.status === "ok"
+                          ? `Last pull ${timeAgo(srcSnapshots.calendar.fetched_at) ?? "recently"} — looks good.`
+                          : `Last pull failed — ${srcSnapshots.calendar.error_note ?? "try Refresh."}`}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-stardust">Bell schedules</p>
+                    {srcBells.map((b, i) => (
+                      <div key={i} className="space-y-1">
+                        <div className="grid grid-cols-[1fr_2fr_auto] items-center gap-2">
+                          <input
+                            aria-label={`Bell schedule ${i + 1} label`}
+                            value={b.label}
+                            onChange={(e) => updateBellRow(i, "label", e.target.value)}
+                            placeholder="Daily"
+                            autoComplete="off"
+                            disabled={srcSaving}
+                            className="w-full rounded-xl border border-line bg-panel-2/60 px-3 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                          />
+                          <input
+                            aria-label={`Bell schedule ${i + 1} URL`}
+                            value={b.url}
+                            onChange={(e) => updateBellRow(i, "url", e.target.value)}
+                            placeholder="https://…/bell-schedule"
+                            autoComplete="off"
+                            inputMode="url"
+                            disabled={srcSaving}
+                            className="w-full rounded-xl border border-line bg-panel-2/60 px-3 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                          />
+                          {srcBells.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => removeBellRow(i)}
+                              aria-label={`Remove bell schedule ${i + 1}`}
+                              disabled={srcSaving}
+                              className="rounded-lg border border-line bg-panel-2/60 px-2.5 py-2 text-sm text-dim transition-colors hover:text-red-400 disabled:opacity-50"
+                            >
+                              ✕
+                            </button>
+                          ) : (
+                            <span aria-hidden="true" className="w-[37px]" />
+                          )}
+                        </div>
+                        {srcSnapshots.bells[i] &&
+                          srcSnapshots.bells[i].status !== "ok" && (
+                            <p className="text-xs text-neon-amber">
+                              Last pull failed —{" "}
+                              {srcSnapshots.bells[i].error_note ?? "try Refresh."}
+                            </p>
+                          )}
+                      </div>
+                    ))}
+                    {srcBells.length < 5 && (
+                      <button
+                        type="button"
+                        onClick={addBellRow}
+                        className="text-xs font-medium text-neon-green transition-opacity hover:opacity-80"
+                      >
+                        + Add another schedule
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => refreshSchoolSources(member.id)}
+                      disabled={srcRefreshing || srcSaving}
+                      className="rounded-xl border border-line bg-panel-2/60 px-4 py-2 text-sm font-medium text-stardust transition-colors hover:text-star disabled:opacity-50"
+                    >
+                      {srcRefreshing ? "Checking…" : "Refresh now"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => saveSchoolSources(member.id)}
+                      disabled={srcSaving || srcRefreshing}
+                      className="flex-1 rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+                    >
+                      {srcSaving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Calendar display — always text, never a blank panel */}
+              {srcSources?.calendar_source_url ? (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+                    Calendar
+                  </p>
+                  {calLoading ? (
+                    <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
+                      Pulling the calendar in…
+                    </p>
+                  ) : calError ? (
+                    <div
+                      role="alert"
+                      className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-3"
+                    >
+                      <p className="text-sm text-neon-amber">{calError}</p>
+                      <button
+                        type="button"
+                        onClick={() => refreshSchoolSources(member.id)}
+                        disabled={srcRefreshing}
+                        className="mt-2 rounded-lg border border-neon-amber/40 bg-neon-amber/10 px-3 py-1.5 text-xs font-medium text-neon-amber transition-colors hover:bg-neon-amber/20 disabled:opacity-50"
+                      >
+                        {srcRefreshing ? "Checking…" : "Try again"}
+                      </button>
+                    </div>
+                  ) : calHtml !== null ? (
+                    <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                      <div
+                        className="school-source-content applet-scroll max-h-96 overflow-y-auto"
+                        dangerouslySetInnerHTML={{ __html: calHtml }}
+                      />
+                      <p className="mt-2 border-t border-line pt-2 text-xs text-dim">
+                        Source:{" "}
+                        <a
+                          href={calUrl || srcSources.calendar_source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-neon-green underline transition-opacity hover:opacity-80"
+                        >
+                          {domainOf(calUrl || srcSources.calendar_source_url)} ↗
+                        </a>
+                        {timeAgo(calFetchedAt) && (
+                          <> · pulled {timeAgo(calFetchedAt)}</>
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                      The calendar isn&apos;t available right now — try Refresh
+                      from the editor above.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                  <p className="text-sm text-dim">
+                    Add your district&apos;s calendar page to see it here.
+                  </p>
+                  {!srcEditing && (
+                    <button
+                      type="button"
+                      onClick={openSourcesEditor}
+                      className="mt-2 text-xs font-medium text-neon-green transition-opacity hover:opacity-80"
+                    >
+                      Add a calendar URL
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Bell schedules collapsible */}
+              <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !bellsOpen;
+                    setBellsOpen(next);
+                    if (next && (srcSources?.bell_schedules.length ?? 0) > 0) {
+                      setBellError("");
+                      ensureBellContent(member.id, bellTab);
+                    }
+                  }}
+                  aria-expanded={bellsOpen}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <span className="text-sm font-medium text-star">Bell schedules</span>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    className={`text-dim transition-transform ${bellsOpen ? "rotate-180" : ""}`}
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {bellsOpen && (
+                  <div className="mt-3">
+                    {(srcSources?.bell_schedules.length ?? 0) === 0 ? (
+                      <p className="text-sm text-dim">
+                        No bell schedules saved yet — add one with “Edit school
+                        sources”.
+                      </p>
+                    ) : (
+                      <>
+                        <div
+                          className="flex flex-wrap gap-1.5"
+                          role="tablist"
+                          aria-label="Bell schedules"
+                        >
+                          {(srcSources?.bell_schedules ?? []).map((b, i) => (
+                            <button
+                              key={`${b.label}-${i}`}
+                              type="button"
+                              role="tab"
+                              aria-selected={bellTab === i}
+                              onClick={() => {
+                                setBellTab(i);
+                                setBellError("");
+                                ensureBellContent(member.id, i);
+                              }}
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                                bellTab === i
+                                  ? "border-neon-green/50 bg-neon-green/10 text-neon-green"
+                                  : "border-line bg-panel-2/60 text-stardust hover:text-star"
+                              }`}
+                            >
+                              {b.label || `Schedule ${i + 1}`}
+                            </button>
+                          ))}
+                        </div>
+                        <div role="tabpanel" className="mt-2">
+                          {bellLoading ? (
+                            <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
+                              Pulling that schedule in…
+                            </p>
+                          ) : bellError ? (
+                            <div
+                              role="alert"
+                              className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-3"
+                            >
+                              <p className="text-sm text-neon-amber">{bellError}</p>
+                              <button
+                                type="button"
+                                onClick={() => refreshSchoolSources(member.id)}
+                                disabled={srcRefreshing}
+                                className="mt-2 rounded-lg border border-neon-amber/40 bg-neon-amber/10 px-3 py-1.5 text-xs font-medium text-neon-amber transition-colors hover:bg-neon-amber/20 disabled:opacity-50"
+                              >
+                                {srcRefreshing ? "Checking…" : "Try again"}
+                              </button>
+                            </div>
+                          ) : bellHtml[bellTab] !== undefined ? (
+                            <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                              <div
+                                className="school-source-content applet-scroll max-h-96 overflow-y-auto"
+                                dangerouslySetInnerHTML={{ __html: bellHtml[bellTab] }}
+                              />
+                              {bellMeta[bellTab]?.url && (
+                                <p className="mt-2 border-t border-line pt-2 text-xs text-dim">
+                                  Source:{" "}
+                                  <a
+                                    href={bellMeta[bellTab].url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-neon-green underline transition-opacity hover:opacity-80"
+                                  >
+                                    {domainOf(bellMeta[bellTab].url)} ↗
+                                  </a>
+                                  {timeAgo(bellMeta[bellTab].fetchedAt) && (
+                                    <> · pulled {timeAgo(bellMeta[bellTab].fetchedAt)}</>
+                                  )}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                              The schedule isn&apos;t available right now — try
+                              Refresh from the editor above.
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
         {/* Manage — link code + remove */}
         <div className="space-y-2 border-t border-line pt-4">
           <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
@@ -1172,6 +1887,14 @@ export function CrewApplet() {
             switched on.
           </p>
         </div>
+        {sourcesNote && (
+          <p
+            role="alert"
+            className="mx-auto max-w-sm rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-2.5 text-sm text-neon-amber"
+          >
+            {sourcesNote}
+          </p>
+        )}
         {roster.length > 0 && (
           <div className="mx-auto max-w-sm space-y-2 text-left">
             <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
@@ -1423,6 +2146,56 @@ export function CrewApplet() {
               className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
             />
           </label>
+          <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+            <p className="text-xs font-medium text-stardust">
+              School calendar &amp; bell schedule{" "}
+              <span className="text-dim">(optional)</span>
+            </p>
+            <p className="mt-0.5 text-xs text-dim">
+              Paste these now and Crystal will show them on{" "}
+              {name ? `${name}'s` : "their"} profile.
+            </p>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs font-medium text-stardust">
+                District calendar page URL
+              </span>
+              <input
+                value={newCalendarUrl}
+                onChange={(e) => setNewCalendarUrl(e.target.value)}
+                placeholder="https://…/calendars"
+                autoComplete="off"
+                inputMode="url"
+                className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
+              />
+            </label>
+            <div className="mt-2.5 grid grid-cols-[1fr_2fr] gap-2">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-stardust">
+                  Bell schedule label
+                </span>
+                <input
+                  value={newBellLabel}
+                  onChange={(e) => setNewBellLabel(e.target.value)}
+                  placeholder="Daily"
+                  autoComplete="off"
+                  className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-stardust">
+                  Bell schedule URL
+                </span>
+                <input
+                  value={newBellUrl}
+                  onChange={(e) => setNewBellUrl(e.target.value)}
+                  placeholder="https://…/bell-schedule"
+                  autoComplete="off"
+                  inputMode="url"
+                  className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
+                />
+              </label>
+            </div>
+          </div>
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-stardust">
               Student portal username
