@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildContextBundle, type ChatContextBundle } from "@/lib/chat/context";
 import { createReplyStream } from "@/lib/chat/sse";
+import { checkYouthSafety } from "@/lib/youth-safety";
+import { ageTier } from "@/lib/child/age-tier";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +90,46 @@ async function createThread(
 
 class WorkerDown extends Error {}
 
+/**
+ * D2 safety floor (Meheldi, locked): duty of care for 13–17 pilots.
+ * When a linked child's message matches a safety-critical pattern
+ * (self-harm, eating disorder, sexual content involving a minor, abuse),
+ * Crystal answers with warm 988 / trusted-adult guidance INSTEAD of the
+ * LLM reply. This is crisis routing, NOT a content filter — everything
+ * else stays completely unfiltered. Applies in both Crystal and Fireball
+ * modes: duty of care has no bypass keyword.
+ */
+async function childSafetyReply(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  pilotId: string,
+  message: string,
+): Promise<string | null> {
+  const { data: pilot } = await supabase
+    .from("pilots")
+    .select("child_crew_member_id, display_name")
+    .eq("id", pilotId)
+    .single();
+  const memberId = pilot?.child_crew_member_id as string | null;
+  if (!memberId) return null;
+  const { data: member } = await supabase
+    .from("crew_members")
+    .select("birthdate")
+    .eq("id", memberId)
+    .single();
+  const tier = ageTier((member?.birthdate as string | null) ?? null);
+  if (tier !== "teen-13-15" && tier !== "teen-16-17") return null;
+
+  const hit = checkYouthSafety(message);
+  if (!hit) return null;
+
+  const firstName = ((pilot?.display_name as string) ?? "").trim().split(" ")[0];
+  return (
+    `Thank you for trusting me with this${firstName ? `, ${firstName}` : ""} — ` +
+    `I'm taking it seriously.\n\n${hit.guidance}\n\n` +
+    `I'm still here, and we can keep talking about anything else whenever you're ready.`
+  );
+}
+
 async function callWorker(
   messages: { role: string; text: string }[],
   context: ChatContextBundle,
@@ -132,6 +174,9 @@ export async function POST(req: Request) {
   }
   const mode = cleanMode(body?.mode);
   const { supabase, pilotId } = auth;
+
+  // D2 safety floor: checked before anything else for 13–17 pilots.
+  const safetyReply = await childSafetyReply(supabase, pilotId, message);
 
   try {
     // 1. Resolve the thread (RLS keeps every query pilot-scoped).
@@ -178,13 +223,16 @@ export async function POST(req: Request) {
       .insert({ thread_id: threadId, role: "user", text: message });
     if (userErr) throw userErr;
 
-    // 4. Context bundle + worker call.
-    const context = await buildContextBundle(supabase, pilotId);
-    const reply = await callWorker(
-      [...history, { role: "user", text: message }],
-      context,
-      mode,
-    );
+    // 4. Context bundle + worker call — skipped when the D2 safety floor
+    // answered: the crisis reply goes out instead of the LLM reply, through
+    // the exact same persistence + response path below.
+    const reply =
+      safetyReply ??
+      (await callWorker(
+        [...history, { role: "user", text: message }],
+        await buildContextBundle(supabase, pilotId),
+        mode,
+      ));
 
     // 5. Persist the reply + touch the thread BEFORE responding, so the
     //    thread is complete even if the client disconnects mid-stream.
