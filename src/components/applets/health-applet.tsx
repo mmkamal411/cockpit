@@ -63,6 +63,7 @@ export function HealthApplet() {
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Metric | null>(null);
   const [trend, setTrend] = useState<Metric | null>(null);
+  const [goalsSheet, setGoalsSheet] = useState<{ focus: Metric | null } | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -196,6 +197,16 @@ export function HealthApplet() {
             })}
       </div>
 
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setGoalsSheet({ focus: null })}
+          className="text-sm text-neon-cyan hover:underline"
+        >
+          🎯 Edit goals
+        </button>
+      </div>
+
       <p className="text-xs text-dim">
         Your health data stays yours — it&apos;s never shared, and support can&apos;t see it.
       </p>
@@ -210,6 +221,19 @@ export function HealthApplet() {
             setTrend(sheet);
             setSheet(null);
           }}
+          onEditGoal={() => {
+            setGoalsSheet({ focus: sheet });
+            setSheet(null);
+          }}
+        />
+      )}
+
+      {goalsSheet && (
+        <GoalsEditor
+          goals={goals}
+          focus={goalsSheet.focus}
+          onClose={() => setGoalsSheet(null)}
+          onSaved={load}
         />
       )}
 
@@ -229,12 +253,14 @@ function LogSheet({
   onClose,
   onSaved,
   onViewTrend,
+  onEditGoal,
 }: {
   metric: Metric;
   goal?: Goal;
   onClose: () => void;
   onSaved: () => void;
   onViewTrend: () => void;
+  onEditGoal: () => void;
 }) {
   const def = METRICS.find((m) => m.id === metric)!;
   const [value, setValue] = useState("");
@@ -463,10 +489,25 @@ function LogSheet({
               </>
             )}
 
-            {goal && (
+            {goal ? (
               <p className="text-xs text-dim">
-                Your goal: {goal.target_value} {goal.unit}
+                Your goal: {goal.target_value} {goal.unit}{" "}
+                <button
+                  type="button"
+                  onClick={onEditGoal}
+                  className="text-neon-cyan hover:underline"
+                >
+                  Change
+                </button>
               </p>
+            ) : (
+              <button
+                type="button"
+                onClick={onEditGoal}
+                className="text-left text-xs text-neon-cyan hover:underline"
+              >
+                Set a goal for {def.label.toLowerCase()} →
+              </button>
             )}
 
             {error && <p className="text-sm text-red-300">{error}</p>}
@@ -489,6 +530,140 @@ function LogSheet({
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Goal editor — create or change the per-metric targets (PUT /api/health/goals).
+/* Goals are supported for weight, sleep, water, exercise, and steps.      */
+/* ------------------------------------------------------------------ */
+
+const GOAL_METRICS = METRICS.filter((m) => m.id !== "blood_glucose");
+
+function GoalsEditor({
+  goals,
+  focus,
+  onClose,
+  onSaved,
+}: {
+  goals: Goal[];
+  focus: Metric | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(goals.map((g) => [g.metric, String(g.target_value)])),
+  );
+  const [saving, setSaving] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [savedTick, setSavedTick] = useState<string | null>(null);
+  const goalFor = (m: Metric) => goals.find((g) => g.metric === m);
+
+  async function save(metric: Metric) {
+    const def = GOAL_METRICS.find((m) => m.id === metric)!;
+    const v = parseFloat(values[metric] ?? "");
+    if (!Number.isFinite(v) || v <= 0) {
+      setErrors((e) => ({ ...e, [metric]: "Enter a goal number, like 8000." }));
+      return;
+    }
+    setSaving(metric);
+    setErrors((e) => ({ ...e, [metric]: "" }));
+    try {
+      const res = await fetch("/api/health/goals", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ metric, target_value: v, unit: def.unit }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof body?.error === "string" ? body.error : "Couldn't save that goal.",
+        );
+      }
+      setSavedTick(metric);
+      onSaved();
+      setTimeout(() => setSavedTick(null), 1500);
+    } catch (err) {
+      setErrors((e) => ({
+        ...e,
+        [metric]: err instanceof Error ? err.message : "Couldn't save that goal.",
+      }));
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Edit health goals">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-line bg-panel p-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-star">🎯 Your goals</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-full border border-line p-2 text-dim hover:text-star"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+        <p className="mt-1 text-sm text-stardust">
+          Targets, not report cards. Set one where it helps and skip the rest.
+        </p>
+
+        <div className="mt-4 space-y-3">
+          {GOAL_METRICS.map((m) => {
+            const goal = goalFor(m.id);
+            const isFocus = focus === m.id;
+            return (
+              <div
+                key={m.id}
+                className={`rounded-2xl border p-4 ${isFocus ? "border-neon-cyan/50 bg-neon-cyan/5" : "border-line bg-panel-2/40"}`}
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-star">
+                    <span aria-hidden="true" className="mr-2">{m.icon}</span>
+                    {m.label}
+                  </p>
+                  {savedTick === m.id ? (
+                    <span className="text-sm text-neon-green">Saved ✓</span>
+                  ) : (
+                    <p className="text-xs text-dim">
+                      {goal ? `Now: ${goal.target_value} ${goal.unit}` : "No goal yet"}
+                    </p>
+                  )}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    value={values[m.id] ?? ""}
+                    onChange={(e) => setValues((v) => ({ ...v, [m.id]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") save(m.id);
+                    }}
+                    inputMode="decimal"
+                    placeholder={goal ? String(goal.target_value) : `e.g. ${m.id === "steps" ? "8000" : m.id === "sleep" ? "8" : m.id === "water" ? "8" : m.id === "exercise" ? "30" : "170"}`}
+                    aria-label={`${m.label} goal`}
+                    className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
+                  />
+                  <span className="flex items-center px-1 text-sm text-dim">{m.unit}</span>
+                  <button
+                    type="button"
+                    onClick={() => save(m.id)}
+                    disabled={saving === m.id}
+                    className="rounded-xl border border-neon-green/40 bg-neon-green/10 px-5 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {saving === m.id ? "Saving…" : goal ? "Update" : "Set"}
+                  </button>
+                </div>
+                {errors[m.id] && <p className="mt-2 text-sm text-red-300">{errors[m.id]}</p>}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
