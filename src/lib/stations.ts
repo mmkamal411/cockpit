@@ -141,7 +141,7 @@ export const STATIONS: StationDef[] = [
   {
     id: "reminders",
     name: "Reminders",
-    blurb: "Gentle nudges before things slip.",
+    blurb: "Gentle reminders before things slip.",
     glow: "#fcd34d",
     bay: "day",
     appletId: "nudges",
@@ -231,7 +231,7 @@ export const STATIONS: StationDef[] = [
   {
     id: "family",
     name: "Family",
-    blurb: "Your crew, and their school life.",
+    blurb: "Your family, and their school life.",
     glow: "#86efac",
     bay: "people",
     appletId: "crew",

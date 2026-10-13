@@ -112,7 +112,7 @@ export function StationDeckBays() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Hail a station — search by name…"
           autoComplete="off"
-          className="min-h-[48px] w-full rounded-2xl border border-line bg-panel-2/80 px-4 text-sm text-star placeholder:text-dim focus:border-neon-cyan/50 focus:outline-none"
+          className="min-h-[48px] w-full rounded-2xl border border-line bg-panel-2/80 px-4 text-sm text-star placeholder:text-dim focus:border-white/40 focus:outline-none"
         />
       </div>
 
@@ -152,7 +152,7 @@ export function StationDeckBays() {
                         type="button"
                         onClick={() => select(s)}
                         aria-pressed={isSelected}
-                        className="block min-h-[88px] w-full rounded-[13px] p-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-neon-cyan/60"
+                        className="block min-h-[88px] w-full rounded-[13px] p-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
                       >
                         <span className="flex items-center gap-2">
                           <StationLed
@@ -236,7 +236,11 @@ export function StationDeckBays() {
                   <button
                     type="button"
                     onClick={() => open(selected)}
-                    className="mt-3 block min-h-[48px] w-full rounded-xl bg-neon-cyan/15 px-4 text-sm font-semibold text-star ring-1 ring-neon-cyan/40 transition-colors hover:bg-neon-cyan/25"
+                    className="mt-3 block min-h-[48px] w-full rounded-xl px-4 text-sm font-semibold text-star transition-colors"
+                    style={{
+                      backgroundColor: `${selected.glow}26`,
+                      boxShadow: `inset 0 0 0 1px ${selected.glow}66`,
+                    }}
                   >
                     Open {selected.name} →
                   </button>

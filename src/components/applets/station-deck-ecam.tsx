@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { openApplet } from "@/lib/applet-bus";
 import { BAYS, STATIONS, type BayId, type StationDef } from "@/lib/stations";
-import { useStationPreview } from "@/lib/station-preview";
+import { useStationPreview, invalidateStationPreviews } from "@/lib/station-preview";
 
 interface Phase {
   /** Plain-language label — grandmother test. */
@@ -95,7 +95,7 @@ export function StationDeckEcam() {
   }, [query]);
 
   const selectStation = (s: StationDef) => {
-    setSelectedId(s.id);
+    setSelectedId((prev) => (prev === s.id ? prev : s.id));
   };
 
   const pickSearchResult = (s: StationDef) => {
@@ -109,14 +109,16 @@ export function StationDeckEcam() {
   };
 
   const openSelected = () => {
-    if (selected?.appletId) openApplet(selected.appletId, {}, { replace: true });
+    if (!selected?.appletId) return;
+    invalidateStationPreviews(selected.id);
+    openApplet(selected.appletId, {}, { replace: true });
   };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-black">
       {/* Panel header */}
       <div className="shrink-0 px-4 pt-4">
-        <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-cyan">
+        <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-stardust">
           Systems
         </p>
         <h2 className="mt-1 text-xl font-semibold text-star">Station Deck</h2>
@@ -130,7 +132,7 @@ export function StationDeckEcam() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Hail a station — search by name"
             aria-label="Hail a station: search all stations"
-            className="h-11 w-full rounded-xl border border-line bg-panel-2 px-4 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none"
+            className="h-11 w-full rounded-xl border border-line bg-panel-2 px-4 text-sm text-star placeholder:text-dim focus:border-white/40 focus:outline-none"
           />
           {searchResults.length > 0 && (
             <ul
@@ -252,7 +254,10 @@ export function StationDeckEcam() {
                     {s.name}
                   </span>
                   {emphasized && (
-                    <span className="text-[10px] font-medium uppercase tracking-widest text-neon-amber">
+                    <span
+                      className="text-[10px] font-medium uppercase tracking-widest"
+                      style={{ color: s.glow }}
+                    >
                       Up first
                     </span>
                   )}
@@ -295,7 +300,11 @@ export function StationDeckEcam() {
                 <button
                   type="button"
                   onClick={() => notifySeedling(selected)}
-                  className="min-h-[48px] shrink-0 rounded-xl border border-neon-amber/50 px-4 text-sm font-medium text-neon-amber transition-colors hover:bg-neon-amber/10"
+                  className="min-h-[48px] shrink-0 rounded-xl border px-4 text-sm font-medium transition-colors"
+                  style={{
+                    borderColor: `${selected.glow}80`,
+                    color: selected.glow,
+                  }}
                 >
                   Notify me when it&rsquo;s live
                 </button>
@@ -323,7 +332,7 @@ export function StationDeckEcam() {
           type="button"
           onClick={() => openApplet("settings", {}, { replace: true })}
           aria-label="Open settings"
-          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-line bg-panel-2 text-sm font-medium text-stardust transition-colors hover:border-neon-cyan/40 hover:text-star"
+          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-line bg-panel-2 text-sm font-medium text-stardust transition-colors hover:border-white/30 hover:text-star"
           style={{ boxShadow: "inset 0 1px 0 0 rgb(255 255 255 / 0.08)" }}
         >
           <span aria-hidden="true" className="text-base leading-none">
