@@ -2,13 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { openApplet } from "@/lib/applet-bus";
-import { readLocal, type CrewMember } from "@/lib/local-store";
 import { STATION_DECK_VARIANT } from "@/lib/feature-flags";
 import { StationDeckBays } from "./station-deck-bays";
 import { StationDeckEcam } from "./station-deck-ecam";
 import { StationDeckGrid } from "./station-deck-grid";
 
-const CREW_KEY = "cockpit.crew";
+interface CrewMember {
+  id: string;
+  name: string;
+  relationship?: string | null;
+}
 
 interface Seedling {
   name: string;
@@ -49,7 +52,21 @@ function MoreAppletLegacy() {
   const [crew, setCrew] = useState<CrewMember[]>([]);
 
   useEffect(() => {
-    setCrew(readLocal<CrewMember[]>(CREW_KEY, []));
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/crew/members");
+        if (res.status === 401) return;
+        const json = await res.json();
+        if (res.ok && !cancelled) setCrew(json.members ?? []);
+      } catch {
+        // Leave crew empty; the onboarding prompt stays.
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -90,37 +107,53 @@ function MoreAppletLegacy() {
           Crew
         </h3>
         <div className="rounded-2xl border border-neon-green/25 bg-panel-2/60 p-4">
-          <p className="text-sm font-semibold text-star">Family aboard? Add your crew.</p>
-          <p className="mt-1 text-xs leading-relaxed text-stardust">
-            Crystal is yours first. If you&apos;d like, bring children aboard and
-            Crystal will help watch over their school life too — grades,
-            homework, and the gentle nudges.
-          </p>
-          {crew.length > 0 && (
-            <ul className="mt-3 space-y-1.5">
-              {crew.map((m) => (
-                <li key={m.id}>
-                  <button
-                    type="button"
-                    onClick={() => openApplet("crew", {}, { replace: true })}
-                    className="flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-sm text-stardust transition-colors hover:bg-panel"
-                    aria-label={`View ${m.name}'s crew profile`}
-                  >
-                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-neon-green" />
-                    <span className="text-star underline decoration-dotted decoration-dim/50 underline-offset-2">{m.name}</span>
-                    <span className="text-xs text-dim">· aboard</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+          {crew.length > 0 ? (
+            <>
+              <p className="text-sm font-semibold text-star">Your crew is aboard.</p>
+              <ul className="mt-3 space-y-1.5">
+                {crew.map((m) => (
+                  <li key={m.id}>
+                    <button
+                      type="button"
+                      onClick={() => openApplet("crew", {}, { replace: true })}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-stardust transition-colors hover:bg-panel"
+                      aria-label={`View ${m.name}'s crew profile`}
+                    >
+                      <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-neon-green" />
+                      <span className="text-base font-medium text-star">{m.name}</span>
+                      {m.relationship && (
+                        <span className="text-xs text-dim">· {m.relationship}</span>
+                      )}
+                      <span aria-hidden="true" className="ml-auto text-dim">›</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={() => openApplet("crew", {}, { replace: true })}
+                className="mt-3 rounded-xl border border-line px-4 py-2 text-sm text-stardust transition-colors hover:border-neon-green/40 hover:text-star"
+              >
+                Add another child
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-star">Family aboard? Add your crew.</p>
+              <p className="mt-1 text-xs leading-relaxed text-stardust">
+                Crystal is yours first. If you&apos;d like, bring children aboard and
+                Crystal will help watch over their school life too — grades,
+                homework, and the gentle nudges.
+              </p>
+              <button
+                type="button"
+                onClick={() => openApplet("crew", {}, { replace: true })}
+                className="mt-3 rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20"
+              >
+                Add a child
+              </button>
+            </>
           )}
-          <button
-            type="button"
-            onClick={() => openApplet("crew", {}, { replace: true })}
-            className="mt-3 rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20"
-          >
-            {crew.length > 0 ? "Add another child" : "Add a child"}
-          </button>
         </div>
       </section>
 
