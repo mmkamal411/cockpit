@@ -1,4 +1,15 @@
 
+## 2026-10-13 ~13:45 EDT — 6-button home navigation deployed to staging (a86c067b)
+Dropped-commitment recovery: Meheldi's 11:35 EDT ack (6 category buttons, 3/side of orb) was lost between workstreams; rebuilt on feature/phase1-module-finish by porting the reviewed Phase-A design from feature/child-education-ux (commit e13f099, pushed).
+- New: src/lib/station-categories.ts (6 categories, category -> subcategory -> applet map; subscriptions wired live since the applet exists on this branch), src/lib/use-crew-roster.ts (shared linked-children check), src/components/home-stations.tsx (cockpit instrument buttons, lit = has attention items, 3-left/3-right display order), src/components/applets/school-station.tsx (parent school surface), src/components/school-glyph.tsx.
+- applet-bus: openStationCategory/openStationModule; /school added to MODULE_ROUTES, /more removed.
+- applet-content: registered school, station-category, class-detail applets (class-detail.tsx was on disk but unregistered).
+- Home: HomeStations below glass pane (scrolls internally on short screens); glass pane gets Settings gear (settings placeholder stays reachable now that More is dead).
+- All 5 toolbar variants: More key removed; conditional School tab (renders only when pilot has >=1 linked crew member).
+- Deploy a86c067b via deploy-staging.py; smoke test PASSED (/, /login, /auth/callback, videos, static assets).
+- tsc --noEmit clean; next build clean (no concurrent-build racing).
+- NOT YET DONE: browser verification of the full flow (parent) — 6 buttons render, 3/side order, each category opens subcategory overlay, subcategories open applets or honest soon panels, School tab appears for Dawson-linked pilot, More gone from toolbar, no 404s/500s/blanks.
+
 ## 2026-10-13 ~13:30 EDT — School calendar + bell schedule feature deployed to staging (f7332d64)
 Squad: backend (2ce8819) + frontend (6196605) + weekly-check script (7c7de31), all on feature/phase1-module-finish. Deploy f7332d64 via deploy-staging.py; smoke test PASSED (/, /login, /auth/callback, videos, static assets).
 - Migration 031_crew_school_sources.sql: crew_school_sources + crew_school_source_snapshots tables (RLS steward policies), guarded Dawson seed (Cobb calendar + Daily/WEB bell links), nudges kind CHECK widened to include 'school'.
