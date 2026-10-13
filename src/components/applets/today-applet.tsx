@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { parseTodo } from "@/lib/parse-todo";
-import { useTodos } from "@/lib/use-todos";
+import { TodoApplet } from "./todo-applet";
 import type {
   CalendarEvent,
   NudgeItem,
@@ -16,21 +15,16 @@ const REFRESH_MS = 60_000;
 /** Today — the pilot's attention and agenda for right now.
  *
  * READ-ONLY briefing surface (overdue, schedule, due today, nudges, school)
- * composed server-side at /api/today. The quick-capture list below it is
- * the full to-do list backed by useTodos() — cloud-synced when signed in,
- * device-local fallback otherwise, with natural-language due dates.
+ * composed server-side at /api/today. The rich to-do manager below it is
+ * TodoApplet — lists, sharing, recurrence, reminders, Google Tasks sync.
  */
-export function TodayApplet() {
+export function TodayApplet({ params }: { params?: Record<string, string> }) {
   const [briefing, setBriefing] = useState<TodayBriefing | null>(null);
   const [briefingError, setBriefingError] = useState<string | null>(null);
   // True when the pilot's sign-in lapsed: retrying can't fix it, so the
   // error panel offers a sign-in link instead of a useless "Try again".
   const [briefingAuthExpired, setBriefingAuthExpired] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
-
-  const { todos, loading, syncError, retrySync, addTodo, toggleTodo, deleteTodo } = useTodos();
-  const [draft, setDraft] = useState("");
-  const [addError, setAddError] = useState<string | null>(null);
 
   const loadBriefing = useCallback(async () => {
     setBriefingError(null);
@@ -97,38 +91,6 @@ export function TodayApplet() {
     (briefing?.counts.nudges ?? 0) +
     (briefing?.counts.school ?? 0);
 
-  /** Quick-capture add. The parser pulls dates out of the text
-   * ("call the dentist tomorrow at 3pm"); when it eats every word
-   * ("tomorrow"), the raw words become the text and the date is kept. */
-  async function addQuickTodo() {
-    setAddError(null);
-    const raw = draft.trim();
-    if (!raw) return;
-    const parsed = parseTodo(raw);
-    const text = parsed.text.trim() === "" ? raw : parsed.text;
-    const dueAt = parsed.dueAt ?? null;
-    setDraft("");
-    try {
-      await addTodo(text, { dueAt });
-    } catch {
-      setDraft(raw);
-      setAddError("Give your to-do a few words first.");
-    }
-  }
-
-  function formatDue(dueAt: number | null | undefined): string | null {
-    if (typeof dueAt !== "number") return null;
-    const day = new Date(dueAt);
-    const today = new Date();
-    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const diffDays = Math.round((startOfDay(day) - startOfDay(today)) / 86_400_000);
-    const time = day.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-    if (diffDays < 0) return `Overdue · ${day.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
-    if (diffDays === 0) return `Today · ${time}`;
-    if (diffDays === 1) return `Tomorrow · ${time}`;
-    return day.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-  }
-
   return (
     <div className="space-y-5">
       <div>
@@ -152,103 +114,10 @@ export function TodayApplet() {
         onRetry={loadBriefing}
       />
 
-      {/* Cloud-sync status: the hook reports the last background-sync
-          failure in plain English; the pilot can retry on the spot. */}
-      {syncError !== null && (
-        <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-center">
-          <p className="text-sm text-star">{syncError}</p>
-          <button
-            type="button"
-            onClick={() => void retrySync()}
-            className="mt-2 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-1.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
-          >
-            Try syncing again
-          </button>
-        </div>
-      )}
-
-      {/* Quick-capture to-dos — cloud-synced when signed in, on this device otherwise. */}
-      <div>
-        <div className="flex gap-2">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void addQuickTodo();
-            }}
-            placeholder="Add a to-do — try “dentist tomorrow at 3pm”…"
-            aria-label="Add a to-do"
-            className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={() => void addQuickTodo()}
-            disabled={!draft.trim()}
-            className="shrink-0 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Add
-          </button>
-        </div>
-        {addError !== null && <p className="mt-1.5 text-xs text-red-400">{addError}</p>}
-      </div>
-
-      {loading ? (
-        <div className="space-y-2" aria-label="Loading your to-dos">
-          {[0, 1].map((i) => (
-            <div
-              key={i}
-              className="h-12 animate-pulse rounded-xl border border-line bg-panel-2/60"
-            />
-          ))}
-        </div>
-      ) : todos.length === 0 ? (
-        <div className="rounded-2xl border border-line bg-panel-2/60 p-6 text-center">
-          <p className="text-sm text-stardust">
-            Your list is empty. Add the first thing on your mind — Crystal will
-            keep it in sight all day.
-          </p>
-        </div>
-      ) : (
-        <ul className="space-y-2">
-          {todos.map((t) => (
-            <li key={t.id}>
-              <div className="flex w-full items-center gap-3 rounded-xl border border-line bg-panel-2/60 px-4 py-3 transition-colors hover:border-neon-cyan/30">
-                <button
-                  type="button"
-                  onClick={() => void toggleTodo(t.id)}
-                  aria-pressed={t.done}
-                  aria-label={t.done ? `Mark “${t.text}” as not done` : `Mark “${t.text}” as done`}
-                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                    t.done ? "border-neon-green bg-neon-green/20 text-neon-green" : "border-dim/60 text-transparent"
-                  }`}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M4 12.5l5 5L20 6.5" />
-                  </svg>
-                </button>
-                <div className="min-w-0 flex-1 text-left">
-                  <p className={`text-sm ${t.done ? "text-dim line-through" : "text-star"}`}>{t.text}</p>
-                  {formatDue(t.dueAt) !== null && (
-                    <p className="mt-0.5 text-xs text-neon-cyan">{formatDue(t.dueAt)}</p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void deleteTodo(t.id)}
-                  aria-label={`Delete “${t.text}”`}
-                  className="shrink-0 rounded-lg px-2 py-1 text-dim transition-colors hover:bg-red-400/10 hover:text-red-300"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                    <path d="M6 6l12 12M18 6L6 18" />
-                  </svg>
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <p className="text-xs text-dim">Saved on this device, synced to your cloud when you&apos;re signed in.</p>
+      {/* Rich to-do manager: lists, sharing, recurrence, reminders,
+          Google Tasks sync, Crystal breakdown. The invite flow can deep-link
+          a freshly shared list via the applet params. */}
+      <TodoApplet initialListId={typeof params?.list === "string" ? params.list : undefined} />
     </div>
   );
 }

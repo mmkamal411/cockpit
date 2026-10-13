@@ -60,7 +60,7 @@ export const APPLETS: Record<string, AppletDef> = {
     name: "Today",
     readout: "ATTN",
     glow: "#67e8f9",
-    render: () => <TodayApplet />,
+    render: (params) => <TodayApplet params={params} />,
   },
   crystal: {
     name: "Crystal",
