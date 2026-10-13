@@ -13,6 +13,7 @@ import { CalendarApplet } from "./applets/calendar-applet";
 import { ShoppingApplet } from "./applets/shopping-applet";
 import { HealthApplet } from "./applets/health-applet";
 import { NudgeCenterApplet } from "./applets/nudge-center-applet";
+import { SchoolOverviewApplet } from "./applets/school-overview-applet";
 
 /**
  * Settings placeholder — the full User Settings module (Profile,
@@ -115,6 +116,12 @@ export const APPLETS: Record<string, AppletDef> = {
     readout: "NUDGE",
     glow: "#fcd34d",
     render: () => <NudgeCenterApplet />,
+  },
+  school: {
+    name: "School Overview",
+    readout: "SKL",
+    glow: "#67e8f9",
+    render: (params) => <SchoolOverviewApplet params={params} />,
   },
   settings: {
     name: "Settings",

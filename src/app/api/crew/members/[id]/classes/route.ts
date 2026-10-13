@@ -9,6 +9,27 @@ interface GradeEntry {
   letter?: string | null;
 }
 
+interface ClassDetail {
+  class?: string;
+  name?: string;
+  grade?: number | string | null;
+  letter?: string | null;
+  period?: string;
+  teacher?: string | null;
+  assignments?: AssignmentEntry[];
+}
+
+interface AssignmentEntry {
+  title?: string;
+  due?: string | null;
+  score?: number | string | null;
+  status?: string | null;
+  percent?: number | string | null;
+  category?: string | null;
+  max_points?: number | string | null;
+  notes?: string | null;
+}
+
 function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -69,7 +90,7 @@ export async function GET(
 
   const { data: latest } = await supabase
     .from("crew_grade_syncs")
-    .select("grades, synced_at")
+    .select("grades, class_details, synced_at")
     .eq("crew_member_id", crewMemberId)
     .filter("grades", "neq", "[]")
     .order("synced_at", { ascending: false })
@@ -80,22 +101,47 @@ export async function GET(
     return NextResponse.json({
       classes: [],
       synced_at: null,
+      stale: false,
+      hours_since_sync: null,
       message: "No school data yet — connect a school login or tap SYNC NOW.",
     });
   }
+
+  // Teacher lookup from class_details (keyed by class name).
+  const details = Array.isArray(latest.class_details)
+    ? (latest.class_details as ClassDetail[])
+    : [];
+  const teacherByClass = new Map<string, string>();
+  for (const d of details) {
+    const key = (d.class ?? d.name ?? "").trim().toLowerCase();
+    if (key && d.teacher) teacherByClass.set(key, d.teacher);
+  }
+
+  const syncedAtMs = new Date(latest.synced_at).getTime();
+  const hoursSinceSync = Math.max(
+    0,
+    Math.round((Date.now() - syncedAtMs) / 3600000),
+  );
 
   const raw = Array.isArray(latest.grades) ? (latest.grades as GradeEntry[]) : [];
   const classes = raw.map((g, i) => {
     const grade = toNumber(g.grade);
     const gap = grade === null ? null : Math.max(0, 90 - grade);
+    const name = g.class ?? g.name ?? `Class ${i + 1}`;
     return {
       id: `class-${i}`,
-      name: g.class ?? g.name ?? `Class ${i + 1}`,
+      name,
       grade,
       letter: g.letter ?? letterFor(grade),
       gap_to_90: gap,
+      teacher: teacherByClass.get(name.trim().toLowerCase()) ?? null,
     };
   });
 
-  return NextResponse.json({ classes, synced_at: latest.synced_at });
+  return NextResponse.json({
+    classes,
+    synced_at: latest.synced_at,
+    stale: hoursSinceSync > 24,
+    hours_since_sync: hoursSinceSync,
+  });
 }

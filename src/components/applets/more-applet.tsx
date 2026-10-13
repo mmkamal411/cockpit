@@ -115,16 +115,18 @@ function MoreAppletLegacy() {
                   <li key={m.id}>
                     <button
                       type="button"
-                      onClick={() => openApplet("crew", {}, { replace: true })}
+                      onClick={() => openApplet("school", { memberId: m.id }, { replace: true })}
                       className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-stardust transition-colors hover:bg-panel"
-                      aria-label={`View ${m.name}'s crew profile`}
+                      aria-label={`View ${m.name}'s school overview`}
                     >
                       <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-neon-green" />
                       <span className="text-base font-medium text-star">{m.name}</span>
                       {m.relationship && (
                         <span className="text-xs text-dim">· {m.relationship}</span>
                       )}
-                      <span aria-hidden="true" className="ml-auto text-dim">›</span>
+                      <span className="ml-auto rounded-full bg-neon-cyan/10 px-2 py-0.5 text-[11px] text-neon-cyan ring-1 ring-neon-cyan/30">
+                        School
+                      </span>
                     </button>
                   </li>
                 ))}
