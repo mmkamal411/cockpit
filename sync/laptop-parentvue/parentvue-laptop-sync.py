@@ -367,6 +367,25 @@ def run_sync():
                 })
     due_next = due_next[:30]
 
+    # Map fetched-but-previously-dropped sections into the payload.
+    # pull_all() fetches these; before this change they were discarded.
+    sections = result.get("sections") or {}
+    attendance_section = sections.get("attendance")
+    messages_section = sections.get("messages")
+    # attendance schema field is jsonb object; pass through whatever we got.
+    attendance_data = attendance_section if isinstance(attendance_section, dict) else {}
+    # synergy_mail schema field is jsonb array; extract a list when possible.
+    synergy_mail_data = []
+    if isinstance(messages_section, dict):
+        for key in ("messages", "raw"):
+            val = messages_section.get(key)
+            if isinstance(val, list):
+                synergy_mail_data = val
+                break
+        else:
+            # Unknown shape — preserve it so nothing is silently lost.
+            synergy_mail_data = messages_section
+
     payload = {
         "crew_member_id": cfg["crew_member_id"],
         "device_name": cfg.get("device_name") or
@@ -376,11 +395,11 @@ def run_sync():
         "gpa": {},
         "due_next": due_next,
         "past_periods": [],
-        "synergy_mail": [],
+        "synergy_mail": synergy_mail_data,
         "office365_emails": [],
         "class_details": class_details,
         "ctls_syllabi": {},
-        "attendance": {},
+        "attendance": attendance_data,
         "ctls_announcements": [],
         "ctls_upcoming": [],
         "zero_guard_flags": [],
