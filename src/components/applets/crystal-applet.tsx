@@ -32,14 +32,32 @@ function greeting(): string {
 }
 
 /**
+ * Words that summon Fireball (direct mode). "fireball" is the explicit
+ * switch; the rest are the old moochie-era directive verbs — when the pilot
+ * asks for more detail, an explanation, or a plan, they want the direct,
+ * no-fluff voice.
+ */
+const FIREBALL_KEYWORDS = [
+  "fireball",
+  "more",
+  "details",
+  "explain",
+  "plan",
+  "describe",
+  "create",
+];
+
+const FIREBALL_RE = new RegExp(`\\b(?:${FIREBALL_KEYWORDS.join("|")})\\b`, "i");
+const CRYSTAL_RE = /\bcrystal\b/i;
+
+/**
  * Detect the persona from keywords in the message.
- * "fireball" wins when both appear (explicit direct request).
+ * Fireball triggers win when both appear (explicit direct request).
  * Defaults to "crystal".
  */
 function detectPersona(text: string): Persona {
-  const lower = text.toLowerCase();
-  if (/\bfireball\b/.test(lower)) return "fireball";
-  if (/\bcrystal\b/.test(lower)) return "crystal";
+  if (FIREBALL_RE.test(text)) return "fireball";
+  if (CRYSTAL_RE.test(text)) return "crystal";
   return "crystal";
 }
 
