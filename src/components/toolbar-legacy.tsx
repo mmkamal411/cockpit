@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet } from "@/lib/applet-bus";
+import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 
 function HomeGlyph() {
   return (
@@ -94,17 +95,12 @@ export function ToolbarLegacy() {
           </button>
         ))}
 
-        {/* The Crystal orb — home base, centered in the toolbar. */}
-        <button
-          type="button"
-          id="toolbar-crystal-orb"
-          onClick={() => openApplet("crystal")}
-          aria-label="Talk to Crystal — your AI co-pilot"
-          title="Crystal"
+        {/* The Crystal command — orb or robot (flag), centered in the toolbar. */}
+        <CrystalCommandButton
           className="crystal-orb"
-        >
-          <span className="crystal-orb-core" aria-hidden="true" />
-        </button>
+          coreClassName="crystal-orb-core"
+          onOpen={() => openApplet("crystal")}
+        />
 
         {stations.slice(2).map((s) => (
           <button key={s.label} type="button" onClick={s.run} aria-label={`Open ${s.label}`} title={s.label} className="toolbar-btn">

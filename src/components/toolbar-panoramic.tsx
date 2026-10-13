@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
+import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 import { createClient } from "@/lib/supabase/client";
 
 /* Glyphs — same 24px line icons as the other variants. Icon + word label. */
@@ -225,19 +226,14 @@ function Yoke({ onOrb, orbActive, orbWaiting }: { onOrb: () => void; orbActive: 
         <circle cx="60" cy="46" r="24" fill="#05090c" stroke="rgb(255 255 255 / 0.08)" strokeWidth="1.5" />
         <circle cx="60" cy="46" r="24" fill="none" stroke="rgb(34 211 238 / 0.3)" strokeWidth="1" strokeDasharray="4 5" className="pano2-hub-ring" />
       </svg>
-      {/* Crystal orb seated in the hub — the command button */}
-      <button
-        type="button"
-        id="toolbar-crystal-orb"
-        onClick={onOrb}
-        data-active={orbActive}
-        data-waiting={orbWaiting}
-        aria-label="Talk to Crystal — your AI co-pilot"
-        title="Crystal"
+      {/* Crystal command — orb or robot (flag), seated in the hub */}
+      <CrystalCommandButton
         className="pano2-orb"
-      >
-        <span className="pano2-orb-core" aria-hidden="true" />
-      </button>
+        coreClassName="pano2-orb-core"
+        active={orbActive}
+        waiting={orbWaiting}
+        onOpen={onOrb}
+      />
     </div>
   );
 }

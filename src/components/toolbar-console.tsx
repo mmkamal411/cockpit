@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
+import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 
 /* Glyphs — copied from toolbar-legacy.tsx, resized to the console spec
    (22px, 1.5px stroke). Icon + word label, always. */
@@ -131,16 +132,11 @@ export function ToolbarConsole() {
             center, overlapping the shelf's top edge. */}
         <div className="console-reactor">
           <div className="console-well" aria-hidden="true" />
-          <button
-            type="button"
-            id="toolbar-crystal-orb"
-            onClick={() => openApplet("crystal")}
-            aria-label="Talk to Crystal — your AI co-pilot"
-            title="Crystal"
+          <CrystalCommandButton
             className="console-orb"
-          >
-            <span className="console-orb-core" aria-hidden="true" />
-          </button>
+            coreClassName="console-orb-core"
+            onOpen={() => openApplet("crystal")}
+          />
         </div>
 
         {/* Inset key bank: five machined keys, one milled recess. */}
