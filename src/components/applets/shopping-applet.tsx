@@ -47,6 +47,7 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [draftQty, setDraftQty] = useState("");
   const [inStore, setInStore] = useState(false);
   const [busy, setBusy] = useState(false);
   // Sharing
@@ -154,13 +155,15 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
   async function addItem() {
     const name = draft.trim();
     if (!name || !activeId || busy || !canEdit) return;
+    const quantity = Math.max(1, parseInt(draftQty.trim(), 10) || 1);
     setBusy(true);
     setDraft("");
+    setDraftQty("");
     try {
       const res = await fetch(`/api/shopping/lists/${activeId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, quantity }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -172,6 +175,7 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
       );
     } catch (err) {
       setDraft(name);
+      setDraftQty(draftQty);
       setError(err instanceof Error ? err.message : "Couldn't add that item.");
     } finally {
       setBusy(false);
@@ -508,6 +512,19 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
           aria-label="Add an item to the current list"
           disabled={!activeId || !canEdit}
           className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-3 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none disabled:opacity-50"
+        />
+        <input
+          type="number"
+          min={1}
+          value={draftQty}
+          onChange={(e) => setDraftQty(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addItem();
+          }}
+          placeholder="Qty"
+          aria-label="Quantity (defaults to 1)"
+          disabled={!activeId || !canEdit}
+          className="w-20 shrink-0 rounded-xl border border-line bg-panel-2 px-3 py-3 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none disabled:opacity-50"
         />
         <button
           type="button"
