@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy Cockpit to Cloudflare Pages (cockpit.pages.dev).
+"""Deploy Cockpit to Cloudflare Pages (https://cockpit-10c.pages.dev).
 
 Pipeline: npm run build -> opennextjs-cloudflare build -> assemble
 .pages-deploy (with _routes.json so /videos/* and /_next/static/* bypass

@@ -39,6 +39,17 @@ export async function isAdminInDb(email: string): Promise<boolean> {
 }
 
 /**
+ * Fail-closed denial for every admin auth layer. Plain-English message per
+ * the product error standard — no jargon, no HTTP status codes to the user.
+ */
+function denyAdminAccess(): never {
+  throw new Response(
+    JSON.stringify({ error: "You don't have access to this." }),
+    { status: 403, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/**
  * Guard for admin route handlers (App Router). Resolves the caller from the
  * session cookie and checks the ADMIN_EMAILS allowlist.
  *
@@ -62,28 +73,23 @@ export async function requireAdmin(request?: Request): Promise<string> {
   const email = data?.user?.email ?? null;
 
   if (error || !email || !isAdminEmail(email)) {
-    throw new Response(JSON.stringify({ error: "Forbidden" }), {
-      status: 403,
-      headers: { "Content-Type": "application/json" },
-    });
+    denyAdminAccess();
   }
 
   return email;
 }
 
 /**
- * Both-layer guard for the most sensitive routes (user delete, exports).
- * Throws the same 403 Response when EITHER layer denies access.
+ * Both-layer guard for the most sensitive routes (user delete, exports,
+ * view-as). Throws the same plain-English 403 Response when EITHER layer
+ * denies access — a single passing layer is never enough.
  */
 export async function requireAdminBothLayers(
   request?: Request,
 ): Promise<string> {
   const email = await requireAdmin(request);
   if (!(await isAdminInDb(email))) {
-    throw new Response(JSON.stringify({ error: "Forbidden" }), {
-      status: 403,
-      headers: { "Content-Type": "application/json" },
-    });
+    denyAdminAccess();
   }
   return email;
 }

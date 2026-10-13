@@ -1,7 +1,7 @@
 /**
  * Glucose + A1C logic tests.
  *
- * Run: npx tsx src/lib/health/glucose.test.ts
+ * Run: node src/lib/health/glucose.test.ts   (Node ≥ 22 strips types natively)
  * (Staging is down, so these pure-function tests are the verification gate.)
  */
 import {
@@ -11,7 +11,7 @@ import {
   validateA1CLab,
   validateGlucose,
   GLUCOSE_CONTEXTS,
-} from "./glucose";
+} from "./glucose.ts";
 
 let passed = 0;
 let failed = 0;

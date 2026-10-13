@@ -1,25 +1,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getEventsInRange } from "@/lib/calendar";
 import { getWeatherCurrent } from "@/lib/weather";
+import { CONTRACT_VERSION, type ChatContextBundle } from "./contract";
+
+export type { ChatContextBundle } from "./contract";
 
 /**
  * Crystal Chat context bundle — assembled server-side, one optional source
  * at a time. Every source degrades silently: if the data isn't there (table
  * missing, integration not connected, fetch failed), it's skipped and chat
- * still works. The bundle is kept compact — well under a 2000-token budget.
+ * still works.
+ *
+ * Privacy: the bundle carries the PILOT's own situational context only.
+ * Crew/child signals are NEVER included (locked founder decision 2026-10-13).
+ * Field-level caps keep the bundle compact (agenda ≤12, todos ≤12, nudges ≤8);
+ * token counting is a Phase 3 item, so no token budget is enforced here.
  */
-
-export interface ChatContextBundle {
-  pilot: { name: string | null; timezone: string | null };
-  /** ISO timestamp so the model knows "today". */
-  now: string;
-  weather?: string;
-  agenda?: string[];
-  todos?: string[];
-  nudges?: string[];
-  /** Crew awareness: names only, never credentials. */
-  crew?: string;
-}
 
 interface PilotRow {
   display_name: string | null;
@@ -146,41 +142,27 @@ async function nudgesSection(supabase: SupabaseClient, pilotId: string): Promise
   }
 }
 
-async function crewSection(supabase: SupabaseClient, pilotId: string): Promise<string | undefined> {
-  try {
-    const { data, error } = await supabase
-      .from("crew_members")
-      .select("name, relationship")
-      .eq("pilot_id", pilotId)
-      .limit(20);
-    if (error) return undefined;
-    const members = (data ?? []) as { name: string; relationship: string }[];
-    if (members.length === 0) return "No children linked";
-    return `Children linked: ${members.map((m) => `${m.name} (${m.relationship})`).join(", ")}`;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Assemble the compact context bundle. Never throws — worst case it returns just pilot + now. */
 export async function buildContextBundle(
   supabase: SupabaseClient,
   pilotId: string,
 ): Promise<ChatContextBundle> {
   const { pilot, row } = await pilotSection(supabase, pilotId);
-  const [weather, agenda, todos, nudges, crew] = await Promise.all([
+  const [weather, agenda, todos, nudges] = await Promise.all([
     weatherSection(row),
     agendaSection(pilotId, pilot.timezone),
     todosSection(supabase, pilotId),
     nudgesSection(supabase, pilotId),
-    crewSection(supabase, pilotId),
   ]);
 
-  const bundle: ChatContextBundle = { pilot, now: new Date().toISOString() };
+  const bundle: ChatContextBundle = {
+    context_version: CONTRACT_VERSION,
+    pilot,
+    now: new Date().toISOString(),
+  };
   if (weather) bundle.weather = weather;
   if (agenda) bundle.agenda = agenda;
   if (todos) bundle.todos = todos;
   if (nudges) bundle.nudges = nudges;
-  if (crew) bundle.crew = crew;
   return bundle;
 }

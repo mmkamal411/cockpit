@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-deploy smoke test for Cockpit staging (cockpit.pages.dev).
+"""Post-deploy smoke test for Cockpit staging (https://cockpit-10c.pages.dev).
 
 Versioned from pookie-app/smoke-test-staging.py (2026-10-12).
 

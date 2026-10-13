@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Panel, ErrorCard, SkeletonTable } from "@/components/admin/ui";
 
@@ -56,6 +57,9 @@ export function ViewAsPanel({ userId }: { userId: string }) {
   const [data, setData] = useState<unknown | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A5: a 403 means one of the two admin auth layers denied access.
+  // Show a plain-English denial with a way back, never a blank panel.
+  const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,14 +68,23 @@ export function ViewAsPanel({ userId }: { userId: string }) {
     })
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+        if (!res.ok) {
+          if (res.status === 403) {
+            const err = new Error(body?.error ?? "You don't have access to this.");
+            (err as { denied?: boolean }).denied = true;
+            throw err;
+          }
+          throw new Error(body?.error ?? `HTTP ${res.status}`);
+        }
         return body;
       })
       .then((body) => {
         if (!cancelled) setData(body);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+        if (cancelled) return;
+        setAccessDenied(err instanceof Error && Boolean((err as { denied?: boolean }).denied));
+        setError(err instanceof Error ? err.message : "Failed to load");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -86,7 +99,24 @@ export function ViewAsPanel({ userId }: { userId: string }) {
       {loading ? (
         <SkeletonTable rows={6} cols={3} />
       ) : error ? (
-        <ErrorCard title="Could not load the pilot's dashboard data" detail={error} />
+        <ErrorCard
+          title={
+            accessDenied
+              ? "You don't have access to this preview"
+              : "Could not load the pilot's dashboard data"
+          }
+          detail={error}
+          retry={
+            accessDenied ? (
+              <Link
+                href="/admin/users"
+                className="rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-200 hover:bg-cyan-400/20"
+              >
+                Back to the users list
+              </Link>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="max-h-96 overflow-auto rounded-lg border border-white/10 bg-black/60 p-3 font-mono text-xs applet-scroll">
           <JsonNode value={data} />
