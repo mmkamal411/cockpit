@@ -2,7 +2,7 @@
 -- 001_pilot_foundation.sql
 -- Cockpit clean rebuild — pilot-first foundation schema
 --
--- Pookie is a spacecraft; the signed-in user is the PILOT.
+-- Cockpit is a spacecraft; the signed-in user is the PILOT.
 -- Children are OPT-IN crew members, never assumed.
 --
 -- RUN: paste this whole file into the Supabase dashboard SQL editor
