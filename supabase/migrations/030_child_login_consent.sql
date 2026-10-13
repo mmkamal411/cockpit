@@ -1,8 +1,8 @@
 -- =============================================================================
--- 029_child_login_consent.sql
+-- 030_child_login_consent.sql
 -- Cockpit — child login + consent (Phase C, child education UX).
 --
--- NOTE: this file supersedes 028_child_login_consent.sql, which was renamed
+-- NOTE: this file supersedes 028_child_login_consent.sql, which was renamed to 030
 -- before it was ever run. Every statement below is idempotent (IF NOT EXISTS
 -- / CREATE OR REPLACE / pg_policies-guarded DO blocks), so running this
 -- after a partial 028 attempt is safe.
@@ -28,7 +28,7 @@
 --     child can validate a code without RLS blocking them.
 --
 -- RUN: paste into the Supabase dashboard SQL editor (project: cockpit)
--- AFTER 028_pilot_profile_delete_grace.sql. Expect "Success. No rows returned."
+-- AFTER 029_class_manual_missing.sql. Expect "Success. No rows returned."
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
