@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type Metric = "weight" | "sleep" | "water" | "exercise" | "blood_glucose";
+type Metric = "weight" | "sleep" | "water" | "exercise" | "blood_glucose" | "steps";
 
 interface HealthLog {
   id: string;
@@ -31,6 +31,7 @@ const METRICS: { id: Metric; label: string; icon: string; unit: string; accent: 
   { id: "water", label: "Water", icon: "💧", unit: "glasses", accent: "text-cyan-300" },
   { id: "exercise", label: "Exercise", icon: "🏃", unit: "min", accent: "text-neon-green" },
   { id: "blood_glucose", label: "Blood sugar", icon: "🩸", unit: "mg/dL", accent: "text-red-300" },
+  { id: "steps", label: "Steps", icon: "👟", unit: "steps", accent: "text-neon-purple" },
 ];
 
 /** Context tags for a glucose reading. */
@@ -55,6 +56,7 @@ const GLUCOSE_DISCLAIMER =
 /** Health — the Med Bay. Manual logging, gentle trends, celebrating streaks. */
 export function HealthApplet() {
   const [latest, setLatest] = useState<Partial<Record<Metric, HealthLog>>>({});
+  const [todaySteps, setTodaySteps] = useState<number | null>(null);
   const [streaks, setStreaks] = useState<Streak[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,10 +67,11 @@ export function HealthApplet() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [logsRes, streaksRes, goalsRes] = await Promise.all([
+      const [logsRes, streaksRes, goalsRes, stepsRes] = await Promise.all([
         fetch("/api/health/logs?limit=200", { cache: "no-store" }),
         fetch("/api/health/streaks", { cache: "no-store" }),
         fetch("/api/health/goals", { cache: "no-store" }),
+        fetch("/api/health/logs?today_only=true&metric=steps", { cache: "no-store" }),
       ]);
       for (const [res, what] of [
         [logsRes, "logs"],
@@ -90,6 +93,15 @@ export function HealthApplet() {
       setLatest(first);
       setStreaks((await streaksRes.json()).streaks ?? []);
       setGoals((await goalsRes.json()).goals ?? []);
+      // Steps append through the day — the tile shows today's total, not the latest entry.
+      if (stepsRes.ok) {
+        const stepsBody = await stepsRes.json().catch(() => ({}));
+        setTodaySteps(
+          typeof stepsBody.today_total === "number" ? stepsBody.today_total : null,
+        );
+      } else {
+        setTodaySteps(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Your health log didn't load. Try again.");
     } finally {
@@ -133,13 +145,29 @@ export function HealthApplet() {
       {/* Metric tiles */}
       <div className="grid grid-cols-2 gap-3">
         {loading
-          ? [0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-32 animate-pulse rounded-2xl border border-line bg-panel-2/60" />
+          ? METRICS.map((m) => (
+              <div key={m.id} className="h-32 animate-pulse rounded-2xl border border-line bg-panel-2/60" />
             ))
           : METRICS.map((m) => {
               const log = latest[m.id];
               const streak = streakFor(m.id);
               const goal = goalFor(m.id);
+              // Steps append through the day — the tile shows today's total.
+              const isSteps = m.id === "steps";
+              const displayValue = isSteps
+                ? todaySteps !== null
+                  ? todaySteps.toLocaleString("en-US")
+                  : null
+                : log
+                  ? `${log.value} ${log.unit}`
+                  : null;
+              const caption = isSteps
+                ? todaySteps !== null
+                  ? "steps today · tap to log more"
+                  : "Tap to log your first steps"
+                : log
+                  ? "Tap to log"
+                  : "Tap to log your first entry";
               return (
                 <button
                   key={m.id}
@@ -156,11 +184,11 @@ export function HealthApplet() {
                     )}
                   </div>
                   <p className="mt-2 text-xs font-medium uppercase tracking-wider text-dim">{m.label}</p>
-                  <p className={`mt-0.5 text-2xl font-semibold ${log ? m.accent : "text-dim"}`}>
-                    {log ? `${log.value} ${log.unit}` : "—"}
+                  <p className={`mt-0.5 text-2xl font-semibold ${displayValue ? m.accent : "text-dim"}`}>
+                    {displayValue ?? "—"}
                   </p>
                   <p className="mt-1 text-xs text-dim">
-                    {log ? "Tap to log" : "Tap to log your first entry"}
+                    {caption}
                     {goal ? ` · goal ${goal.target_value} ${goal.unit}` : ""}
                   </p>
                 </button>
@@ -232,7 +260,8 @@ function LogSheet({
     metric === "weight" ? "e.g. 172" :
     metric === "sleep" ? "e.g. 7.5" :
     metric === "water" ? "e.g. 6" :
-    metric === "blood_glucose" ? "e.g. 112" : "e.g. 30";
+    metric === "blood_glucose" ? "e.g. 112" :
+    metric === "steps" ? "e.g. 5000" : "e.g. 30";
 
   async function save() {
     const v = parseFloat(value);

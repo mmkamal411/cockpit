@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePilot, serverError } from "@/lib/api-auth";
 
-const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab"];
+const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab", "steps"];
 
 /**
  * GET /api/health/trends?metric=sleep&period=30d
@@ -22,13 +22,15 @@ export async function GET(req: Request) {
     const metric = searchParams.get("metric");
     if (!metric || !METRICS.includes(metric)) {
       return NextResponse.json(
-        { error: "Pick weight, sleep, water, exercise, blood sugar, or lab A1C." },
+        { error: "Pick weight, sleep, water, exercise, blood sugar, steps, or lab A1C." },
         { status: 400 },
       );
     }
     const days = searchParams.get("period") === "7d" ? 7 : 30;
 
-    const end = new Date();
+    // Steps accumulate: the day's point is the SUM of its entries, not the average.
+    const isSteps = metric === "steps";
+
     const start = new Date();
     start.setDate(start.getDate() - days);
     const priorStart = new Date();
@@ -62,8 +64,10 @@ export async function GET(req: Request) {
       const key = d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
       const vals = byDay.get(key);
       if (vals && vals.length > 0) {
-        const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-        daily.push({ date: key, value: Math.round(avg * 100) / 100 });
+        const agg = isSteps
+          ? vals.reduce((a, b) => a + b, 0)
+          : vals.reduce((a, b) => a + b, 0) / vals.length;
+        daily.push({ date: key, value: Math.round(agg * 100) / 100 });
       } else {
         daily.push({ date: key, value: NaN });
       }
@@ -79,12 +83,13 @@ export async function GET(req: Request) {
       return Math.round((window.reduce((a, b) => a + b.value, 0) / window.length) * 100) / 100;
     });
 
-    // Prior-period average for the delta.
+    // Prior-period average for the delta. For steps, each prior day contributes
+    // its sum (matching the daily points), not the raw entries.
     const priorVals: number[] = [];
     for (const [day, vals] of byDay) {
       const d = new Date(day + "T12:00:00");
       if (d >= priorStart && d < start) {
-        priorVals.push(...vals);
+        priorVals.push(...(isSteps ? [vals.reduce((a, b) => a + b, 0)] : vals));
       }
     }
     const priorAvg = priorVals.length > 0
