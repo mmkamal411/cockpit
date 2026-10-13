@@ -89,11 +89,12 @@ export async function GET(
     event_date: string;
     end_date: string | null;
     location: string | null;
+    description: string | null;
   }> = [];
   try {
     const { data: eventRows, error: eventsError } = await supabase
       .from("crew_school_calendar_events")
-      .select("title, event_date, end_date, location")
+      .select("title, event_date, end_date, location, description")
       .eq("crew_member_id", ownedId)
       .order("event_date", { ascending: true })
       .limit(100);

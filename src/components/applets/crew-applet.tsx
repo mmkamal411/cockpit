@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ClassDetail } from "./class-detail";
+import { DistrictCalendar } from "./district-calendar";
 import { pageLooksLikeBell } from "@/lib/school-sources";
 import {
   BellRowInput,
@@ -82,65 +83,7 @@ interface CalendarEvent {
   event_date: string;
   end_date: string | null;
   location: string | null;
-}
-
-/** Local YYYY-MM-DD for "upcoming" comparisons. */
-function localYmd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
-}
-
-/** "Tue, Oct 20" style date for calendar event rows. */
-function formatEventDate(ymd: string): string {
-  const d = new Date(`${ymd}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return ymd;
-  return d.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-/** Upcoming school calendar dates, from the saved calendar rows. */
-function CalendarEventList({ events }: { events: CalendarEvent[] }) {
-  const today = localYmd(new Date());
-  const upcoming = events
-    .filter((e) => e.event_date >= today)
-    .sort((a, b) => (a.event_date < b.event_date ? -1 : 1))
-    .slice(0, 15);
-  if (upcoming.length === 0) {
-    return (
-      <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
-        The saved calendar has no upcoming dates.
-      </p>
-    );
-  }
-  return (
-    <div className="rounded-xl border border-neon-green/20 bg-panel-2/60 px-4 py-3">
-      <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
-        Upcoming dates
-      </p>
-      <ul className="mt-2 space-y-2">
-        {upcoming.map((e, i) => (
-          <li key={`${e.event_date}-${i}`} className="flex gap-3 text-sm">
-            <span className="w-32 shrink-0 text-neon-green">
-              {formatEventDate(e.event_date)}
-              {e.end_date && e.end_date !== e.event_date
-                ? ` – ${formatEventDate(e.end_date)}`
-                : ""}
-            </span>
-            <span className="text-stardust">
-              {e.title}
-              {e.location ? (
-                <span className="text-dim"> · {e.location}</span>
-              ) : null}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+  description: string | null;
 }
 
 interface SchoolSourceSnapshot {
@@ -1326,6 +1269,8 @@ export function CrewApplet() {
                       typeof r.end_date === "string" ? r.end_date : null,
                     location:
                       typeof r.location === "string" ? r.location : null,
+                    description:
+                      typeof r.description === "string" ? r.description : null,
                   } satisfies CalendarEvent,
                 ];
               })
@@ -2439,7 +2384,16 @@ export function CrewApplet() {
                   </p>
                   {calEvents.length > 0 ? (
                     <>
-                      <CalendarEventList events={calEvents} />
+                      <DistrictCalendar
+                        events={calEvents.map((e) => ({
+                          title: e.title,
+                          event_date: e.event_date,
+                          end_date: e.end_date,
+                          category: e.description,
+                        }))}
+                        districtName={srcSources?.district ?? null}
+                        sourceUrl={calUrl || srcSources?.calendar_source_url || null}
+                      />
                       {calError && (
                         <p
                           role="alert"
