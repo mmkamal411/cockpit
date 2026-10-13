@@ -24,6 +24,7 @@ interface Seedling {
 // Stations still being built — seedlings, not dead ends. Each one says what
 // it will do, so the full ship is visible from the first tap.
 const SEEDLINGS: Seedling[] = [
+  { name: "Calendar", blurb: "Your day, laid out calmly.", glow: "#f0abfc", appletId: "calendar" },
   { name: "Health", blurb: "Sleep, movement, and how your body is really doing.", glow: "#86efac", appletId: "health" },
   { name: "Money", blurb: "Bills, spending, and the quiet leaks in your budget.", glow: "#fcd34d", appletId: "bills" },
   { name: "Mail", blurb: "Every inbox, triaged — the important stuff floats up.", glow: "#67e8f9" },
