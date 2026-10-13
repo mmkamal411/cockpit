@@ -1,5 +1,5 @@
 -- =============================================================================
--- 016_shopping_shares.sql
+-- 017_shopping_shares.sql
 -- Cockpit — shopping list sharing, Tier 1 (simple sharing) + viral invites.
 --
 -- Adds:
