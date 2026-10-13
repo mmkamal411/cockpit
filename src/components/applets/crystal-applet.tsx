@@ -8,6 +8,7 @@ import {
   stripDirective,
   type Persona,
 } from "@/lib/chat/mode";
+import { parseSSEFrame } from "@/lib/chat/sse";
 
 const TUTOR_URL = (
   process.env.NEXT_PUBLIC_CRYSTAL_URL ||
@@ -180,7 +181,7 @@ export function CrystalApplet() {
 
     try {
       if (SERVER_MODE) {
-        await sendViaServer(clean, persona, outbound);
+        await sendViaServer(persona, outbound);
       } else {
         await sendDirect(workerHistory, persona);
       }
@@ -189,30 +190,83 @@ export function CrystalApplet() {
     }
   }
 
-  /** Server path: POST /api/chat — context assembled server-side, thread persisted. */
-  async function sendViaServer(clean: string, persona: Persona, outbound: string) {
+  /** Server path: POST /api/chat — context assembled server-side, thread
+   *  persisted, reply streamed back over SSE (spec §3). */
+  async function sendViaServer(persona: Persona, outbound: string) {
+    let res: Response;
     try {
-      const res = await fetch("/api/chat", {
+      res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ thread_id: threadId, message: outbound, mode: persona }),
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({
+          thread_id: threadId,
+          message: outbound,
+          mode: persona,
+          stream: true,
+        }),
       });
-      if (!res.ok) throw new Error(`chat ${res.status}`);
-      const data = (await res.json()) as {
-        reply?: unknown;
-        thread_id?: unknown;
-        mode?: unknown;
-      };
-      const reply =
-        typeof data.reply === "string" && data.reply.trim() ? data.reply.trim() : "";
-      if (!reply) throw new Error("empty reply");
-      if (typeof data.thread_id === "string") setThreadId(data.thread_id);
-      const replyPersona: Persona = data.mode === "fireball" ? "fireball" : "crystal";
-      setMessages((prev) => [...prev, { role: "assistant", text: reply, persona: replyPersona }]);
+    } catch {
+      throw new Error("chat unreachable");
+    }
+    if (!res.ok || !res.body) throw new Error(`chat ${res.status}`);
+    // Placeholder bubble that fills in as SSE chunks arrive.
+    setMessages((prev) => [...prev, { role: "assistant", text: "", persona }]);
+    try {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let fullText = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop() ?? "";
+        for (const frame of frames) {
+          const parsed = parseSSEFrame(`${frame}\n\n`);
+          if (!parsed) continue;
+          if (typeof parsed["delta"] === "string") {
+            const delta = parsed["delta"] as string;
+            fullText += (fullText ? " " : "") + delta;
+            setMessages((prev) => {
+              const next = [...prev];
+              const last = next[next.length - 1];
+              if (last && last.role === "assistant") {
+                next[next.length - 1] = {
+                  ...last,
+                  text: last.text ? `${last.text} ${delta}` : delta,
+                };
+              }
+              return next;
+            });
+          }
+          if (parsed["done"] === true) {
+            if (typeof parsed["thread_id"] === "string") setThreadId(parsed["thread_id"]);
+            if (parsed["mode"] === "fireball" || parsed["mode"] === "crystal") {
+              const replyPersona = parsed["mode"] as Persona;
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last && last.role === "assistant") {
+                  next[next.length - 1] = { ...last, persona: replyPersona };
+                }
+                return next;
+              });
+            }
+          }
+        }
+      }
+      if (!fullText.trim()) throw new Error("empty stream");
       void fetchThreads();
     } catch {
-      // Server path failed — fall back to the direct worker path so chat
-      // never breaks. The user's message is already on screen.
+      // Stream broke mid-flight: drop the placeholder and fall back to the
+      // direct worker path so chat never breaks.
+      setMessages((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && last.role === "assistant" && !last.text) next.pop();
+        return next;
+      });
       const workerHistory = [...messages, { role: "user" as const, text: outbound }];
       await sendDirect(workerHistory, persona);
     }

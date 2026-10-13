@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildContextBundle, type ChatContextBundle } from "@/lib/chat/context";
+import { createReplyStream } from "@/lib/chat/sse";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ interface ChatBody {
   thread_id?: unknown;
   message?: unknown;
   mode?: unknown;
+  stream?: unknown;
 }
 
 interface PriorMessage {
@@ -184,8 +186,8 @@ export async function POST(req: Request) {
       mode,
     );
 
-    // 5. Persist the reply + touch the thread (best-effort: the pilot already
-    //    has their answer, so a persistence hiccup must not fail the request).
+    // 5. Persist the reply + touch the thread BEFORE responding, so the
+    //    thread is complete even if the client disconnects mid-stream.
     try {
       await supabase
         .from("chat_messages")
@@ -195,9 +197,22 @@ export async function POST(req: Request) {
         .update({ updated_at: new Date().toISOString() })
         .eq("id", threadId);
     } catch {
-      /* reply already delivered */
+      /* persistence is best-effort; the reply below still goes out */
     }
 
+    // 6. Streaming clients get SSE (spec §3); everyone else gets JSON.
+    const wantStream =
+      body?.stream === true ||
+      (req.headers.get("accept") || "").includes("text/event-stream");
+    if (wantStream) {
+      return new Response(createReplyStream(reply, { thread_id: threadId, mode }), {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    }
     return NextResponse.json({ reply, thread_id: threadId, mode });
   } catch (err) {
     if (err instanceof WorkerDown) {
