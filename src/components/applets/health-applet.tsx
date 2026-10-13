@@ -25,6 +25,11 @@ interface Goal {
   unit: string;
 }
 
+/** A trend chart only appears once a metric has at least this many distinct
+ * data points. Below that, a friendly empty state is shown instead of an
+ * empty or broken chart. */
+const TREND_MIN_POINTS = 3;
+
 const METRICS: { id: Metric; label: string; icon: string; unit: string; accent: string }[] = [
   { id: "steps", label: "Steps", icon: "👟", unit: "steps", accent: "text-neon-green" },
   { id: "weight", label: "Weight", icon: "⚖️", unit: "lb", accent: "text-amber-300" },
@@ -644,6 +649,47 @@ function StepsGoalEditor({ initial, onSaved }: { initial: number; onSaved: () =>
 }
 
 /* ------------------------------------------------------------------ */
+/* Trend empty state — shown until a metric has 3+ entries.            */
+/* ------------------------------------------------------------------ */
+
+function TrendEmptyState({ logged, noun }: { logged: number; noun: string }) {
+  const remaining = TREND_MIN_POINTS - logged;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  return (
+    <div className="py-8 text-center">
+      <svg viewBox="0 0 120 52" className="mx-auto w-32" role="img" aria-label="Trend not available yet">
+        <line x1="6" y1="46" x2="114" y2="46" stroke="#3a3a52" strokeWidth="1" opacity="0.6" />
+        <polyline
+          points="8,40 34,30 60,33 86,18 110,12"
+          fill="none"
+          stroke="#67e8f9"
+          strokeWidth="2"
+          strokeDasharray="5 5"
+          opacity="0.35"
+        />
+        {[
+          [8, 40],
+          [34, 30],
+          [60, 33],
+          [86, 18],
+          [110, 12],
+        ].map(([x, y]) => (
+          <circle key={x} cx={x} cy={y} r="3.5" fill="none" stroke="#67e8f9" strokeWidth="1.5" opacity="0.5" />
+        ))}
+      </svg>
+      <p className="mt-3 text-sm text-stardust">
+        📈 Log {plural(remaining, noun)} more to see your trend.
+      </p>
+      <p className="mt-1 text-xs text-dim">
+        {logged > 0
+          ? `You're ${plural(logged, noun)} in — almost there.`
+          : "Once you've logged 3, your chart appears here."}
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Glucose trend view — readings chart with ADA reference bands,       */
 /* estimated A1C, lab A1C history, and the medical disclaimer.        */
 /* ------------------------------------------------------------------ */
@@ -740,10 +786,8 @@ function GlucoseTrendView({ onClose }: { onClose: () => void }) {
           <p className="py-6 text-center text-sm text-stardust">{error}</p>
         ) : loading ? (
           <div className="mt-4 h-40 animate-pulse rounded-xl bg-panel-2/60" />
-        ) : readings.length === 0 ? (
-          <p className="py-6 text-center text-sm text-stardust">
-            No readings yet — log your blood sugar and the trend will appear here.
-          </p>
+        ) : readings.length < TREND_MIN_POINTS ? (
+          <TrendEmptyState logged={readings.length} noun="reading" />
         ) : (
           <div className="mt-4">
             <svg viewBox="0 0 300 140" className="w-full" role="img" aria-label="Blood sugar readings with reference bands">
@@ -949,16 +993,27 @@ function TrendView({ metric, onClose }: { metric: Metric; onClose: () => void })
     unit: string | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Daily step goal, fetched alongside the trend so goal-hit days can be marked.
+  const [stepsGoal, setStepsGoal] = useState<number | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/health/trends?metric=${metric}&period=30d`, { cache: "no-store" });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
+        const [trendRes, goalsRes] = await Promise.all([
+          fetch(`/api/health/trends?metric=${metric}&period=30d`, { cache: "no-store" }),
+          metric === "steps" ? fetch("/api/health/goals", { cache: "no-store" }) : Promise.resolve(null),
+        ]);
+        const body = await trendRes.json().catch(() => ({}));
+        if (!trendRes.ok) {
           throw new Error(typeof body?.error === "string" ? body.error : "The trend didn't load.");
         }
         setData(body);
+        if (goalsRes) {
+          const goalsBody = await goalsRes.json().catch(() => ({}));
+          const goal = (goalsBody.goals ?? []).find((g: { metric: string }) => g.metric === "steps");
+          const target = Number(goal?.target_value);
+          if (Number.isFinite(target) && target > 0) setStepsGoal(target);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "The trend didn't load.");
       }
@@ -966,9 +1021,15 @@ function TrendView({ metric, onClose }: { metric: Metric; onClose: () => void })
   }, [metric]);
 
   const points = data?.daily.filter((d) => d.value !== null) ?? [];
-  const max = points.length > 0 ? Math.max(...points.map((p) => p.value as number)) : 1;
+  const isSteps = metric === "steps";
+  const dataMax = points.length > 0 ? Math.max(...points.map((p) => p.value as number)) : 1;
+  // Keep the goal line in view even when it sits above every logged day.
+  const max = isSteps && stepsGoal !== null ? Math.max(dataMax, stepsGoal) : dataMax;
   const min = points.length > 0 ? Math.min(...points.map((p) => p.value as number)) : 0;
   const span = Math.max(max - min, 0.001);
+  const xOf = (i: number) => 10 + (i / Math.max(points.length - 1, 1)) * 280;
+  const yOf = (v: number) => 110 - ((v - min) / span) * 95;
+  const hitGoal = (v: number) => isSteps && stepsGoal !== null && v >= stepsGoal;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={`${def.label} trend`}>
@@ -993,25 +1054,42 @@ function TrendView({ metric, onClose }: { metric: Metric; onClose: () => void })
           <p className="py-6 text-center text-sm text-stardust">{error}</p>
         ) : !data ? (
           <div className="h-40 animate-pulse rounded-xl bg-panel-2/60" />
-        ) : points.length === 0 ? (
-          <p className="py-6 text-center text-sm text-stardust">
-            No entries yet — log a few days and the trend will appear here.
-          </p>
+        ) : points.length < TREND_MIN_POINTS ? (
+          <TrendEmptyState logged={points.length} noun="day" />
         ) : (
           <div className="mt-4">
             <svg viewBox="0 0 300 120" className="w-full" role="img" aria-label={`${def.label} trend chart`}>
+              {/* Steps goal line — dashed, at the daily goal */}
+              {isSteps && stepsGoal !== null && (
+                <line
+                  x1="10"
+                  y1={yOf(stepsGoal)}
+                  x2="290"
+                  y2={yOf(stepsGoal)}
+                  stroke="#fcd34d"
+                  strokeWidth="1.5"
+                  strokeDasharray="6 4"
+                  opacity="0.7"
+                />
+              )}
               {points.map((p, i) => {
-                const x = 10 + (i / Math.max(points.length - 1, 1)) * 280;
-                const y = 110 - ((p.value as number - min) / span) * 95;
-                return <circle key={p.date} cx={x} cy={y} r="3.5" fill="#5eead4" />;
+                const x = xOf(i);
+                const y = yOf(p.value as number);
+                const reached = hitGoal(p.value as number);
+                return (
+                  <g key={p.date}>
+                    {reached && (
+                      <text x={x} y={y - 8} textAnchor="middle" fontSize="10" fill="#86efac">
+                        ✓
+                      </text>
+                    )}
+                    <circle cx={x} cy={y} r="3.5" fill={reached ? "#86efac" : "#5eead4"} />
+                  </g>
+                );
               })}
               <polyline
                 points={points
-                  .map((p, i) => {
-                    const x = 10 + (i / Math.max(points.length - 1, 1)) * 280;
-                    const y = 110 - ((p.value as number - min) / span) * 95;
-                    return `${x},${y}`;
-                  })
+                  .map((p, i) => `${xOf(i)},${yOf(p.value as number)}`)
                   .join(" ")}
                 fill="none"
                 stroke="#5eead4"
@@ -1019,6 +1097,17 @@ function TrendView({ metric, onClose }: { metric: Metric; onClose: () => void })
                 opacity="0.7"
               />
             </svg>
+            {isSteps && stepsGoal !== null && (
+              <div className="mt-1 space-y-1 text-xs text-dim">
+                <p>
+                  <span className="inline-block h-0 w-6 border-t-2 border-dashed border-amber-300/70 align-middle" />{" "}
+                  Daily goal: {stepsGoal.toLocaleString("en-US")} steps
+                </p>
+                <p>
+                  <span className="text-neon-green">✓</span> days you hit your goal
+                </p>
+              </div>
+            )}
             <div className="mt-3 space-y-1 text-sm text-stardust">
               <p>
                 30-day average:{" "}
