@@ -115,3 +115,23 @@ Process notes: (1) My uncommitted work was wiped TWICE mid-task — first by the
 
 ## 2026-10-13 ~11:50 EDT — DEPLOY IN PROGRESS (subagent 60470553)
 Running full `deploy/deploy-staging.py` on `feature/phase1-module-finish` @ c2b0e8f (965bd21 hero-vista fix + docs-only c2b0e8f, both pushed, tree clean). **All teams: do NOT commit, push, checkout, or `rm -rf .next` on this tree until the all-clear entry lands (~15 min).** A source change mid-build will corrupt the bundle the same way the 11:20–11:36 EDT races did.
+
+## 2026-10-13 ~11:46 EDT — Deploy Crisis RESOLVED (coordinator 4c667c4c)
+**Deploy b593f39d is LIVE on staging, smoke test passed.** 
+**Root cause:** concurrent `next build` processes on the shared working tree (3+ builds in 16 min, 11:20–11:36 EDT) — one process's `rm -rf .next` raced another's in-flight build → ENOENT on temp files. Not a code bug, not disk, not Node.
+**Fix:** single build at a time. Verified via Cloudflare API (b593f39d, deploy success, 15:45 UTC) + independent smoke test (all 5 checks pass).
+**Includes:** hero-vista video rotation fix, Calendar in More, Outlook calendar UI, class detail pages, shopping delete/quantity, Phase 1 module finishes.
+**Hard rule going forward:** one build/deploy at a time per working tree. Check `ps -eo args | grep "[n]ext build"` before starting. Announce in BUILD-LOG.
+**Incremental deploys:** Meheldi mandated small batches going forward. Next deploys should be one feature group at a time.
+
+## 2026-10-13 ~11:55 EDT — DEPLOY ALL-CLEAR + strategy pivot (subagent 60470553)
+**Staging deploy LANDED.** Deployment `b593f39d` → https://b593f39d.cockpit-10c.pages.dev (canonical https://cockpit-10c.pages.dev). Smoke test: ALL 5 checks passed (/, /login 200, /auth/callback 307→login?error=auth, vista video mp4 200, _next static asset 200). `deploy-staging.py` exit 0. Tree is free — teams may resume work on feature/phase1-module-finish.
+
+**Timing note on the incremental-release strategy:** this full-branch deploy finished uploading ~2 min BEFORE the strategy-change message arrived — it could not be recalled. Net effect: staging now runs the entire phase1-module-finish tip (f552456). Per-batch commit map vs. what actually shipped:
+- Batch 1: video rotation (72d631d + 965bd21 fix) SHIPPED. Calendar-in-More (`3b4b8a9`, on feature/outlook-calendar) NOT shipped — cherry-pick candidate.
+- Batch 2: shopping quantity (a2f2cab) SHIPPED. Item delete buttons (`33a5ee4`, on feature/health-steps-progress) NOT shipped — cherry-pick candidate.
+- Batch 3: class detail pages (`3e112be`) SHIPPED.
+- Batch 4: Outlook code SHIPPED via the 72d631d sweep (OAuth routes, calendar-outlook.ts, Graph mapping, Connect-Outlook UI). Canonical commits on feature/outlook-calendar (b57f145). **INERT until Meheldi runs 023_calendar_outlook.sql** — without it the provider CHECK rejects 'outlook' rows and the UI falls back to the plain-English ?cal=error notice. Integration Manager (6d143746) tracking the 023 confirmation.
+- Batch 5: health-steps code SHIPPED via the same sweep (canonical: a4b145f, 56218e6, a151783, 23d6a55 on feature/health-steps-progress). **INERT until Meheldi runs 025_calendar_sync_status.sql + 026_health_steps.sql.** 6d143746 tracking.
+- Batch 6: module finishes (weather 50ca619, todos/today/calendar polish) SHIPPED.
+Suggested next small deploy (parent to confirm): cherry-pick `3b4b8a9` + `33a5ee4` onto a deploy branch → build → upload → smoke → browser verify. No further deploys launched from this task pending parent sequencing.
