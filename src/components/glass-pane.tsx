@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { parseTodo } from "@/lib/parse-todo";
-import { useTodos } from "@/lib/use-todos";
+import { readLocal, writeLocal } from "@/lib/local-store";
+import type { TodoItem } from "@/lib/today-types";
+const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 import { openApplet } from "@/lib/applet-bus";
+
+const TODOS_KEY = "cockpit.todos";
 
 // Fallback position when the pilot hasn't shared location — the ship's
 // home port label stays honest about it.
@@ -51,7 +54,7 @@ export function GlassPane() {
   const [weather, setWeather] = useState<Weather | null>(null);
   const [weatherFailed, setWeatherFailed] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const { todos, addTodo: createTodo, toggleTodo: flipTodo } = useTodos();
+  const [todos, setTodos] = useState<TodoItem[]>(() => readLocal<TodoItem[]>(TODOS_KEY, []));
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
@@ -82,6 +85,10 @@ export function GlassPane() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    writeLocal(TODOS_KEY, todos);
+  }, [todos]);
+
   const now = new Date();
   const week = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(now);
@@ -90,15 +97,15 @@ export function GlassPane() {
   });
   const open = todos.filter((t) => !t.done);
 
-  async function addTodo() {
-    const parsed = parseTodo(draft);
-    if (!parsed.text) return;
+  function addTodo() {
+    const text = draft.trim();
+    if (!text) return;
+    setTodos((prev) => [...prev, { id: newId(), text, done: false, createdAt: Date.now(), dueAt: null }]);
     setDraft("");
-    await createTodo(parsed.text, parsed.dueAt !== undefined ? { dueAt: parsed.dueAt } : undefined);
   }
 
   function toggleTodo(id: string) {
-    void flipTodo(id);
+    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
   }
 
   return (
