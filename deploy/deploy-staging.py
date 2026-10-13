@@ -39,7 +39,7 @@ from dynamic_credentials import dynamic_credential_entry  # noqa: E402
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ACCOUNT_ID = "91264b3fa69afffd6ffe57bdb3c545a8"  # same Cloudflare account as pookie-app
 PROJECT = "cockpit"
-STAGING_URL = "https://cockpit.pages.dev"
+STAGING_URL = "https://cockpit-10c.pages.dev"
 
 # Source inputs that must be older than the build output. If any of these is
 # newer than .open-next/worker.js, the build output is stale and must not ship.

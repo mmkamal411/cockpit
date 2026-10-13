@@ -40,7 +40,7 @@ import sys
 import urllib.request
 import urllib.error
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "https://cockpit.pages.dev"
+BASE = sys.argv[1] if len(sys.argv) > 1 else "https://cockpit-10c.pages.dev"
 UA = "Mozilla/5.0 (Cockpit-Smoke-Test) AppleWebKit/537.36"
 
 
