@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { ClassDetail } from "./class-detail";
+
 const SYNC_OPTIONS = ["Grades", "Attendance", "Assignments", "School messages"];
 
 type Step = 1 | 2 | 3;
@@ -99,6 +101,8 @@ export function CrewApplet() {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesSyncedAt, setClassesSyncedAt] = useState<string | null>(null);
   const [classesMessage, setClassesMessage] = useState("");
+  // Class detail drill-down: when set, shows one class's full page.
+  const [selectedClassName, setSelectedClassName] = useState<string | null>(null);
 
   // Load the pilot's crew roster on mount.
   useEffect(() => {
@@ -316,6 +320,7 @@ export function CrewApplet() {
   /** Open a member's detail view and load their classes. */
   function openMemberDetail(memberId: string) {
     setSelectedMemberId(memberId);
+    setSelectedClassName(null);
     setClasses([]);
     setClassesMessage("");
     setClassesSyncedAt(null);
@@ -420,6 +425,16 @@ export function CrewApplet() {
       // Member vanished from roster (e.g. removed) — back to the list.
       setSelectedMemberId(null);
       return null;
+    }
+    // Class detail drill-down — one class's full page.
+    if (selectedClassName) {
+      return (
+        <ClassDetail
+          memberId={selectedMemberId}
+          className={selectedClassName}
+          onBack={() => setSelectedClassName(null)}
+        />
+      );
     }
     const status = syncStatusText(member);
     const attention = needsAttention(member);
@@ -716,11 +731,14 @@ export function CrewApplet() {
                 </p>
               )}
               {classes.map((c) => (
-                <div
+                <button
                   key={c.id}
-                  className="flex items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5"
+                  type="button"
+                  onClick={() => setSelectedClassName(c.name)}
+                  className="flex w-full items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-left transition-colors hover:border-neon-green/30"
+                  aria-label={`Open ${c.name} details`}
                 >
-                  <span className="text-sm text-star">{c.name}</span>
+                  <span className="text-sm text-star underline decoration-dotted decoration-dim/50 underline-offset-2">{c.name}</span>
                   <span className="flex items-center gap-2">
                     {c.gap_to_90 !== null && c.gap_to_90 > 0 && (
                       <span className="text-xs text-neon-amber">{c.gap_to_90.toFixed(1)} to 90</span>
@@ -735,8 +753,11 @@ export function CrewApplet() {
                       {c.grade !== null ? `${c.grade.toFixed(1)}` : "—"}
                       {c.letter && <span className="ml-1 text-xs font-normal text-dim">{c.letter}</span>}
                     </span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-dim">
+                      <path d="M9 18l6-6-6-6" />
+                    </svg>
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           ) : (
