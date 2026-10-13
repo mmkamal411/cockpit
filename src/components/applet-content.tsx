@@ -8,6 +8,7 @@ import { ProgressApplet } from "./applets/progress-applet";
 import { MoreApplet } from "./applets/more-applet";
 import { CrewApplet } from "./applets/crew-applet";
 import { BillsApplet } from "./applets/bills-applet";
+import { SubscriptionsApplet } from "./applets/subscriptions-applet";
 import { WeatherApplet } from "./applets/weather-applet";
 import { CalendarApplet } from "./applets/calendar-applet";
 import { ShoppingApplet } from "./applets/shopping-applet";
@@ -85,6 +86,12 @@ export const APPLETS: Record<string, AppletDef> = {
     readout: "BILLS",
     glow: "#fcd34d",
     render: () => <BillsApplet />,
+  },
+  subscriptions: {
+    name: "Subscriptions",
+    readout: "SUBS",
+    glow: "#fcd34d",
+    render: () => <SubscriptionsApplet />,
   },
   weather: {
     name: "Weather",
