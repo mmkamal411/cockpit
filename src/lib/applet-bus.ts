@@ -54,8 +54,9 @@ export function useAppletBus(): AppletBusState {
 export interface OpenOptions {
   /**
    * Replace the currently-open applet instead of stowing it. Used for
-   * in-applet sub-navigation (More → Crew, More → Add a child) so the
-   * minimized dock doesn't accumulate stepping stones.
+   * in-applet sub-navigation (station-category → module, category overlay →
+   * "coming soon" panel, class drill-downs) so the minimized dock doesn't
+   * accumulate stepping stones.
    */
   replace?: boolean;
 }
@@ -122,6 +123,26 @@ export function clearAppletRestored(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Station-category flow — the home-station button → subcategory → applet path.
+//
+// A home station button opens the intermediate subcategory overlay
+// (`station-category` applet); a subcategory tap opens its target module
+// with `replace` so the overlay never clogs the minimized dock. Subcategories
+// whose module isn't built yet stay inside the overlay as an honest
+// "coming soon" panel — never a blank page, never a dead end.
+// ---------------------------------------------------------------------------
+
+/** Open a station's subcategory overlay (the intermediate step). */
+export function openStationCategory(categoryId: string): void {
+  openApplet("station-category", { category: categoryId });
+}
+
+/** Open a module from a subcategory tap, replacing the overlay. */
+export function openStationModule(id: string, params: AppletParams = {}): void {
+  openApplet(id, params, { replace: true });
+}
+
+// ---------------------------------------------------------------------------
 // In-applet link interception — links inside an applet that point at a module
 // route open that module as an applet instead of navigating the page.
 // External links, anchors, mailto/tel pass through untouched.
@@ -137,7 +158,7 @@ const MODULE_ROUTES: Record<string, string> = {
   "/today": "today",
   "/crystal": "crystal",
   "/progress": "progress",
-  "/more": "more",
+  "/school": "school",
   "/crew": "crew",
 };
 
