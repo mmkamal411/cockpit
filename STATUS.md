@@ -14,8 +14,8 @@
 | Calendar | 60% | UI + 7 API routes + OAuth flow built | Google OAuth client (Mehedi), sync engine, migration 013, staging verify |
 | To-dos | 95% | Unified hook, 5 API routes, NL parser, localStorage dedupe done | Migration 011 + staging verify |
 | Today Briefing | 85% | Composer + briefing UI done | Staging verify |
-| Crystal Chat | — | Team C still running | — |
-| Nudges | — | Team C still running | Needs todos+calendar live first |
+| Crystal Chat | 100% (code) | Mode pill, thread persistence, /api/chat (flag-gated), context bundle, streaming — done | Migration 014 + staging verify |
+| Nudges | 100% (code) | Scoring engine, 6 API routes, nudge-center applet, producer docs — done | Migration 009 + producers + staging verify |
 
 ## Phase 2 Modules
 
