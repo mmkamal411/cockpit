@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { HeroVista } from "@/components/pilot/hero-vista";
 import { GlassPane } from "@/components/glass-pane";
 import { HomeStations } from "@/components/home-stations";
+import { ChildHome } from "@/components/child/child-home";
 
 /** Session-gated: reads cookies per request — opt out of static-shell validation. */
 export const dynamic = "force-dynamic";
@@ -43,6 +44,34 @@ export default async function HomePage() {
     user.email,
     typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : undefined,
   );
+
+  // Pilot-type aware home: a linked child (13+) gets their own school-day
+  // home (morning spark → bell strip → check-in hero → tonight's ONE action).
+  // Everyone else gets the standard glass pane. One query, fail-open to the
+  // standard home if the pilot row can't be read.
+  let isChildPilot = false;
+  try {
+    const supabase = await createClient();
+    const { data: pilot } = await supabase
+      .from("pilots")
+      .select("child_crew_member_id")
+      .eq("id", user.id)
+      .single();
+    isChildPilot = !!(pilot?.child_crew_member_id as string | null);
+  } catch {
+    isChildPilot = false;
+  }
+
+  if (isChildPilot) {
+    return (
+      <div className="relative h-dvh overflow-hidden">
+        <HeroVista pilotName={pilotName} />
+        <div className="absolute inset-x-0 bottom-0 z-10 flex max-h-[calc(100dvh-72px)] flex-col items-center gap-3 overflow-y-auto px-4 pb-[104px] pt-2 sm:items-end sm:px-8 sm:pb-[110px]">
+          <ChildHome />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-dvh overflow-hidden">

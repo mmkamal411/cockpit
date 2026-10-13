@@ -171,20 +171,12 @@ Branch: feature/child-education-ux (synced, HEAD = origin). Built the Settings a
 **Pre-existing issues (other teams' WIP on this shared branch, not mine):**
 - `GET /` 500s from Phase B's `class-detail.tsx` rewrite importing `@/lib/checkin-topics`, `@/lib/peer-tips`, `@/components/class-resources` (don't exist yet) — broken before my work.
 - `npx tsc` shows errors only in Phase C/D files — none in Phase A files.
-## 2026-10-13 ~12:40 EDT — Shopping Module Finisher finished (subagent ae9d6220)
-Branch: feature/module-finish-all (worktree ~/workspace/cockpit-finish). Shopping UI now 100%.
 
-**Shipped (2 commits, both pushed to origin/feature/module-finish-all):**
-1. `09e7abd` — Item edit + delete UI + list management UI (`src/components/applets/shopping-applet.tsx`):
-   - **Item edit:** ✏️ button on every item (unchecked + checked) opens an inline editor — name, quantity, unit, notes, "Repeats" checkbox. Save → PATCH /api/shopping/items/[id]. Notes now also render under unchecked item names (were stored but never shown).
-   - **Item delete:** two-step inline confirm ("Delete this item? Keep it / Yes, delete") → DELETE /api/shopping/items/[id]; unchecked_count reconciled on success.
-   - **New list:** "+ New list" button + form with icon picker (14 emojis) → POST /api/shopping/lists; new list auto-selected.
-   - **Rename list:** "✏️ Rename" control for the active own list → PATCH /api/shopping/lists/[id].
-   - **Delete list:** "🗑 Delete" with two-step confirm (warns items are deleted too, buying patterns stay) → DELETE /api/shopping/lists/[id]; selection falls back to first remaining list.
-   - Starter-list seeding now skipped if the pilot deliberately deleted all lists (previously deleting all lists then reloading would resurrect the 3 seeds).
-   - All affordances hidden on view-only shared lists; all errors plain-English; no blank states.
-2. `ea5cb89` — Removed dead route `GET /api/shopping/shared` (git rm src/app/api/shopping/shared/route.ts). Verified zero callers repo-wide (src/docs/supabase) — GET /api/shopping/lists already merges shared-with-me lists.
+## 2026-10-13 ~14:15 EDT — Phase B class-detail rewrite committed (subagent 07137f0a, isolated worktree ~/workspace/cockpit-phaseB)
+Shared-tree collision earlier: another agent's coordination stashed my uncommitted rewrite + switched the tree to feature/phase1-module-finish mid-task. Recovered the rewrite from the stash, moved to a detached worktree on origin/feature/child-education-ux. Verified: tsc --noEmit clean; esbuild unit run of path-to-90/morning-spark/peer-tips/checkin-topics/youth-safety all pass (zeros-first ranking, +X.X pts, amber-never-red, stable daily spark, 988 safety floor).
+Shipped: crisis (<75) / steady (>90) / middle class-page variants; deterministic buildPathActions (zeros → missing → study levers, top-3, +X.X pts pills, skip ungraded categories); teen-owned checkboxes / parent read-only; "You flagged this" wiring; comeback sparkline; This Week strip; 98% Playbook peer tips (unit-filtered); Tonight's ONE action (persisted pick); Missing zeros-first → Upcoming → Past(collapsed); manual missing logger (029 table + API); category opportunity bars; What-If simulator; check-in timeline with theme line; words/files divider; Files/Links tabs; Dawson's Word; teacher card with "what to ask"; cool-down copy. NOT in Phase B scope (report): subskill diagnosis section, Explain It Back, teacher inbox / student email draft (Phase A school station), GPA simulator.
 
+<<<<<<< HEAD
 **Verified:** `npx tsc --noEmit` — zero shopping-related errors (3 pre-existing react-hooks/set-state-in-effect warnings in the old useEffect blocks + other teams' untracked nudges-producers TS5097 errors; verified the lint warnings exist identically on the pre-change file, my code adds none). eslint on src/app/api/shopping/ clean. No console.logs, no dead code.
 
 **NOT YET VERIFIED:** end-to-end in a real browser (no live browser on this subagent). Needs a signed-in staging session after a deploy containing 09e7abd/ea5cb89: (1) edit an item's name/qty/unit/notes/repeats and confirm it persists + re-renders; (2) delete an item via two-step confirm; (3) create a new list with a non-default icon, rename it, then delete it; (4) delete all lists → confirm empty state + no seed resurrection on reload; (5) view-only shared list shows no edit/delete/rename affordances.
@@ -254,3 +246,8 @@ Branch: feature/module-finish-all (worktree ~/workspace/cockpit-finish). Shoppin
 **FIXED:** Broken imports 500ing `/` now real files. **Schema:** 027 + 029 need Supabase run.
 
 **Remaining:** Phase C (running).
+=======
+## 2026-10-13 ~14:15 EDT — Phase B class-detail rewrite committed (subagent 07137f0a, isolated worktree ~/workspace/cockpit-phaseB)
+Shared-tree collision earlier: another agent's coordination stashed my uncommitted rewrite + switched the tree to feature/phase1-module-finish mid-task. Recovered the rewrite from the stash, moved to a detached worktree on origin/feature/child-education-ux. Verified: tsc --noEmit clean; esbuild unit run of path-to-90/morning-spark/peer-tips/checkin-topics/youth-safety all pass (zeros-first ranking, +X.X pts, amber-never-red, stable daily spark, 988 safety floor).
+Shipped: crisis (<75) / steady (>90) / middle class-page variants; deterministic buildPathActions (zeros → missing → study levers, top-3, +X.X pts pills, skip ungraded categories); teen-owned checkboxes / parent read-only; "You flagged this" wiring; comeback sparkline; This Week strip; 98% Playbook peer tips (unit-filtered); Tonight's ONE action (persisted pick); Missing zeros-first → Upcoming → Past(collapsed); manual missing logger (029 table + API); category opportunity bars; What-If simulator; check-in timeline with theme line; words/files divider; Files/Links tabs; Dawson's Word; teacher card with "what to ask"; cool-down copy. NOT in Phase B scope (report): subskill diagnosis section, Explain It Back, teacher inbox / student email draft (Phase A school station), GPA simulator.
+>>>>>>> origin/feature/child-education-ux
