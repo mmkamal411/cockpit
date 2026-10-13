@@ -51,7 +51,7 @@ async function testStudentVue(username: string, password: string): Promise<Attem
         "Content-Type": "application/json",
         "User-Agent": "Cockpit/1.0",
       },
-      body: JSON.stringify({ arguments: { request: JSON.stringify({ userID: null }) } }),
+      body: JSON.stringify({ request: JSON.stringify({ userID: null }) }),
       signal: controller.signal,
     });
     if (res.status === 401) return { ok: false, authFailed: true, unreachable: false };
@@ -120,18 +120,12 @@ export async function POST(
     return NextResponse.json(unauthorized(), { status: 403 });
   }
 
-  // Single validation attempt — never retried.
+  // Cobb students authenticate via Microsoft SSO — the StudentVUE mobile API
+  // does not accept SSO credentials, so a "failure" here proves nothing.
+  // We still attempt the check (it catches obvious typos for native accounts),
+  // but we NEVER block saving on it. The laptop sync worker does the real
+  // validation via the browser/SSO path on its next run.
   const result = await testStudentVue(username, password);
-
-  if (result.authFailed) {
-    return NextResponse.json(
-      {
-        error:
-          "That student login didn't work — the email or password didn't match. Check for typos (capital letters matter), or use the school's \"Forgot password\" link, then try again.",
-      },
-      { status: 401 },
-    );
-  }
 
   // Credentials are good, OR the API couldn't verify them (Cobb students
   // use Microsoft SSO — the mobile API may not accept native login).
