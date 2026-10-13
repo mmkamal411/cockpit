@@ -191,3 +191,40 @@ def emit_nudge(pilot_id, title, dedup_key, deadline, body=None):
 
 Engine implementation: `src/lib/nudges/engine.ts`.
 Tests: `src/lib/nudges/engine.test.ts` (`node src/lib/nudges/engine.test.ts`).
+
+## 8. Running the producers (Phase 1)
+
+The MVP producers live in `src/lib/nudges/producers/`:
+
+| File | What it does |
+|---|---|
+| `meeting-soon.ts` | Meetings starting within 60 min (visible calendars, no cancelled/all-day) |
+| `bill-due.ts` | Unpaid bills due within 3 days or overdue (snoozes respected) |
+| `index.ts` | `runProducers(db, { pilotId? })` — runs every registered producer per pilot, golden-rule wrapped |
+| `producers.test.ts` | 59 unit tests — `npm run test:producers` |
+
+The scheduled trigger is `POST /api/nudges/producers/run` (service-key
+auth, same pattern as §1). Optional body `{ "pilot_id": "uuid" }` scopes to
+one pilot; omit it to run for every pilot. Response is a per-pilot,
+per-producer summary of inserted/deduped/suppressed/skipped counts plus any
+captured (non-fatal) errors.
+
+**Recommended cadence: every 15 minutes.** The producers are dedupe-safe —
+repeat runs are cheap no-ops (one quick SELECT per event/bill, engine
+returns `deduped`). The 60-minute meeting window plus a 15-minute cadence
+means the earliest reminder lands ~45–60 min before a meeting and the
+latest ~0–15 min before.
+
+Example scheduler (use curl — Python urllib POSTs get 403 from this stack):
+
+```bash
+# every 15 minutes — needs SUPABASE_SERVICE_ROLE_KEY in the environment
+curl -s -X POST "https://cockpit.pages.dev/api/nudges/producers/run" \
+  -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Use the staging URL (`https://pookie-staging.pages.dev`) when testing —
+never point a scheduler at staging by accident in production, or pilots get
+double nudges. One scheduler per environment, exactly one.
