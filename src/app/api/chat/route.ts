@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { buildContextBundle, type ChatContextBundle } from "@/lib/chat/context";
+import { buildContextBundle } from "@/lib/chat/context";
+import {
+  ContractViolationError,
+  toWireRequest,
+  toWireResponse,
+  type Persona,
+  type WorkerChatRequest,
+  type WorkerChatResponse,
+} from "@/lib/chat/contract";
 import { createReplyStream } from "@/lib/chat/sse";
 
 export const dynamic = "force-dynamic";
@@ -17,8 +25,6 @@ export const dynamic = "force-dynamic";
  * request. This route attaches `Authorization: Bearer <CRYSTAL_WORKER_SECRET>`
  * from the server-side env. The secret is NEVER exposed to the browser.
  */
-
-type Persona = "crystal" | "fireball";
 
 const UNAUTH = { error: "Sign in to chat with Crystal." };
 
@@ -99,11 +105,22 @@ class WorkerDown extends Error {}
  *  problem, not a chat problem. Surfaced to the pilot in plain English. */
 class WorkerMisconfigured extends WorkerDown {}
 
-async function callWorker(
-  messages: { role: string; text: string }[],
-  context: ChatContextBundle,
-  mode: Persona,
-): Promise<string> {
+/** Structured server-side log for contract violations — internals never reach the pilot. */
+function logContractViolation(where: "outbound" | "inbound", err: ContractViolationError) {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      event: "chat_contract_violation",
+      route: "POST /api/chat",
+      where,
+      detail: err.message,
+      details: err.details,
+      at: new Date().toISOString(),
+    }),
+  );
+}
+
+async function callWorker(body: WorkerChatRequest): Promise<WorkerChatResponse> {
   if (!CRYSTAL_SECRET) {
     // Fail closed: never call the worker without the secret.
     throw new WorkerMisconfigured("CRYSTAL_WORKER_SECRET is not set");
@@ -117,7 +134,7 @@ async function callWorker(
         Authorization: `Bearer ${CRYSTAL_SECRET}`,
       },
       signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
-      body: JSON.stringify({ messages, context, mode }),
+      body: JSON.stringify(body),
     });
   } catch {
     throw new WorkerDown("worker unreachable");
@@ -126,11 +143,20 @@ async function callWorker(
     throw new WorkerMisconfigured("worker rejected the shared secret (401)");
   }
   if (!res.ok) throw new WorkerDown(`worker ${res.status}`);
-  const data = (await res.json().catch(() => null)) as { reply?: unknown } | null;
-  const reply =
-    data && typeof data.reply === "string" && data.reply.trim() ? data.reply.trim() : "";
-  if (!reply) throw new WorkerDown("empty reply");
-  return reply;
+  let data: unknown = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  // Throws ContractViolationError on a malformed worker envelope (loud,
+  // never silently treated as a valid reply).
+  try {
+    return toWireResponse(data, body.mode);
+  } catch (err) {
+    if (err instanceof ContractViolationError) logContractViolation("inbound", err);
+    throw err;
+  }
 }
 
 export async function POST(req: Request) {
@@ -199,13 +225,19 @@ export async function POST(req: Request) {
       .insert({ thread_id: threadId, role: "user", text: message });
     if (userErr) throw userErr;
 
-    // 4. Context bundle + worker call.
+    // 4. Context bundle + worker call. The bundle is validated against the
+    //    canonical contract (contract.ts) before anything leaves the app —
+    //    a violation throws ContractViolationError LOUDLY instead of sending
+    //    malformed or out-of-contract fields to the worker.
     const context = await buildContextBundle(supabase, pilotId);
-    const reply = await callWorker(
+    const wireRequest = toWireRequest(
       [...history, { role: "user", text: message }],
       context,
       mode,
     );
+    const workerRes = await callWorker(wireRequest);
+    const reply = workerRes.reply;
+    const replyPersona = workerRes.persona;
 
     // 5. Persist the reply + touch the thread BEFORE responding, so the
     //    thread is complete even if the client disconnects mid-stream.
@@ -226,7 +258,7 @@ export async function POST(req: Request) {
       body?.stream === true ||
       (req.headers.get("accept") || "").includes("text/event-stream");
     if (wantStream) {
-      return new Response(createReplyStream(reply, { thread_id: threadId, mode }), {
+      return new Response(createReplyStream(reply, { thread_id: threadId, mode: replyPersona }), {
         headers: {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -234,13 +266,23 @@ export async function POST(req: Request) {
         },
       });
     }
-    return NextResponse.json({ reply, thread_id: threadId, mode });
+    return NextResponse.json({ reply, thread_id: threadId, mode: replyPersona });
   } catch (err) {
     if (err instanceof WorkerMisconfigured) {
       return NextResponse.json(
         {
           error:
             "I can't reach my voice service right now — the app setup is missing a key. The team has been notified.",
+        },
+        { status: 502 },
+      );
+    }
+    if (err instanceof ContractViolationError) {
+      logContractViolation("outbound", err);
+      return NextResponse.json(
+        {
+          error:
+            "I couldn't put your answer together — something on my end wasn't quite right. Try again in a moment.",
         },
         { status: 502 },
       );
