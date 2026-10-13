@@ -1,4 +1,12 @@
 
+## 2026-10-13 ~13:30 EDT — School calendar + bell schedule feature deployed to staging (f7332d64)
+Squad: backend (2ce8819) + frontend (6196605) + weekly-check script (7c7de31), all on feature/phase1-module-finish. Deploy f7332d64 via deploy-staging.py; smoke test PASSED (/, /login, /auth/callback, videos, static assets).
+- Migration 031_crew_school_sources.sql: crew_school_sources + crew_school_source_snapshots tables (RLS steward policies), guarded Dawson seed (Cobb calendar + Daily/WEB bell links), nudges kind CHECK widened to include 'school'.
+- API: GET/PUT /api/crew/members/[id]/school-sources, POST .../refresh (server-side fetch + sanitize, check_status ok/stale/broken), GET .../content (sanitized HTML or plain-English error).
+- UI: add-child step 2 optional fields; member detail "School calendar & bell schedules" section — edit form, calendar panel with Source attribution, bell schedules collapsible with tabs.
+- Weekly cron: school-sources/weekly-check.py + WEEKLY-CRON-DRAFT.md (parent to register via cron.add; cron definition files are read-only from agents).
+- NOT YET DONE: migration 031 needs running in the Supabase SQL editor (parent); browser verification of the new UI pending (parent); cron registration pending (parent).
+
 ## 2026-10-13 ~11:10 EDT — Outlook Calendar Integration Team kicked off (coordinator 94a20143)
 Branch: feature/outlook-calendar. Azure app "Cockpit" registered, OUTLOOK_CLIENT_ID + OUTLOOK_CLIENT_SECRET on Cloudflare Pages. 3 experts fanned out: OAuth Engineer (connect/callback routes), Graph Sync Engineer (Graph pull + token refresh), UI Engineer (Outlook in calendar UI). Single merged commit when all three report back.
 
