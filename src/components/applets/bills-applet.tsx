@@ -99,15 +99,22 @@ function ScanDisclaimerDialog({
 
   useEffect(() => {
     confirmRef.current?.focus();
-    const el = dialogRef.current;
-    if (!el) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        // Stop here: the applet-host has its own window-level Esc handler that
+        // closes the whole applet. Esc on this dialog means exactly "Not now" —
+        // the dialog goes away, the form is untouched, the applet stays open.
+        // (document fires before window in the bubble phase, so stopping here
+        // keeps the applet open.) The listener is attached unconditionally so
+        // Esc works even if the dialog ref is momentarily unset.
+        e.stopPropagation();
         onDismiss();
         return;
       }
       if (e.key !== "Tab") return;
+      const el = dialogRef.current;
+      if (!el) return;
       const focusables = Array.from(
         el.querySelectorAll<HTMLElement>(
           'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
@@ -291,24 +298,34 @@ export function BillsApplet() {
         const text = await readerRef.current.read(url);
         if (cancelledRef.current) return;
         const fields = extractBillFields(text);
-        const found = [fields.name, fields.amount, fields.dueDate].filter(Boolean).length;
-        if (found === 0) {
+        const read = [fields.name, fields.amount, fields.dueDate].filter(Boolean).length;
+        if (read === 0) {
           setScanNotice("failed");
           setScanAnnounce(
             "We couldn't read that bill. You can type it in below — nothing was saved.",
           );
           return;
         }
-        if (fields.name) setFName(fields.name);
-        if (fields.amount) setFAmount(fields.amount);
-        if (fields.dueDate) setFDueDate(fields.dueDate);
+        // Never overwrite what the user already typed: OCR fills empty fields
+        // only. Each filled field is marked "Suggested — check me".
+        const fillName = fields.name && fName.trim() === "" ? fields.name : null;
+        const fillAmount = fields.amount && fAmount.trim() === "" ? fields.amount : null;
+        const fillDueDate =
+          fields.dueDate && fDueDate.trim() === "" ? fields.dueDate : null;
+        if (fillName) setFName(fillName);
+        if (fillAmount) setFAmount(fillAmount);
+        if (fillDueDate) setFDueDate(fillDueDate);
         setSuggested({
-          name: !!fields.name,
-          amount: !!fields.amount,
-          dueDate: !!fields.dueDate,
+          name: !!fillName,
+          amount: !!fillAmount,
+          dueDate: !!fillDueDate,
         });
         setScanNotice(null);
-        setScanAnnounce("We filled in what we could read — please check before saving.");
+        setScanAnnounce(
+          fillName || fillAmount || fillDueDate
+            ? "We filled in what we could read — please check before saving."
+            : "We read your bill, but your entries were already filled in — nothing was changed.",
+        );
       } catch {
         if (!cancelledRef.current) {
           setScanNotice("failed");
@@ -327,7 +344,7 @@ export function BillsApplet() {
         readerRef.current = null;
       }
     },
-    [],
+    [fName, fAmount, fDueDate],
   );
 
   const handleScanFile = useCallback(
