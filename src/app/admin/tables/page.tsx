@@ -3,7 +3,7 @@ import { adminGetSafe } from "@/lib/admin/api";
 import type { TableInfo, TablesResponse } from "@/lib/admin/types";
 import { PageHeader, ErrorCard, EmptyState } from "@/components/admin/ui";
 
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 function normalizeTables(data: TableInfo[] | TablesResponse | null): TableInfo[] {
   if (!data) return [];

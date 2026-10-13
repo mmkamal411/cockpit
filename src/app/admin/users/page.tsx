@@ -3,7 +3,7 @@ import type { UsersResponse } from "@/lib/admin/types";
 import { PageHeader, ErrorCard } from "@/components/admin/ui";
 import { UsersBrowser } from "@/components/admin/users-browser";
 
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 const VALID_SORTS = new Set([
   "email",

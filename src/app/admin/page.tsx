@@ -17,7 +17,7 @@ import {
   formatTime,
 } from "@/components/admin/ui";
 
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 function statusTone(status: string): "green" | "red" | "amber" | "muted" {
   const s = status.toLowerCase();

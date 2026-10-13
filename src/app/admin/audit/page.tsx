@@ -3,7 +3,7 @@ import type { AuditResponse } from "@/lib/admin/types";
 import { PageHeader, ErrorCard } from "@/components/admin/ui";
 import { AuditBrowser } from "@/components/admin/audit-browser";
 
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 export default async function AdminAuditPage({
   searchParams,

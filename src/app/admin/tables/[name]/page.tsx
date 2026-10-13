@@ -5,7 +5,7 @@ import { PageHeader, ErrorCard } from "@/components/admin/ui";
 import { TableBrowser } from "@/components/admin/table-browser";
 import { RlsPanel } from "@/components/admin/rls-panel";
 
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 export default async function AdminTableDetailPage({
   params,

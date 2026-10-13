@@ -3,7 +3,7 @@ import type { UserDetail } from "@/lib/admin/types";
 import { ErrorCard } from "@/components/admin/ui";
 import { UserTabs } from "@/components/admin/user-tabs";
 
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 export default async function AdminUserDetailPage({
   params,

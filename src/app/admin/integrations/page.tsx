@@ -3,7 +3,7 @@ import type { IntegrationStatus } from "@/lib/admin/types";
 import { PageHeader, ErrorCard, EmptyState } from "@/components/admin/ui";
 import { IntegrationCard } from "@/components/admin/integration-card";
 
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 export default async function AdminIntegrationsPage() {
   const { data, error } = await adminGetSafe<IntegrationStatus[]>("/api/admin/integrations");

@@ -4,7 +4,7 @@ import { HeroVista } from "@/components/pilot/hero-vista";
 import { GlassPane } from "@/components/glass-pane";
 
 /** Session-gated: reads cookies per request — opt out of static-shell validation. */
-export const instant = false;
+export const dynamic = "force-dynamic";
 
 function pilotNameFor(email: string | undefined, fullName: string | undefined): string {
   if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
