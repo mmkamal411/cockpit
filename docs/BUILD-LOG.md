@@ -217,3 +217,40 @@ Branch: feature/module-finish-all (worktree ~/workspace/cockpit-finish). Shoppin
 - `npx tsc --noEmit`: zero errors in all Phase D files (only stale `.next/dev/types` refs to the Money/Bills subscriptions routes, which don't exist yet — their merge is mid-flight).
 - Spec alignment (SETTINGS-SPEC.md, landed as c2b0e8f mid-task): Station 4 keeps NO persona toggle (parent directive overrides the spec's voice-mode row — keyword-only fireball/crystal); Station 7 retention = 90d/1yr/until-I-delete; Station 6 carries the locked "Cockpit never tells anyone when you change a setting here" copy.
 **NOT browser-verified** (no subagent browser): needs a signed-in staging session — open Settings from the gear → 7 panels render; search "quiet hours"; toggle + reload persists; mint a link code; reorder home order → persists to cockpit_layouts; export downloads; DangerZone confirm + cancel.
+
+## 2026-10-13 ~14:00 EDT — Phase C DONE ✅ (child login + consent, worker 07137f0a)
+
+**Branch:** `feature/child-education-ux` — all commits pushed. Note: another agent switched the shared checkout at ~/workspace/cockpit to `feature/phase1-module-finish` mid-task; Phase C continued in git worktree `~/workspace/cockpit-phaseC` (isolated, no interference).
+
+**Commits (Phase C):**
+- `a47b935` → superseded: migration 028 (renamed, never run)
+- `4bcbdc4` — `src/lib/child/`: `age-tier.ts` (tier enforcement in code: under13/13-15/16-17/18+, cooling-off days, WILL/NOT consent copy), `morning-spark.ts` (14-day bundled delight pack, offline-safe)
+- `13f3939` — claim flow: `src/app/claim/[code]/page.tsx` (server-validated, signed-out pitch / signed-in consent), `src/components/claim-flow.tsx`, `src/components/consent-screen.tsx` (WILL see / will NOT see two-column, login glass aesthetic), `src/app/api/claim/preview` + `src/app/api/claim` (plain-English errors)
+- `ed021e4` — invite UI + gates: `src/components/invite-to-cockpit.tsx` (under-13 stewardship message instead of button; 13+ big 6-digit code + live 15-min countdown + copy), under-13 gate + `created_by` + audit in link-code route, child access in checkins route (`created_by='crew'`), 13–15 cooling-off + undo in `DELETE/POST /api/crew/access-grants/[id]`
+- `294b607` — migration `030_child_login_consent.sql` (idempotent; resolves the 029 collision with Phase D's `029_class_manual_missing.sql`)
+- `28c4206` — `src/components/my-sharing.tsx` + `/sharing` page + `src/app/api/sharing` (viewers, scope toggles 16+, one-tap revoke, go-independent + confetti, audit timeline), D2 safety floor in `POST /api/chat` (reuses Phase B's `checkYouthSafety`; crisis → warm 988/trusted-adult reply instead of the LLM, same persistence/response path, both personas)
+- `9f41436` — merge of Phase A build-log entry `24fa458` (no code)
+
+**Migration for Meheldi:** run `supabase/migrations/030_child_login_consent.sql` AFTER 029. Adds: `pilots.child_crew_member_id` + `birthdate`; `link_codes.created_by/redeemed_by`; grant cooling-off columns; `consent_events` audit table; child-self RLS (crew profile, grade syncs, path-to-90, checkins, grants); steward reads child SHARED check-ins only; `preview_link_code` + `redeem_link_code` RPCs (atomic claim: consume code → link pilot → consent grant → audit; enforces 13+ floor; logs birthdate mismatches).
+
+**Deliberate cross-phase edits (flagged):** (1) Extended Phase B's checkins route for child POST/GET (their stewardOnly blocked the child entirely). (2) Tightened Phase B's `checkins_steward_all` RLS to shared-channel only — the consent screen promises "just for me" stays private, so the schema enforces it (guarded: only replaces the broad version). (3) Extended Phase B's grant-revoke route with 13–15 cooling-off + undo + audit. (4) Removed my own `src/lib/child/safety-floor.ts` — duplicated Phase B's `youth-safety.ts`; chat path reuses theirs.
+
+**Collisions found (coordinator):** two 027s exist (`027_education_tables.sql` with checkins columns pilot_id/what_worked/… vs Phase B's `027_checkins_class_resources.sql` with class_name/worked_on[]/… + `if not exists`) — different checkins schemas; whichever Meheldi runs second silently keeps the first. Needs a ruling. Two 029s existed — resolved (mine → 030). My `git add -A` once swept other teams' WIP (settings applet, manual-missing route, class-detail edits) into ed021e4 — files preserved in git, nothing lost; using explicit `git add <paths>` since.
+
+**Verification:** `npx tsc --noEmit` clean for all Phase C files (1 pre-existing error in Phase D's `src/app/api/settings/route.ts`, untouched). Pure-lib unit checks pass (age tiers incl. birthday edge cases, cooling-off days, consent lists, 8 safety-pattern cases). `next build` not yet run (worktree had symlinked node_modules; real copy in progress). NOT browser-verified (no subagent browser).
+
+**Needs browser verification (signed-in staging, post-deploy + migration 030):** (1) parent mints code for 13–15 child → big code + countdown; under-13 child → stewardship message, no button; (2) child opens /claim/<code> → consent screen WILL/NOT lists → accept → linked, grant written; (3) /sharing as 16–17 child → viewers, scope toggles, revoke, go-independent confetti, timeline; (4) 13–15 steward revoke → 7-day cooling-off + undo; (5) child chat "i want to kill myself" → 988 reply, no worker call; normal chat unaffected; (6) child /home → morning spark → bell strip → check-in hero → ONE action → relevance-sorted classes.
+
+**Remaining Phase C notes:** lazy cooling-off finalize runs in GET /api/sharing (child side); a cron for finalize + child notification on cooling-off start is v2. Second-parent invite flow is Phase D/v2 territory (schema `granted_by` ready).
+
+## 2026-10-13 ~12:46 EDT — Child Education Build: Phase B DONE ✅ (worker 38c095bf)
+
+**4 commits pushed to `feature/child-education-ux`, HEAD `9ddc1fa`:**
+- `eab591c` — Lib: path-to-90.ts, morning-spark.ts, resource-types.ts, peer-tips.ts, checkin-topics.ts, youth-safety.ts (D2)
+- `fcedb39` — Check-ins: migration 027 tables, checkins API, checkin-flow.tsx (D1 shared-default + "Just for me")
+- `9b03c1c` — Resources: API + upload-zone + class-resources.tsx (13-type visual cards)
+- `9ddc1fa` — Class page rewrite: crisis/steady/middle variants, teen-owned checkboxes, sparkline, What-If, Dawson's Word
+
+**FIXED:** Broken imports 500ing `/` now real files. **Schema:** 027 + 029 need Supabase run.
+
+**Remaining:** Phase C (running).
