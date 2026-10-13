@@ -2,6 +2,38 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 /**
+ * GET /api/weather/location
+ * Returns the pilot's saved weather prefs. 401 when signed out —
+ * callers fall back to a default location rather than a blank card.
+ */
+export async function GET() {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json(
+        { error: "Sign in to load your saved location." },
+        { status: 401 },
+      );
+    }
+    const { data, error } = await supabase
+      .from("pilots")
+      .select("home_location, home_lat, home_lon, weather_units")
+      .eq("id", user.id)
+      .single();
+    if (error) throw error;
+    return NextResponse.json({ prefs: data ?? null });
+  } catch {
+    return NextResponse.json(
+      { error: "Couldn't load your saved location right now." },
+      { status: 500 },
+    );
+  }
+}
+
+/**
  * PATCH /api/weather/location
  * Body: { home_location?: string, home_lat?: number, home_lon?: number, weather_units?: "F"|"C" }
  * Persists the pilot's weather preferences. Requires auth.

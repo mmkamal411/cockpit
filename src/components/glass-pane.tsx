@@ -17,9 +17,13 @@ interface Weather {
   high: number;
   low: number;
   code: number;
+  units: "F" | "C";
   place: string;
   approximate: boolean;
 }
+
+/** Coarse-only rounding (directive D7 — never precise GPS). */
+const roundCoord = (n: number) => Math.round(n * 10) / 10;
 
 function weatherWords(code: number): string {
   if (code === 0) return "Clear sky";
@@ -31,18 +35,42 @@ function weatherWords(code: number): string {
   return "Stormy";
 }
 
-async function fetchWeather(lat: number, lon: number, signal: AbortSignal): Promise<Omit<Weather, "place" | "approximate">> {
-  const url =
-    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-    `&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=1`;
-  const res = await fetch(url, { signal });
+async function fetchWeather(
+  lat: number,
+  lon: number,
+  units: "F" | "C",
+  signal: AbortSignal,
+): Promise<Omit<Weather, "place" | "approximate" | "units">> {
+  const res = await fetch(
+    `/api/weather?lat=${roundCoord(lat)}&lon=${roundCoord(lon)}&units=${units}`,
+    { signal },
+  );
   if (!res.ok) throw new Error(`weather ${res.status}`);
   const data = await res.json();
   return {
-    temp: Math.round(data.current.temperature_2m),
-    high: Math.round(data.daily.temperature_2m_max[0]),
-    low: Math.round(data.daily.temperature_2m_min[0]),
-    code: data.current.weather_code,
+    temp: data.temp,
+    high: data.high,
+    low: data.low,
+    code: data.code,
+  };
+}
+
+/** The pilot's saved location + units, or null when signed out / nothing saved. */
+async function loadSavedPrefs(): Promise<{
+  lat: number;
+  lon: number;
+  label: string;
+  units: "F" | "C";
+} | null> {
+  const res = await fetch("/api/weather/location");
+  if (!res.ok) return null;
+  const { prefs } = await res.json();
+  if (!prefs || !Number.isFinite(prefs.home_lat) || !Number.isFinite(prefs.home_lon)) return null;
+  return {
+    lat: prefs.home_lat,
+    lon: prefs.home_lon,
+    label: prefs.home_location || "Home",
+    units: prefs.weather_units === "C" ? "C" : "F",
   };
 }
 
@@ -60,12 +88,12 @@ export function GlassPane() {
   useEffect(() => {
     const controller = new AbortController();
     let settled = false;
-    const load = (lat: number, lon: number, place: string, approximate: boolean) => {
-      fetchWeather(lat, lon, controller.signal)
+    const load = (lat: number, lon: number, units: "F" | "C", place: string, approximate: boolean) => {
+      fetchWeather(lat, lon, units, controller.signal)
         .then((w) => {
           if (settled || controller.signal.aborted) return;
           settled = true;
-          setWeather({ ...w, place, approximate });
+          setWeather({ ...w, units, place, approximate });
         })
         .catch(() => {
           if (settled || controller.signal.aborted) return;
@@ -73,15 +101,32 @@ export function GlassPane() {
           setWeatherFailed(true);
         });
     };
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => load(pos.coords.latitude, pos.coords.longitude, "Right here", false),
-        () => load(FALLBACK.lat, FALLBACK.lon, FALLBACK.label, true),
-        { timeout: 6000, maximumAge: 600000 },
-      );
-    } else {
-      load(FALLBACK.lat, FALLBACK.lon, FALLBACK.label, true);
-    }
+    // Saved home location first, then coarse device location, then the default.
+    loadSavedPrefs()
+      .then((prefs) => {
+        if (controller.signal.aborted) return;
+        if (prefs) {
+          load(prefs.lat, prefs.lon, prefs.units, prefs.label, false);
+        } else if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) =>
+              load(
+                roundCoord(pos.coords.latitude),
+                roundCoord(pos.coords.longitude),
+                "F",
+                "Near you",
+                true,
+              ),
+            () => load(FALLBACK.lat, FALLBACK.lon, "F", FALLBACK.label, true),
+            { timeout: 6000, maximumAge: 600000 },
+          );
+        } else {
+          load(FALLBACK.lat, FALLBACK.lon, "F", FALLBACK.label, true);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) load(FALLBACK.lat, FALLBACK.lon, "F", FALLBACK.label, true);
+      });
     return () => controller.abort();
   }, []);
 
@@ -125,7 +170,7 @@ export function GlassPane() {
           {weather ? (
             <>
               <p className="mt-1 text-3xl font-semibold text-star">
-                {weather.temp}°<span className="text-base font-normal text-stardust">F</span>
+                {weather.temp}°<span className="text-base font-normal text-stardust">{weather.units}</span>
               </p>
               <p className="mt-0.5 text-xs text-stardust">
                 {weatherWords(weather.code)} · {weather.place}

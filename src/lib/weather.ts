@@ -99,9 +99,12 @@ async function fetchFromProvider(
   lon: number,
   units: "F" | "C",
 ): Promise<WeatherDetail> {
+  // Round before the provider call (coarse per directive D7 — never precise GPS).
+  const rlat = roundCoord(lat);
+  const rlon = roundCoord(lon);
   const tempUnit = units === "F" ? "fahrenheit" : "celsius";
   const url =
-    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+    `https://api.open-meteo.com/v1/forecast?latitude=${rlat}&longitude=${rlon}` +
     `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m` +
     `&hourly=temperature_2m,weather_code,precipitation_probability` +
     `&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max` +
@@ -109,36 +112,44 @@ async function fetchFromProvider(
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`open-meteo ${res.status}`);
   const data = await res.json();
+
+  // Defensive parse: the provider occasionally returns partial payloads.
+  const cur = data.current;
+  const dailyTimes: string[] = data.daily?.time ?? [];
+  if (!cur || typeof cur.temperature_2m !== "number" || dailyTimes.length === 0) {
+    throw new Error("open-meteo returned an empty forecast");
+  }
   const now = Date.now();
+  const num = (v: unknown, fb: number): number =>
+    typeof v === "number" && Number.isFinite(v) ? Math.round(v) : fb;
+  const hourlyTimes: string[] = data.hourly?.time ?? [];
 
-  const hourly: HourlyPoint[] = (data.hourly?.time ?? [])
-    .slice(0, 24)
-    .map((t: string, i: number) => ({
-      time: t,
-      temp: Math.round(data.hourly.temperature_2m[i]),
-      code: data.hourly.weather_code[i],
-      precipChance: data.hourly.precipitation_probability?.[i] ?? 0,
-    }));
+  const hourly: HourlyPoint[] = hourlyTimes.slice(0, 24).map((t: string, i: number) => ({
+    time: t,
+    temp: num(data.hourly.temperature_2m?.[i], 0),
+    code: num(data.hourly.weather_code?.[i], 0),
+    precipChance: num(data.hourly.precipitation_probability?.[i], 0),
+  }));
 
-  const daily: DailyPoint[] = (data.daily?.time ?? []).map((t: string, i: number) => ({
+  const daily: DailyPoint[] = dailyTimes.map((t: string, i: number) => ({
     date: t,
-    high: Math.round(data.daily.temperature_2m_max[i]),
-    low: Math.round(data.daily.temperature_2m_min[i]),
-    code: data.daily.weather_code[i],
-    precipChance: data.daily.precipitation_probability_max?.[i] ?? 0,
-    sunrise: data.daily.sunrise[i],
-    sunset: data.daily.sunset[i],
+    high: num(data.daily.temperature_2m_max?.[i], 0),
+    low: num(data.daily.temperature_2m_min?.[i], 0),
+    code: num(data.daily.weather_code?.[i], 0),
+    precipChance: num(data.daily.precipitation_probability_max?.[i], 0),
+    sunrise: data.daily.sunrise?.[i] ?? "",
+    sunset: data.daily.sunset?.[i] ?? "",
   }));
 
   const current: WeatherCurrent = {
-    temp: Math.round(data.current.temperature_2m),
-    feelsLike: Math.round(data.current.apparent_temperature),
-    high: daily[0] ? daily[0].high : Math.round(data.current.temperature_2m),
-    low: daily[0] ? daily[0].low : Math.round(data.current.temperature_2m),
-    code: data.current.weather_code,
-    words: weatherWords(data.current.weather_code),
-    humidity: data.current.relative_humidity_2m,
-    windMph: Math.round(data.current.wind_speed_10m),
+    temp: num(cur.temperature_2m, 0),
+    feelsLike: num(cur.apparent_temperature, 0),
+    high: daily[0] ? daily[0].high : num(cur.temperature_2m, 0),
+    low: daily[0] ? daily[0].low : num(cur.temperature_2m, 0),
+    code: num(cur.weather_code, 0),
+    words: weatherWords(num(cur.weather_code, 0)),
+    humidity: num(cur.relative_humidity_2m, 0),
+    windMph: num(cur.wind_speed_10m, 0),
     uvIndex: 0,
     sunrise: daily[0]?.sunrise ?? "",
     sunset: daily[0]?.sunset ?? "",
@@ -211,11 +222,13 @@ export async function searchLocation(q: string): Promise<GeoResult[]> {
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`geocoding ${res.status}`);
   const data = await res.json();
-  return (data.results ?? []).map((r: Record<string, unknown>) => ({
-    name: r["name"] as string,
-    country: (r["country"] as string) ?? null,
-    admin1: (r["admin1"] as string) ?? null,
-    lat: roundCoord(r["latitude"] as number),
-    lon: roundCoord(r["longitude"] as number),
-  }));
+  return (data.results ?? [])
+    .map((r: Record<string, unknown>) => ({
+      name: (r["name"] as string) ?? "",
+      country: (r["country"] as string) ?? null,
+      admin1: (r["admin1"] as string) ?? null,
+      lat: roundCoord(Number(r["latitude"])),
+      lon: roundCoord(Number(r["longitude"])),
+    }))
+    .filter((r) => r.name.length > 0 && Number.isFinite(r.lat) && Number.isFinite(r.lon));
 }

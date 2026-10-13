@@ -30,12 +30,39 @@ export function WeatherApplet() {
   const [loc, setLoc] = useState(FALLBACK);
   const [detail, setDetail] = useState<(WeatherDetail & { summary: string }) | null>(null);
   const [failed, setFailed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GeoResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
   const unitLabel = units === "F" ? "F" : "C";
 
+  // Load the pilot's saved location + units once. Falls back to Marietta when
+  // signed out or nothing saved — never a blank card.
   useEffect(() => {
+    let cancelled = false;
+    fetch("/api/weather/location")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d?.prefs) return;
+        const p = d.prefs;
+        if (Number.isFinite(p.home_lat) && Number.isFinite(p.home_lon)) {
+          setLoc({ lat: p.home_lat, lon: p.home_lon, label: p.home_location || "Home" });
+        }
+        if (p.weather_units === "F" || p.weather_units === "C") setUnits(p.weather_units);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setPrefsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!prefsLoaded) return;
     const controller = new AbortController();
     setFailed(false);
     setDetail(null);
@@ -52,7 +79,7 @@ export function WeatherApplet() {
         if (e.name !== "AbortError") setFailed(true);
       });
     return () => controller.abort();
-  }, [loc, units]);
+  }, [loc, units, prefsLoaded, retryCount]);
 
   useEffect(() => {
     if (query.trim().length < 2) {
@@ -61,10 +88,14 @@ export function WeatherApplet() {
     }
     const t = setTimeout(() => {
       setSearching(true);
+      setSearchFailed(false);
       fetch(`/api/weather/search?q=${encodeURIComponent(query.trim())}`)
         .then((r) => (r.ok ? r.json() : { results: [] }))
         .then((d) => setResults(d.results ?? []))
-        .catch(() => setResults([]))
+        .catch(() => {
+          setResults([]);
+          setSearchFailed(true);
+        })
         .finally(() => setSearching(false));
     }, 350);
     return () => clearTimeout(t);
@@ -115,7 +146,18 @@ export function WeatherApplet() {
               )}
             </>
           ) : failed ? (
-            <p className="mt-2 text-sm text-stardust">The skies are quiet — weather is unavailable right now.</p>
+            <div>
+              <p className="mt-2 text-sm text-stardust">
+                The skies are quiet — weather is unavailable right now.
+              </p>
+              <button
+                type="button"
+                onClick={() => setRetryCount((n) => n + 1)}
+                className="mt-2 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
+              >
+                Try again
+              </button>
+            </div>
           ) : (
             <p className="mt-2 text-sm text-dim">Reading the skies…</p>
           )}
@@ -210,6 +252,11 @@ export function WeatherApplet() {
           className="mt-2 w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none"
         />
         {searching && <p className="mt-1 text-xs text-dim">Searching…</p>}
+        {searchFailed && results.length === 0 && (
+          <p className="mt-1 text-xs text-stardust">
+            The place search isn't working right now — try again in a bit.
+          </p>
+        )}
         {results.length > 0 && (
           <ul className="mt-2 space-y-1">
             {results.map((r, i) => (
