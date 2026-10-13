@@ -44,3 +44,31 @@ Fixed the briefing composer's real bugs + finished the remaining polish:
 - UI: expired sign-in now shows a "Sign in" link instead of a useless retry; header date uses the briefing's pilot-timezone day; attention count includes school items; overdue items show "due yesterday / due N days ago"; all-day events show "All day"; event locations + school due times shown.
 - Warnings for genuinely-unreadable sources are plain-English; no blank pages (loading skeleton, error panel, per-section empty lines all intact).
 - NOTE: at ~11:15 EDT a `git reset --hard` after the class-detail merge wiped my uncommitted edits AND the To-dos expert's concurrent useTodos applet migration. I re-applied my Today changes; the To-dos expert's applet work (useTodos/parseTodo migration) needs re-doing — flagged to coordinator.
+
+## 2026-10-13 ~11:35 EDT — Calendar Module Expert (5cbff5c1): provider-agnostic sync engine + Google adapter + UI polish
+
+**Scope:** Google + shared framework only. No Outlook-specific code written; Outlook team's untracked files untouched.
+
+**Shipped (branch feature/phase1-module-finish):**
+1. `src/lib/calendar-sync.ts` — provider-agnostic sync framework:
+   - `CalendarProvider` interface: `{ name, refreshAccessToken, listCalendars, listEvents }`; adapters register via `registerCalendarProvider()`. No static cross-imports — Outlook's adapter plugs in by implementing the interface, never by me importing their files.
+   - `syncConnection(connectionId)` — refresh → pull calendar list → upsert into `calendars` → pull events per calendar in the 30d-back/90d-forward window → upsert into `calendar_events` → prune cached rows the provider no longer returns → stamp `last_synced_at`, clear `last_sync_error`. Failures record a plain-English `last_sync_error` on the connection row and rethrow.
+   - `syncAllConnections(pilotId)` — every active connection, any registered provider; per-connection failures captured (never thrown); unregistered providers skipped silently.
+   - **Behavior fix vs the Outlook engine's approach:** `visible`/`kind` are preserved on sync — existing user choices (set via PATCH /api/calendar/calendars/[id]) survive; only new calendars get defaults. The Outlook engine currently overwrites visible=true/kind="personal" on every sync, which clobbers UI edits. Recommend adopting this pattern.
+2. `src/lib/calendar-google.ts` — Google adapter implementing `CalendarProvider` (token refresh with fail-closed crypto + revoked/error status, calendarList.list, events.list with singleEvents=true and pageToken paging, pure mapping functions). Also `syncGoogleCalendar` / `syncAllGoogleCalendars` matching the Outlook engine's result shape `{ results, errors }`.
+3. `supabase/migrations/025_calendar_sync_status.sql` — additive `calendar_connections.last_sync_error text` (null = last sync succeeded). Meheldi runs migrations.
+4. Calendar UI polish (`src/components/applets/calendar-applet.tsx`): restored CalNotice (OAuth round-trip feedback: connected/reconsent/error) and ConnectedAccounts (disconnect, per-account last-synced labels, sync-error display) which the committed version lacked; added Sync-now button POSTing `/api/calendar/sync` with syncing/disabled/error states; empty-day, loading ("Reading your day…"), and error states intact; all errors plain-English, no blank pages.
+
+**For the Outlook team (coordinator 94a20143):**
+- Your `src/app/api/calendar/sync/route.ts` is the natural home for the shared dispatch: swap `syncAllOutlookCalendars(user.id, supabase)` for `syncAllConnections(user.id, supabase)` (same `{ results, errors }` shape) and Google syncs through the same route with zero new code. Your route must import BOTH `@/lib/calendar-outlook` and `@/lib/calendar-google` (registration happens at module load).
+- Your `src/app/api/calendar/connections/route.ts` select list should add `last_sync_error` — the UI reads it but tolerates its absence.
+- Shared cache contract (unchanged): `calendars` keyed by (connection_id, provider_calendar_id); `calendar_events` keyed by (calendar_id, provider_event_id). Read routes (events/agenda/next) are provider-blind.
+- Shared-tree collision note: the working tree briefly held a 367-line calendar-applet.tsx (CalNotice + multi-provider ConnectedAccounts, never committed, exists nowhere in git history) — another agent's `git restore` wiped it along with my in-progress edits. I rebuilt the equivalent + polish from the committed 194-line version and committed promptly. If anyone still has that 367-line version's source, compare before merging UI work.
+- Do NOT re-run: 013 (existing), 023 (yours, untracked), 024 (todos team). Mine is 025 only.
+
+**Verified:** `npx tsc --noEmit` clean for all calendar files (5 pre-existing errors elsewhere: .next validator artifacts, weather.ts — other teams). 18 mapping unit tests + 17 framework orchestration tests pass (tsx, /tmp). NOT verifiable here: live Google OAuth/sync (no Google Cloud OAuth client yet — Meheldi's action item) and browser rendering (no live browser on this agent).
+
+**Blocker for Meheldi:** Google Cloud OAuth client with Calendar scope (`GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` env vars on Cloudflare Pages + redirect URI `/api/calendar/callback`). Everything else is built and ready; sync cannot run until this exists.
+
+## 2026-10-13 ~11:45 EDT — Today module: removed dead syncError banner (Today expert 5cbff5c1)
+The applet referenced `syncError`/`retrySync` from useTodos(), which the current hook does not provide — the banner would have rendered permanently empty and crashed on click. Removed the dead banner + destructured names (no dead code per standing rule). If the To-dos expert adds sync status to the hook later, the banner can come back wired to the real API.
