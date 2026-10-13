@@ -14,6 +14,7 @@ import {
   SourceCheckRow,
   SourceFallbackUpload,
   Spinner,
+  applyIntakeResults,
   normalizeBellPeriods,
   normalizeCalendarSummary,
   runSourceIntake,
@@ -477,6 +478,34 @@ export function CrewApplet() {
     return items;
   }
 
+  /**
+   * Intake items for the SAVED links — what Refresh actually re-checks.
+   * Keys mirror the editor's ("calendar", "bell-<n>") so the per-source
+   * checks land on the same rows the fallback gates watch.
+   */
+  function buildSavedIntakeItems(): IntakeItem[] {
+    const items: IntakeItem[] = [];
+    const calUrl = srcSources?.calendar_source_url?.trim();
+    if (calUrl)
+      items.push({
+        key: "calendar",
+        kind: "calendar",
+        label: "Calendar link",
+        url: calUrl,
+      });
+    (srcSources?.bell_schedules ?? []).forEach((b, i) => {
+      const url = b.url.trim();
+      if (url)
+        items.push({
+          key: `bell-${i}`,
+          kind: "bell",
+          label: b.label.trim() || "Schedule",
+          url,
+        });
+    });
+    return items;
+  }
+
   /** Fresh "verifying" checks for an item list. */
   function checksForItems(items: IntakeItem[]): SourceCheck[] {
     return items.map((item) => ({
@@ -558,6 +587,56 @@ export function CrewApplet() {
     return Boolean(
       (srcSnapshots.bells[i] && srcSnapshots.bells[i].status !== "ok") ||
         srcChecks.some((c) => c.key === `bell-${i}` && c.state === "error"),
+    );
+  }
+
+  /**
+   * Status line under the calendar link. A fresh check beats the snapshot:
+   * when the editor has run a check for the calendar link, the line shows
+   * the check's state — never a stale "looks good" next to a fresh failure.
+   */
+  function calendarStatusLine() {
+    const fresh = srcChecks.find((c) => c.key === "calendar");
+    if (fresh && fresh.state !== "saved") {
+      const failed = fresh.state === "error";
+      return (
+        <p className={`mt-1 text-xs ${failed ? "text-neon-amber" : "text-dim"}`}>
+          {failed
+            ? (fresh.message ?? "The calendar link didn't read — try Refresh.")
+            : "Checking the calendar link…"}
+        </p>
+      );
+    }
+    const snap = srcSnapshots.calendar;
+    if (!snap) return null;
+    const ok = snap.status === "ok";
+    return (
+      <p className={`mt-1 text-xs ${ok ? "text-dim" : "text-neon-amber"}`}>
+        {ok
+          ? `Last pull ${timeAgo(snap.fetched_at) ?? "recently"} — looks good.`
+          : `Last pull failed — ${snap.error_note ?? "try Refresh."}`}
+      </p>
+    );
+  }
+
+  /**
+   * Bell row i's failure message, from the freshest source: a fresh check
+   * error first, then the snapshot's error note. Renders nothing when the
+   * row has no failure from either source.
+   */
+  function bellRowStatus(i: number, label: string) {
+    const fresh = srcChecks.find((c) => c.key === `bell-${i}`);
+    const freshFailed = fresh?.state === "error";
+    const snap = srcSnapshots.bells[i];
+    const snapFailed = !!snap && snap.status !== "ok";
+    if (!snapFailed && !freshFailed) return null;
+    const message = freshFailed
+      ? (fresh?.message ?? "We couldn't read that link. Try again.")
+      : `last pull failed — ${snap?.error_note ?? "try Refresh."}`;
+    return (
+      <p className="text-xs text-neon-amber">
+        {label || `Schedule ${i + 1}`}: {message}
+      </p>
     );
   }
 
@@ -1204,14 +1283,24 @@ export function CrewApplet() {
     setSrcRetryingKey(check.key);
     // Re-run the FULL payload: the backend replaces bell_schedules wholesale,
     // so a partial retry would wipe the other saved links.
-    const items = buildSrcIntakeItems(
+    const draft = buildSrcIntakeItems(
       check.kind === "upload" ? [check] : undefined,
     );
+    const draftUploads = draft.filter((i) => i.kind === "upload");
+    const draftUrls = draft.filter((i) => i.kind !== "upload");
+    // The editor draft may be empty (e.g. Refresh ran with the editor
+    // closed) — retry the saved links rather than wiping the checks.
+    const items = [
+      ...(draftUrls.length > 0 ? draftUrls : buildSavedIntakeItems()),
+      ...draftUploads,
+    ];
     setSrcChecks(checksForItems(items));
     try {
       await runSourceIntake({
         memberId,
-        district: srcDistrict.trim() || null,
+        // Keep the saved district when the editor draft is empty — a retry
+        // re-checks the links, it must not wipe the district.
+        district: srcDistrict.trim() || srcSources?.district || null,
         items,
         onCheck: (key, patch) =>
           setSrcChecks((prev) =>
@@ -1246,6 +1335,15 @@ export function CrewApplet() {
     setSrcRefreshing(true);
     setSrcMessage(null);
     try {
+      // Refresh checks the SAVED links — seed per-source checks from them so
+      // the fresh results land on the right rows, exactly like the Save flow.
+      // The fallback gates and status lines below read these checks first.
+      const items = buildSavedIntakeItems();
+      setSrcChecks(checksForItems(items));
+      const patchCheck = (key: string, patch: Partial<SourceCheck>) =>
+        setSrcChecks((prev) =>
+          prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+        );
       const res = await fetch(
         `/api/crew/members/${memberId}/school-sources/refresh`,
         { method: "POST" },
@@ -1255,13 +1353,16 @@ export function CrewApplet() {
       const results: IntakeSourceResult[] = Array.isArray(json.results)
         ? json.results
         : [];
-      const failed = results.filter((r) => !r.verified);
+      applyIntakeResults(items, results, patchCheck);
+      // A page that opened but gave us nothing readable still needs the
+      // pilot's help — count it as failed, same as the per-source checks.
+      const failed = results.filter((r) => !r.verified || !r.parsed);
       setSrcMessage({
         ok: failed.length === 0,
         text:
           failed.length === 0
-            ? `Checked ${results.length} ${results.length === 1 ? "page" : "pages"} — all fresh.`
-            : `${failed.length} of ${results.length} didn't load: ${failed
+            ? `Checked ${results.length} ${results.length === 1 ? "page" : "pages"} — all read.`
+            : `${failed.length} of ${results.length} didn't come through: ${failed
                 .map((f) => `${f.label || "Link"} — ${f.message ?? "try again"}`)
                 .join("; ")}`,
       });
@@ -1959,19 +2060,7 @@ export function CrewApplet() {
                         className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
                       />
                     </label>
-                    {srcSnapshots.calendar && (
-                      <p
-                        className={`mt-1 text-xs ${
-                          srcSnapshots.calendar.status === "ok"
-                            ? "text-dim"
-                            : "text-neon-amber"
-                        }`}
-                      >
-                        {srcSnapshots.calendar.status === "ok"
-                          ? `Last pull ${timeAgo(srcSnapshots.calendar.fetched_at) ?? "recently"} — looks good.`
-                          : `Last pull failed — ${srcSnapshots.calendar.error_note ?? "try Refresh."}`}
-                      </p>
-                    )}
+                    {calendarStatusLine()}
                     {calendarSourceFailed() &&
                       !srcFallbackDone.includes("calendar") && (
                         <div className="mt-2">
@@ -2002,19 +2091,10 @@ export function CrewApplet() {
                   />
                   {srcBells.map((b, i) => {
                     const sourceKey = `bell-${i}`;
-                    const snapFailed =
-                      srcSnapshots.bells[i] &&
-                      srcSnapshots.bells[i].status !== "ok";
-                    if (!snapFailed && !bellSourceFailed(i)) return null;
+                    if (!bellSourceFailed(i)) return null;
                     return (
                       <div key={`snap-${i}`} className="space-y-2">
-                        {snapFailed && (
-                          <p className="text-xs text-neon-amber">
-                            {b.label || `Schedule ${i + 1}`}: last pull
-                            failed —{" "}
-                            {srcSnapshots.bells[i]?.error_note ?? "try Refresh."}
-                          </p>
-                        )}
+                        {bellRowStatus(i, b.label)}
                         {!srcFallbackDone.includes(sourceKey) && (
                           <SourceFallbackUpload
                             kind="bell"

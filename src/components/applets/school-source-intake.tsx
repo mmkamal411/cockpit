@@ -286,6 +286,58 @@ export function normalizeCalendarSummary(parsed: unknown): {
 const LINK_ERROR_FALLBACK =
   "We couldn't open that link. Check it in your browser and try again.";
 
+/**
+ * Match per-source intake results back to the requested items and push each
+ * item's check to saved/error.
+ *
+ * Matching is by (kind, url) — the backend keys results that way — with a
+ * URL-only fallback for results that carry no kind (so two items sharing one
+ * URL each get their own kind's result instead of colliding on one entry).
+ *
+ * A source counts as saved only when the page both answered AND yielded
+ * readable data (verified && parsed). A page that opens but has nothing we
+ * can read (a JS-driven calendar, an unrecognized layout) is an error: the
+ * pilot still needs to supply the data, which is exactly when the upload
+ * fallback is offered.
+ */
+export function applyIntakeResults(
+  items: IntakeItem[],
+  results: IntakeSourceResult[],
+  onCheck: (key: string, patch: Partial<SourceCheck>) => void,
+): void {
+  const byKindUrl = new Map<string, IntakeSourceResult>();
+  const byUrl = new Map<string, IntakeSourceResult>();
+  for (const r of results) {
+    if (!r || typeof r.url !== "string") continue;
+    if (!byUrl.has(r.url)) byUrl.set(r.url, r);
+    if (typeof r.kind === "string" && r.kind)
+      byKindUrl.set(`${r.kind}::${r.url}`, r);
+  }
+  for (const item of items) {
+    if (item.kind === "upload" || !item.url) continue;
+    const result =
+      byKindUrl.get(`${item.kind}::${item.url}`) ?? byUrl.get(item.url);
+    if (!result) {
+      onCheck(item.key, {
+        state: "error",
+        message: LINK_ERROR_FALLBACK,
+      });
+      continue;
+    }
+    if (result.verified && result.parsed) {
+      onCheck(item.key, {
+        state: "saved",
+        message: result.message ?? "Saved — the link opened fine.",
+      });
+    } else {
+      onCheck(item.key, {
+        state: "error",
+        message: result.message ?? LINK_ERROR_FALLBACK,
+      });
+    }
+  }
+}
+
 export interface RunIntakeOptions {
   memberId: string;
   district?: string | null;
@@ -393,31 +445,7 @@ export async function runSourceIntake(opts: RunIntakeOptions): Promise<void> {
       }
       return;
     }
-    const byUrl = new Map<string, IntakeSourceResult>();
-    for (const r of results) {
-      if (r && typeof r.url === "string") byUrl.set(r.url, r);
-    }
-    for (const item of urlItems) {
-      const result = item.url ? byUrl.get(item.url) : undefined;
-      if (!result) {
-        onCheck(item.key, {
-          state: "error",
-          message: LINK_ERROR_FALLBACK,
-        });
-        continue;
-      }
-      if (result.verified) {
-        onCheck(item.key, {
-          state: "saved",
-          message: result.message ?? "Saved — the link opened fine.",
-        });
-      } else {
-        onCheck(item.key, {
-          state: "error",
-          message: result.message ?? LINK_ERROR_FALLBACK,
-        });
-      }
-    }
+    applyIntakeResults(urlItems, results, onCheck);
   } catch (e) {
     for (const item of urlItems) {
       onCheck(item.key, {
