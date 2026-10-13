@@ -1,5 +1,5 @@
 -- =============================================================================
--- 013_chat_threads.sql
+-- 014_chat_threads.sql
 -- Crystal Chat — thread persistence.
 --
 -- One active thread per day (enforced in /api/chat, not the DB), plus
@@ -9,11 +9,10 @@
 -- Also adds pilots.default_mode (the Crystal/Fireball preference from the
 -- module spec §4 — chat preferences read at session start).
 --
--- NOTE: migration numbers 007–012 were claimed by other teams on
--- 2026-10-13; 013 is the first free slot. Do not renumber without
--- coordinating.
+-- NOTE: originally numbered 013; renamed to 014 on 2026-10-13 after the
+-- calendar team claimed 013. Do not renumber without coordinating.
 --
--- RUN: paste into the Supabase dashboard SQL editor AFTER 012_health.sql.
+-- RUN: paste into the Supabase dashboard SQL editor AFTER 013_calendar.sql.
 -- =============================================================================
 
 create extension if not exists pgcrypto;

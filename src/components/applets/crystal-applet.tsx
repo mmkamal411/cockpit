@@ -15,6 +15,13 @@ const TUTOR_URL = (
   ""
 ).replace(/\/$/, "");
 
+/**
+ * Server API path (POST /api/chat) — the browser stops calling the worker
+ * directly (spec §5). Flag-gated: the client-direct path stays the default
+ * until /api/chat is verified working end-to-end.
+ */
+const SERVER_MODE = process.env.NEXT_PUBLIC_CHAT_SERVER_API === "1";
+
 interface ChatMessage {
   role: "user" | "assistant";
   text: string;
@@ -22,6 +29,14 @@ interface ChatMessage {
   persona?: Persona;
   /** System note (mode flip confirmations) — rendered as a subtle line. */
   note?: boolean;
+}
+
+interface ThreadSummary {
+  id: string;
+  title: string;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 const SUGGESTIONS = [
@@ -36,6 +51,14 @@ function greeting(): string {
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
+}
+
+function greetingMessage(): ChatMessage {
+  return {
+    role: "assistant",
+    persona: "crystal",
+    text: `${greeting()}. I'm Crystal — your co-pilot. Tell me what's on your mind and I'll help you run the day.`,
+  };
 }
 
 /** Tappable mode pill — shows which persona answered, flips the mode. */
@@ -72,19 +95,44 @@ function ModePill({
 
 /** Crystal — the pilot's AI co-pilot. Warm by default, Fireball on keyword. */
 export function CrystalApplet() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", text: `${greeting()}. I'm Crystal — your co-pilot. Tell me what's on your mind and I'll help you run the day.`, persona: "crystal" },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([greetingMessage()]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [voiceDown, setVoiceDown] = useState(!TUTOR_URL);
+  const [voiceDown, setVoiceDown] = useState(!TUTOR_URL && !SERVER_MODE);
   /** Sticky mode — keyword flips persist until the pilot flips back. */
   const [mode, setMode] = useState<Persona>("crystal");
+  /** Thread persistence (server mode only). */
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [todayId, setTodayId] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [threadSearch, setThreadSearch] = useState("");
+  const [loadingThread, setLoadingThread] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, sending]);
+
+  // Load today's thread on open (server mode).
+  useEffect(() => {
+    if (!SERVER_MODE) return;
+    let cancelled = false;
+    (async () => {
+      const list = await fetchThreads();
+      if (cancelled || !list) return;
+      if (list.today_id) {
+        setLoadingThread(true);
+        const loaded = await fetchThread(list.today_id);
+        setLoadingThread(false);
+        if (cancelled) return;
+        if (loaded && loaded.length > 0) setMessages(loaded);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /** Flip the mode with a one-line confirmation (spec §7). */
   function flipMode(next?: Persona) {
@@ -93,13 +141,16 @@ export function CrystalApplet() {
     setMode(target);
     setMessages((prev) => [
       ...prev,
-      {
-        role: "assistant",
-        note: true,
-        persona: target,
-        text: flipConfirmation(target),
-      },
+      { role: "assistant", note: true, persona: target, text: flipConfirmation(target) },
     ]);
+    if (SERVER_MODE) {
+      // Best-effort: the pill flip already happened locally.
+      fetch("/api/chat/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: target }),
+      }).catch(() => {});
+    }
   }
 
   async function send(text: string) {
@@ -111,19 +162,71 @@ export function CrystalApplet() {
     const outbound = stripDirective(clean, persona);
     // Keyword flips are sticky: update the mode with a confirmation line.
     const flipped = persona !== mode;
-    if (flipped) setMode(persona);
+    if (flipped) {
+      setMode(persona);
+      if (SERVER_MODE) {
+        fetch("/api/chat/mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: persona }),
+        }).catch(() => {});
+      }
+    }
     // UI shows what the pilot typed; the worker gets the directive stripped.
     const userMsg: ChatMessage = { role: "user", text: clean };
     const history = [...messages, userMsg];
     const workerHistory = [...messages, { ...userMsg, text: outbound }];
     setMessages(flipped ? [...history, flipNote(persona)] : history);
 
-    if (!TUTOR_URL) {
+    try {
+      if (SERVER_MODE) {
+        await sendViaServer(clean, persona, outbound);
+      } else {
+        await sendDirect(workerHistory, persona);
+      }
+    } finally {
       setSending(false);
+    }
+  }
+
+  /** Server path: POST /api/chat — context assembled server-side, thread persisted. */
+  async function sendViaServer(clean: string, persona: Persona, outbound: string) {
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId, message: outbound, mode: persona }),
+      });
+      if (!res.ok) throw new Error(`chat ${res.status}`);
+      const data = (await res.json()) as {
+        reply?: unknown;
+        thread_id?: unknown;
+        mode?: unknown;
+      };
+      const reply =
+        typeof data.reply === "string" && data.reply.trim() ? data.reply.trim() : "";
+      if (!reply) throw new Error("empty reply");
+      if (typeof data.thread_id === "string") setThreadId(data.thread_id);
+      const replyPersona: Persona = data.mode === "fireball" ? "fireball" : "crystal";
+      setMessages((prev) => [...prev, { role: "assistant", text: reply, persona: replyPersona }]);
+      void fetchThreads();
+    } catch {
+      // Server path failed — fall back to the direct worker path so chat
+      // never breaks. The user's message is already on screen.
+      const workerHistory = [...messages, { role: "user" as const, text: outbound }];
+      await sendDirect(workerHistory, persona);
+    }
+  }
+
+  /** Direct browser → worker path (legacy; stays until /api/chat is verified). */
+  async function sendDirect(
+    workerHistory: ChatMessage[],
+    persona: Persona,
+  ) {
+    if (!TUTOR_URL) {
       setVoiceDown(true);
       return;
     }
-
     try {
       const controller = new AbortController();
       const timer = window.setTimeout(() => controller.abort(), 30000);
@@ -148,36 +251,228 @@ export function CrystalApplet() {
         ...prev,
         { role: "assistant", text: "I went quiet for a moment — check your connection and try again. I'm still here.", persona },
       ]);
-    } finally {
-      setSending(false);
     }
   }
 
+  // ---- thread drawer -------------------------------------------------------
+
+  async function fetchThreads(): Promise<{ threads: ThreadSummary[]; today_id: string | null } | null> {
+    try {
+      const res = await fetch("/api/chat/threads");
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        threads?: ThreadSummary[];
+        today_id?: string | null;
+      };
+      const list = Array.isArray(data.threads) ? data.threads : [];
+      setThreads(list);
+      setTodayId(data.today_id ?? null);
+      return { threads: list, today_id: data.today_id ?? null };
+    } catch {
+      return null;
+    }
+  }
+
+  async function fetchThread(id: string): Promise<ChatMessage[] | null> {
+    try {
+      const res = await fetch(`/api/chat/threads/${id}`);
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        thread?: { id: string };
+        messages?: { role: string; text: string; persona: string | null }[];
+      };
+      if (!data.thread) return null;
+      setThreadId(data.thread.id);
+      return (data.messages ?? []).map((m) => ({
+        role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+        text: m.text,
+        persona: m.persona === "fireball" ? ("fireball" as const) : m.role === "assistant" ? ("crystal" as const) : undefined,
+      }));
+    } catch {
+      return null;
+    }
+  }
+
+  async function openThread(id: string) {
+    setLoadingThread(true);
+    const loaded = await fetchThread(id);
+    setLoadingThread(false);
+    if (loaded) {
+      setMessages(loaded.length > 0 ? loaded : [greetingMessage()]);
+      setDrawerOpen(false);
+    }
+  }
+
+  async function newThread() {
+    try {
+      const res = await fetch("/api/chat/threads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { thread?: { id: string } };
+      if (data.thread) {
+        setThreadId(data.thread.id);
+        setMessages([greetingMessage()]);
+        setDrawerOpen(false);
+        void fetchThreads();
+      }
+    } catch {
+      /* drawer stays open */
+    }
+  }
+
+  async function togglePin(t: ThreadSummary) {
+    try {
+      const res = await fetch(`/api/chat/threads/${t.id}/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned: !t.pinned }),
+      });
+      if (res.ok) void fetchThreads();
+    } catch {
+      /* no-op */
+    }
+  }
+
+  async function deleteThread(id: string) {
+    try {
+      const res = await fetch(`/api/chat/threads/${id}`, { method: "DELETE" });
+      if (!res.ok) return;
+      if (id === threadId) {
+        setThreadId(null);
+        setMessages([greetingMessage()]);
+      }
+      void fetchThreads();
+    } catch {
+      /* no-op */
+    }
+  }
+
+  const visibleThreads = threads.filter((t) =>
+    threadSearch.trim()
+      ? t.title.toLowerCase().includes(threadSearch.trim().toLowerCase())
+      : true,
+  );
+
   return (
     <div className="flex min-h-[320px] flex-col">
-      <div className="flex-1 space-y-3">
-        {messages.map((m, i) =>
-          m.note ? (
-            <p key={i} className="text-center text-[11px] uppercase tracking-widest text-dim">
-              {m.text}
-            </p>
-          ) : (
-            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+      {SERVER_MODE && (
+        <div className="mb-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setDrawerOpen((v) => !v);
+              if (!drawerOpen) void fetchThreads();
+            }}
+            aria-expanded={drawerOpen}
+            className="rounded-full border border-line bg-panel-2/60 px-3 py-1 text-xs text-stardust transition-colors hover:border-neon-teal/40 hover:text-star"
+          >
+            {drawerOpen ? "Close conversations" : "Conversations"}
+          </button>
+          <span className="ml-auto">
+            <ModePill persona={mode} onFlip={() => flipMode()} />
+          </span>
+        </div>
+      )}
+
+      {SERVER_MODE && drawerOpen && (
+        <div className="mb-3 rounded-xl border border-line bg-panel-2/50 p-3">
+          <div className="mb-2 flex gap-2">
+            <input
+              value={threadSearch}
+              onChange={(e) => setThreadSearch(e.target.value)}
+              placeholder="Search conversations…"
+              aria-label="Search conversations"
+              className="min-w-0 flex-1 rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-xs text-star placeholder:text-dim focus:border-neon-teal/60 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={newThread}
+              className="shrink-0 rounded-lg border border-neon-teal/40 bg-neon-teal/10 px-3 py-1.5 text-xs font-medium text-neon-teal hover:bg-neon-teal/20"
+            >
+              New
+            </button>
+          </div>
+          <div className="max-h-48 space-y-1 overflow-y-auto">
+            {visibleThreads.length === 0 && (
+              <p className="px-1 py-2 text-xs text-dim">
+                {threadSearch ? "No conversations match." : "No conversations yet."}
+              </p>
+            )}
+            {visibleThreads.map((t) => (
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                  m.role === "user"
-                    ? "bg-neon-teal/15 text-star ring-1 ring-neon-teal/30"
-                    : "border border-line bg-panel-2/70 text-stardust"
+                key={t.id}
+                className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs transition-colors ${
+                  t.id === threadId ? "bg-neon-teal/10 text-star" : "text-stardust hover:bg-panel-2"
                 }`}
               >
-                {m.role === "assistant" && m.persona && (
-                  <ModePill persona={m.persona} onFlip={() => flipMode()} />
-                )}
-                <div>{m.text}</div>
+                <button
+                  type="button"
+                  onClick={() => openThread(t.id)}
+                  className="min-w-0 flex-1 truncate text-left"
+                  title={t.title}
+                >
+                  {t.pinned && <span aria-hidden>📌 </span>}
+                  {t.title}
+                  {t.id === todayId && (
+                    <span className="ml-2 rounded-full bg-neon-teal/15 px-1.5 py-0.5 text-[10px] text-neon-teal">
+                      today
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => togglePin(t)}
+                  aria-label={t.pinned ? "Unpin conversation" : "Pin conversation"}
+                  title={t.pinned ? "Unpin" : "Pin"}
+                  className="shrink-0 rounded px-1 text-dim hover:text-star"
+                >
+                  {t.pinned ? "★" : "☆"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteThread(t.id)}
+                  aria-label="Delete conversation"
+                  title="Delete"
+                  className="shrink-0 rounded px-1 text-dim hover:text-red-400"
+                >
+                  ✕
+                </button>
               </div>
-            </div>
-          ),
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 space-y-3">
+        {loadingThread && (
+          <p className="text-center text-xs text-dim">Loading conversation…</p>
         )}
+        {!loadingThread &&
+          messages.map((m, i) =>
+            m.note ? (
+              <p key={i} className="text-center text-[11px] uppercase tracking-widest text-dim">
+                {m.text}
+              </p>
+            ) : (
+              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                    m.role === "user"
+                      ? "bg-neon-teal/15 text-star ring-1 ring-neon-teal/30"
+                      : "border border-line bg-panel-2/70 text-stardust"
+                  }`}
+                >
+                  {m.role === "assistant" && m.persona && (
+                    <ModePill persona={m.persona} onFlip={() => flipMode()} />
+                  )}
+                  <div>{m.text}</div>
+                </div>
+              </div>
+            ),
+          )}
         {sending && (
           <div className="flex justify-start">
             <div className="rounded-2xl border border-line bg-panel-2/70 px-4 py-2.5 text-sm text-dim">
@@ -196,7 +491,7 @@ export function CrystalApplet() {
         <div ref={bottomRef} />
       </div>
 
-      {messages.length === 1 && (
+      {messages.length === 1 && !loadingThread && (
         <div className="mb-3 flex flex-wrap gap-2">
           {SUGGESTIONS.map((s) => (
             <button
