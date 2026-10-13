@@ -59,7 +59,8 @@ PREVIEW_PROPS_BRANCH = 'endsWith("/server/preview-props.json")'
 # Build-time env vars baked into the Next.js bundle. Missing ones mean a
 # build that does not match the intended staging config — fail loudly.
 REQUIRED_BUILD_ENV = ["NEXT_PUBLIC_SUPABASE_URL",
-                      "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"]
+                      "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+                      "NEXT_PUBLIC_CRYSTAL_URL"]
 
 
 def run(cmd, env=None, check=True):
