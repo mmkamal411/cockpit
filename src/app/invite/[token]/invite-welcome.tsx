@@ -13,21 +13,29 @@ export function InviteWelcome({
   ownerName,
   permission,
   already,
+  kind = "shopping",
 }: {
   listId: string;
   listName: string;
   ownerName: string;
   permission: "view" | "edit";
   already: boolean;
+  kind?: "shopping" | "todo";
 }) {
   const router = useRouter();
 
   function openList() {
     // The applet bus is module-level state: opening before navigating keeps
     // the shared list active once /home mounts its applet host.
-    openApplet("shopping", { list: listId, welcome: "1" });
+    if (kind === "todo") {
+      openApplet("today", { list: listId, welcome: "1" });
+    } else {
+      openApplet("shopping", { list: listId, welcome: "1" });
+    }
     router.push("/home");
   }
+
+  const itemNoun = kind === "todo" ? "tasks" : "items";
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-black px-6">
@@ -40,7 +48,7 @@ export function InviteWelcome({
           <strong className="text-star">{ownerName}</strong> shared their{" "}
           <strong className="text-star">&ldquo;{listName}&rdquo;</strong> list with you
           {permission === "edit"
-            ? " — you can add items and check things off together."
+            ? ` — you can add ${itemNoun} and check things off together.`
             : " — you can follow along as it updates."}
         </p>
         <p className="mt-3 text-xs leading-relaxed text-dim">

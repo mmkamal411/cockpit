@@ -17,7 +17,9 @@ export async function GET() {
     }
     const { data, error } = await supabase
       .from("calendar_connections")
-      .select("id, provider, provider_account_email, status, last_synced_at, last_sync_error, created_at")
+      .select(
+        "id, provider, provider_account_email, status, last_synced_at, last_sync_error, created_at, granted_scopes, last_tasks_sync",
+      )
       .eq("pilot_id", user.id)
       .order("created_at", { ascending: true });
     if (error) throw error;

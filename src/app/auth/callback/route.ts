@@ -69,6 +69,16 @@ export async function GET(request: NextRequest) {
               } catch {
                 /* invite redemption retries on the next sign-in */
               }
+              // Same for to-do list shares (037).
+              try {
+                await supabase
+                  .from("todo_list_shares")
+                  .update({ shared_with_pilot_id: uid })
+                  .is("shared_with_pilot_id", null)
+                  .eq("shared_with_email", email);
+              } catch {
+                /* invite redemption retries on the next sign-in */
+              }
             }
           }
         } catch (e) {
