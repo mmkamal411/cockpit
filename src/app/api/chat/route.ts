@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { ensurePilot } from "@/lib/auth/ensure-pilot";
 import { buildContextBundle } from "@/lib/chat/context";
 import {
   ContractViolationError,
@@ -48,7 +49,7 @@ async function requirePilot() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
-  return { supabase, pilotId: user.id };
+  return { supabase, pilotId: user.id, email: user.email ?? null };
 }
 
 interface ChatBody {
@@ -178,7 +179,16 @@ export async function POST(req: Request) {
     );
   }
   const mode = cleanMode(body?.mode);
-  const { supabase, pilotId } = auth;
+  const { supabase, pilotId, email } = auth;
+
+  // The pilots row must exist before any pilot_id-keyed insert (FK to
+  // pilots(id)). Lazy-provision it here so a missed signup-time upsert
+  // degrades to a one-time self-repair instead of a broken chat. LOUD on
+  // failure — never a silent 500 loop.
+  const ensured = await ensurePilot(supabase, pilotId, email);
+  if (!ensured.ok) {
+    return NextResponse.json({ error: ensured.message }, { status: 503 });
+  }
 
   try {
     // 1. Resolve the thread (RLS keeps every query pilot-scoped).
