@@ -1,8 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
-/** Refreshes the auth session on every request. */
-export async function updateSession(request: NextRequest) {
+export interface SessionRefresh {
+  response: NextResponse;
+  user: User | null;
+}
+
+/** Refreshes the auth session on every request; also reports the user. */
+export async function updateSession(request: NextRequest): Promise<SessionRefresh> {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -26,7 +32,9 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return supabaseResponse;
+  return { response: supabaseResponse, user };
 }
