@@ -222,8 +222,9 @@ export async function searchLocation(q: string): Promise<GeoResult[]> {
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`geocoding ${res.status}`);
   const data = await res.json();
-  return (data.results ?? [])
-    .map((r: Record<string, unknown>) => ({
+  const results = (data.results ?? []) as Record<string, unknown>[];
+  return results
+    .map((r) => ({
       name: (r["name"] as string) ?? "",
       country: (r["country"] as string) ?? null,
       admin1: (r["admin1"] as string) ?? null,
