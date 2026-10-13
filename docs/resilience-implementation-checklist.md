@@ -25,27 +25,30 @@ These are the CRITICAL/HIGH issues the Python expert team found in the current s
 Each source gets 3 transport methods. If primary fails, auto-fallback to next.
 
 ### ParentVUE
-- [ ] REST API primary (working — verify from laptop)
-- [ ] SOAP API fallback (code exists in `parentvue_pull.py` — test it)
-- [ ] Web scrape fallback (build if needed)
+- [x] REST API primary (working — verify from laptop) **VERIFIED 2026-10-13:** REST→SOAP fallback tested live from Windows laptop. **BUG FOUND & FIXED:** 500/SQL server errors were misclassified as auth failures, blocking SOAP fallback. `studentvue_api.py` now distinguishes real auth (401/invalid) from server errors (500/SQL) — server errors raise `StudentVueAPIError` (allows fallback), not `StudentVueAuthError`. Test added: `test_server_error_envelope_raises_api_error_not_auth`. All 42 tests pass.
+- [x] SOAP API fallback (code exists in `parentvue_pull.py` — test it) **VERIFIED 2026-10-13:** SOAP login succeeded from Windows laptop when REST returned SQL error. Transport auto-selected: `soap`.
+- [ ] Web scrape fallback (build if needed) — **DEFERRED:** PXP2_*.aspx scrape exists as separate browser cron (parentvue-daily-check). Not in Python module by design. Revisit if both REST and SOAP fail simultaneously.
 
-### CTLS Parent
-- [ ] Form POST + session cookies primary
-- [ ] Web scrape fallback
+### CTLS Parent (now ParentSquare)
+- [x] Form POST + session cookies primary **VERIFIED 2026-10-13:** `parentsquare_pull.py` implements cookie-session login to ctlsparent.cobbk12.org (now serves ParentSquare/Rails app).
+- [x] API v2 JSON endpoints — implemented (`_pull_feeds`, `_pull_notices`, `_pull_student_dashboard`)
+- [x] HTML scraping fallback — implemented (same methods use HTML parsing)
+- [ ] ICS calendar feeds — documented but not implemented (calendar-only, 3rd fallback). Low priority.
 
 ### StudentVUE (via SSO)
-- [ ] Browser/SSO automation primary (laptop workers)
-- [ ] Document: mobile REST API does NOT work for SSO — don't try
+- [x] Browser/SSO automation primary (laptop workers) — **DOCUMENTED 2026-10-13:** Added SSO CONSTRAINT warning to `studentvue_api.py`: mobile API uses native Basic auth, CANNOT work with Microsoft SSO credentials. Student sources REQUIRE browser automation on trusted device.
+- [x] Document: mobile REST API does NOT work for SSO — don't try — **DONE:** explicit warning in code.
 
 ### CTLS Learn
-- [ ] Browser/SSO automation primary
+- [x] Browser/SSO automation primary — **DOCUMENTED:** Same SSO constraint applies. Laptop workers only.
 
 ### Office 365 Email
-- [ ] Microsoft Graph API primary
-- [ ] IMAP fallback
+- [ ] Microsoft Graph API primary — **NOT BUILT:** Requires Azure app registration (Meheldi's action item). No Graph API code exists in telemetry/.
+- [ ] IMAP fallback — **NOT BUILT:** Would require app password or OAuth. Deferred until Graph API is set up.
 
 ### Office 365 Calendar
-- [ ] Microsoft Graph API primary
+- [ ] Microsoft Graph API primary — **NOT BUILT:** Same Azure app registration blocker.
+- [ ] Documented in Phase 4 as cloud worker task.
 
 ---
 
