@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const TUTOR_URL = (process.env.NEXT_PUBLIC_POOKIE_TUTOR_URL || "").replace(/\/$/, "");
+const TUTOR_URL = (
+  process.env.NEXT_PUBLIC_CRYSTAL_URL ||
+  process.env.NEXT_PUBLIC_POOKIE_TUTOR_URL ||
+  ""
+).replace(/\/$/, "");
+
+type Persona = "crystal" | "fireball";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -23,8 +29,9 @@ function greeting(): string {
   return "Good evening";
 }
 
-/** Crystal — the pilot's AI co-pilot. Warm, proactive, ambient. */
+/** Crystal — the pilot's AI co-pilot. Warm by default, Fireball on demand. */
 export function CrystalApplet() {
+  const [persona, setPersona] = useState<Persona>("crystal");
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", text: `${greeting()}. I'm Crystal — your co-pilot. Tell me what's on your mind and I'll help you run the day.` },
   ]);
@@ -61,7 +68,7 @@ export function CrystalApplet() {
         body: JSON.stringify({
           messages: history.slice(-20).map((m) => ({ role: m.role, text: m.text })),
           context: { pilot: true },
-          mode: "pookie",
+          mode: persona,
         }),
       });
       window.clearTimeout(timer);
@@ -82,6 +89,35 @@ export function CrystalApplet() {
 
   return (
     <div className="flex min-h-[320px] flex-col">
+      <div className="mb-3 flex items-center gap-2">
+        <div
+          role="tablist"
+          aria-label="AI personality"
+          className="inline-flex rounded-full border border-line bg-panel-2/60 p-0.5"
+        >
+          {(["crystal", "fireball"] as Persona[]).map((p) => (
+            <button
+              key={p}
+              role="tab"
+              aria-selected={persona === p}
+              type="button"
+              onClick={() => setPersona(p)}
+              className={`rounded-full px-3.5 py-1.5 text-xs font-medium capitalize transition-colors ${
+                persona === p
+                  ? p === "crystal"
+                    ? "bg-neon-teal/20 text-neon-teal"
+                    : "bg-neon-amber/20 text-neon-amber"
+                  : "text-dim hover:text-stardust"
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <span className="text-[11px] text-dim">
+          {persona === "crystal" ? "Warm co-pilot" : "Straight-talk mode"}
+        </span>
+      </div>
       <div className="flex-1 space-y-3">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -99,7 +135,7 @@ export function CrystalApplet() {
         {sending && (
           <div className="flex justify-start">
             <div className="rounded-2xl border border-line bg-panel-2/70 px-4 py-2.5 text-sm text-dim">
-              <span className="crystal-typing" aria-label="Crystal is thinking">
+              <span className="crystal-typing" aria-label={`${persona === "fireball" ? "Fireball" : "Crystal"} is thinking`}>
                 <i /> <i /> <i />
               </span>
             </div>
