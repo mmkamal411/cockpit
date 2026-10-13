@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet } from "@/lib/applet-bus";
+import { useHasLinkedChildren } from "@/lib/use-crew-roster";
+import { SchoolGlyph } from "./school-glyph";
 
 function HomeGlyph() {
   return (
@@ -40,23 +42,15 @@ function ProgressGlyph() {
   );
 }
 
-function MoreGlyph() {
-  return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <circle cx="5" cy="12" r="1.8" />
-      <circle cx="12" cy="12" r="1.8" />
-      <circle cx="19" cy="12" r="1.8" />
-    </svg>
-  );
-}
-
 /**
  * Toolbar — the persistent bottom-center command bar.
  * Center: the Crystal orb (soothing, glowing, id="toolbar-crystal-orb").
- * Flanks: Home · Today · Crystal · Progress · More. Always a path back home.
+ * Flanks: Home · Today · Crystal · Progress · School (School only when the
+ * pilot has a linked child). Always a path back home.
  */
 export function ToolbarLegacy() {
   const router = useRouter();
+  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
@@ -67,7 +61,15 @@ export function ToolbarLegacy() {
     { label: "Today", glyph: <TodayGlyph />, run: () => openApplet("today") },
     { label: "Crystal", glyph: <ChatGlyph />, run: () => openApplet("crystal") },
     { label: "Progress", glyph: <ProgressGlyph />, run: () => openApplet("progress") },
-    { label: "More", glyph: <MoreGlyph />, run: () => openApplet("more") },
+    ...(showSchool
+      ? [
+          {
+            label: "School",
+            glyph: <SchoolGlyph size={19} strokeWidth={1.9} />,
+            run: () => openApplet("school"),
+          },
+        ]
+      : []),
   ];
 
   return (

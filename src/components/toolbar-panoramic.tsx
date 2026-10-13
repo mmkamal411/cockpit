@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
 import { createClient } from "@/lib/supabase/client";
+import { useHasLinkedChildren } from "@/lib/use-crew-roster";
+import { SchoolGlyph } from "./school-glyph";
 
 /* Glyphs — same 24px line icons as the other variants. Icon + word label. */
 function HomeGlyph() {
@@ -35,15 +37,7 @@ function ProgressGlyph() {
   );
 }
 
-function MoreGlyph() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <circle cx="5" cy="12" r="1.8" />
-      <circle cx="12" cy="12" r="1.8" />
-      <circle cx="19" cy="12" r="1.8" />
-    </svg>
-  );
-}
+
 
 function MicGlyph() {
   return (
@@ -261,6 +255,9 @@ export function ToolbarPanoramic() {
   const { open, minimized } = useAppletBus();
   const today = useShipDate();
   const pilotName = usePilotName();
+  // School renders iff the pilot has ≥1 linked child (D4) — zero parenting
+  // pixels for childless pilots.
+  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
@@ -295,15 +292,19 @@ export function ToolbarPanoramic() {
       active: open?.id === "progress",
       arc: "inner" as const,
     },
-    {
-      id: "more",
-      label: "More",
-      glyph: <MoreGlyph />,
-      run: () => openApplet("more"),
-      aria: "Open More",
-      active: open?.id === "more",
-      arc: "outer" as const,
-    },
+    ...(showSchool
+      ? [
+          {
+            id: "school",
+            label: "School",
+            glyph: <SchoolGlyph size={22} strokeWidth={1.5} />,
+            run: () => openApplet("school"),
+            aria: "Open School",
+            active: open?.id === "school",
+            arc: "outer" as const,
+          },
+        ]
+      : []),
   ];
 
   const crystalActive = open?.id === "crystal";
@@ -382,6 +383,16 @@ export function ToolbarPanoramic() {
           <span className="pano2-pilot">
             Pilot&nbsp;//&nbsp;<span className="pano2-pilot-name">{pilotName}</span>
           </span>
+          {/* Avatar — secondary Settings entry (primary is the gear on the home glass pane). */}
+          <button
+            type="button"
+            onClick={() => openApplet("settings")}
+            aria-label="Open Settings"
+            title="Settings"
+            className="pano2-avatar"
+          >
+            {pilotName.charAt(0)}
+          </button>
           <span className="pano2-date">{fmtDate(today)}</span>
         </div>
       </div>
@@ -618,6 +629,26 @@ const PANORAMIC_CSS = `
   color: rgb(143 166 177 / 0.6); white-space: nowrap;
 }
 .pano2-pilot-name, .pano2-date { color: #dbe9ef; }
+/* Pilot avatar — secondary Settings entry. 28px is informational chrome
+   (the glass-pane gear is the primary Settings entry), not a key. */
+.pano2-avatar {
+  width: 28px; height: 28px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9999px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  color: #5eead4;
+  background: radial-gradient(circle at 50% 38%, #0d2226 0%, #05090c 70%);
+  border: 1px solid rgb(94 234 212 / 0.35);
+  box-shadow: 0 0 10px rgb(94 234 212 / 0.25), inset 0 1px 2px rgb(255 255 255 / 0.08);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: border-color 90ms ease-out, box-shadow 90ms ease-out;
+}
+.pano2-avatar:hover {
+  border-color: rgb(94 234 212 / 0.7);
+  box-shadow: 0 0 14px rgb(94 234 212 / 0.45), inset 0 1px 2px rgb(255 255 255 / 0.08);
+}
 /* Desktop: roomier */
 @media (min-width: 640px) {
   .pano2-console { border-radius: 44px 44px 0 0; padding: 12px 20px max(10px, env(safe-area-inset-bottom)); }
