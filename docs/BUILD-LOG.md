@@ -123,3 +123,32 @@ All pushed to origin. Needs: migration 028 run in Supabase dashboard, then stagi
 
 ## 2026-10-13 ~12:38 EDT — DEPLOY COMPLETE (Google Calendar env vars pickup)
 Deploy 2e0ac2f2 live on cockpit-10c.pages.dev. Smoke test passed (all 5 checks). Google Calendar OAuth env vars now active. Built from feature/phase1-module-finish @ 60af80a via separate worktree (main tree untouched).
+
+## 2026-10-13 ~12:45 EDT — Phase D (Child Education Build Team, subagent c6144adb) — Settings: 7 panels built
+Branch: feature/child-education-ux (synced, HEAD = origin). Built the Settings applet shell + all 7 panels on Phase B's pilot_settings namespaced schema (027 — reused as-is, no new table needed).
+
+**New lib:**
+- `src/lib/pilot-settings.ts` — types, DEFAULT_SETTINGS (grade-drop default 90, quiet hours 10 PM–7 AM on, D1 shared-default/D3 full-text locked), mergeSettings (deep-merge, arrays replace, unknown keys dropped), sanitizeNamespace (numeric clamps), freshnessLabel ("synced Xh ago"), SETTING_BLURBS (plain-English "what this does" for every setting).
+
+**New API (8 routes):**
+- `GET/PUT /api/settings` — merged-over-defaults load (never blank), per-namespace partial save.
+- `GET/PATCH /api/settings/profile` — name, read-only sign-in email, photo, timezone, coarse home location, °F/°C (bridges pilots row).
+- `GET /api/settings/connections` — calendars + per-child school logins + pilot_integrations + unwired catalog (honest "not connected yet").
+- `GET/PUT /api/settings/layout` — reads/writes the ACTIVE cockpit_layouts row (fills the layer-2 personalization gap); unknown stations re-appended so nothing silently vanishes.
+- `GET /api/settings/export` — "Download my data" JSON bundle (never credentials).
+- `GET/DELETE/POST /api/settings/account` — DangerZone: type-email-to-confirm → 30-day grace (pilots.deletion_requested_at, new migration 028 + avatar_url); cancel path.
+- `GET/POST /api/crew/access-grants` + `DELETE /api/crew/access-grants/[id]` — who-can-see-what per child, revoke = revoked_at (audit preserved), steward-only via RLS + ownership check.
+
+**New UI:**
+- `src/components/applets/settings-applet.tsx` — shell: search (name/blurb/keyword match, never blank — empty results get a "show all" recovery), 7 panel rows each with live state summary ("Grade alerts: on, target 90").
+- `src/components/applets/settings/` — shared primitives (SettingRow w/ blurb, Switch role=switch, Segmented, Slider, Panel, Notice, StatusDot, usePanelSettings optimistic hook) + 7 panels:
+  1. Profile — photo picker (browser-downscaled 128px data URL, no storage infra needed), name, read-only email, timezone, coarse location, °F/°C.
+  2. Connections — per-row status + freshness; calendar connect/disconnect/reconnect (anchor OAuth, per existing pattern); school logins link into the family panel; unwired kinds honest "still being built".
+  3. Alerts — per-domain switches, grade target slider (default 90), due-soon hours, daily recap, quiet hours (10 PM–7 AM default), urgent breakthrough (off), sensitivity slider.
+  4. Crystal — proactive help Off/Gentle/Eager, learn-from-corrections, D2 safety-floor note; NO persona toggle (keyword-only, per directive).
+  5. Your cockpit — home order with up/down + LIVE PREVIEW chips, hero widgets, neon accent, reduce motion, celebrations, orb calm/lively; saves to cockpit_layouts.
+  6. Family & sharing — who's aboard (age tiers, school freshness), per-child expander: prominent 6-digit link-code mint (D5), who-can-see-what + revoke, audit timeline (grants + codes), go-independent for 16–17, D1/D3 visibility switches.
+  7. Privacy & data — retention (90d/1yr/forever), data download, cookies, sign out, DangerZone (type-email confirm, 30-day countdown, cancel button).
+- `src/components/applet-content.tsx` — placeholder replaced; openApplet("settings") now renders the real SettingsApplet.
+
+**Verified:** `npx tsc --noEmit` — zero errors. ESLint: only the repo-standard data-fetch set-state-in-effect pattern (same as crew-applet etc.) + one no-location-assign warning on the deliberate full-reload sign-out. No console.logs, no dead code, no commented-out blocks. **NOT browser-verified** (no subagent browser): needs a signed-in staging session — open Settings from the station deck footer → all 7 panels render, search works, save a setting → reload shows it persisted; family panel link-code mint; layout reorder persists; export downloads; DangerZone flow. Migrations 027 + 028 still need Meheldi to run in the SQL editor (settings API 500s until 027 exists — panel shows plain-English retry states).
