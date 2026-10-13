@@ -1,5 +1,9 @@
 import { strict as assert } from "node:assert";
-import { pickSectionSources, type SyncRow } from "./school-sections.ts";
+import {
+  normalizeDueNext,
+  pickSectionSources,
+  type SyncRow,
+} from "./school-sections.ts";
 
 function row(over: Partial<SyncRow> & { synced_at: string }): SyncRow {
   return {
@@ -61,3 +65,57 @@ function row(over: Partial<SyncRow> & { synced_at: string }): SyncRow {
 }
 
 console.log("school-sections pickSectionSources: all passed");
+
+// --- normalizeDueNext: laptop-worker shape (assignment key) ---
+{
+  const out = normalizeDueNext([
+    { assignment: "No Red Ink", due: "10/16/2026", class: "Lit" },
+    { assignment: "  ", due: "10/17/2026", class: "Gov" },
+  ]);
+  assert.equal(out.length, 1, "blank assignment dropped");
+  assert.equal(out[0].assignment, "No Red Ink");
+  assert.equal(out[0].due, "10/16/2026");
+  assert.equal(out[0].class, "Lit");
+}
+
+// --- normalizeDueNext: ParentVUE fallback shape (title key, extra keys) ---
+// Regression: the parent pull keys entries `title`; the old mapper only
+// read `assignment` and silently blanked "This week".
+{
+  const out = normalizeDueNext([
+    {
+      class: "Lit",
+      title: "Practice assessments",
+      due: "10/13/2026",
+      score: null,
+      max_points: 20,
+      category: "Practice",
+    },
+    { class: "Gov", title: "Voter registration HW", due: "10/14/2026" },
+    { class: "Gov", title: "", due: "10/15/2026" },
+  ]);
+  assert.equal(out.length, 2, "title-keyed parent entries must survive");
+  assert.equal(out[0].assignment, "Practice assessments");
+  assert.equal(out[0].class, "Lit");
+  assert.equal(out[1].assignment, "Voter registration HW");
+}
+
+// --- normalizeDueNext: assignment wins over title when both present ---
+{
+  const out = normalizeDueNext([
+    { assignment: "A", title: "B", due: "10/16/2026", class: "Lit" },
+  ]);
+  assert.equal(out[0].assignment, "A");
+}
+
+// --- normalizeDueNext: non-array / missing due ---
+assert.deepEqual(normalizeDueNext(null), []);
+assert.deepEqual(normalizeDueNext("x"), []);
+{
+  const out = normalizeDueNext([{ title: "No due date" }]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].due, null);
+  assert.equal(out[0].class, null);
+}
+
+console.log("school-sections normalizeDueNext: all passed");

@@ -22,36 +22,6 @@ interface Office365MailEntry {
   date?: string;
 }
 
-interface DueNextEntry {
-  assignment?: string;
-  due?: string;
-  class?: string;
-}
-
-interface UpcomingItem {
-  assignment: string;
-  due: string | null;
-  class: string | null;
-}
-
-/** Sanitize the due_next upcoming-assignment list for the client. */
-function normalizeDueNext(dueNext: unknown): UpcomingItem[] {
-  if (!Array.isArray(dueNext)) return [];
-  const out: UpcomingItem[] = [];
-  for (const e of dueNext as DueNextEntry[]) {
-    const assignment =
-      typeof e.assignment === "string" ? e.assignment.trim() : "";
-    if (!assignment) continue;
-    out.push({
-      assignment,
-      due: typeof e.due === "string" ? e.due.trim() : null,
-      class: typeof e.class === "string" && e.class.trim() ? e.class.trim() : null,
-    });
-    if (out.length >= 60) break;
-  }
-  return out;
-}
-
 interface SchoolMessage {
   source: "synergy" | "outlook";
   sender: string | null;
@@ -139,7 +109,7 @@ function letterFor(grade: number | null): string | null {
   return "F";
 }
 
-import { pickSectionSources, type SyncRow } from "@/lib/school-sections";
+import { pickSectionSources, normalizeDueNext, type SyncRow } from "@/lib/school-sections";
 
 /**
  * GET /api/crew/members/[id]/classes
@@ -147,7 +117,9 @@ import { pickSectionSources, type SyncRow } from "@/lib/school-sections";
  * - classes with current grades + gap-to-90 + teacher lookup (via class_details)
  *   from the NEWEST sync row with grades
  * - due_next: upcoming assignments ({assignment, due, class}) for the 7-day due scan,
- *   from the newest row that HAS due_next (laptop-worker rows can be grades-only)
+ *   from the newest row that HAS due_next (laptop-worker rows can be grades-only).
+ *   Entries may key the title as `assignment` (laptop workers) or `title`
+ *   (ParentVUE fallback pull) — both are accepted.
  * - gpa (weighted/unweighted/cumulative when the sync carries it)
  * - attendance summary ({absences, tardies, ...} when present)
  * - messages: Synergy + Office 365 teacher mail merged, newest first (top 8),
@@ -194,14 +166,16 @@ export async function GET(
   // grades-only (empty due_next/mail) while the 4x-daily parent pulls carry
   // the full payload. Take the newest row for classes, and the newest rows
   // that actually have due_next / mail for those sections — a grades-only
-  // row must never blank "This week" or "Messages".
+  // row must never blank "This week" or "Messages". The window is generous
+  // (20, not 5): hourly grades-only pushes can flush the section-carrying
+  // rows out of a small window.
   const { data: rows } = (await supabase
     .from("crew_grade_syncs")
     .select("grades, class_details, synced_at, gpa, due_next, attendance, synergy_mail, office365_emails")
     .eq("crew_member_id", crewMemberId)
     .filter("grades", "neq", "[]")
     .order("synced_at", { ascending: false })
-    .limit(5)) as { data: SyncRow[] | null };
+    .limit(20)) as { data: SyncRow[] | null };
 
   const latest = rows?.[0];
   if (!latest) {

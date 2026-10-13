@@ -40,3 +40,51 @@ export function pickSectionSources(rows: SyncRow[]): {
     mailSource: rows.find(hasMail) ?? latest,
   };
 }
+
+export interface DueNextEntry {
+  assignment?: string;
+  /** ParentVUE fallback pulls key the title "title", not "assignment". */
+  title?: string;
+  name?: string;
+  due?: string;
+  class?: string;
+}
+
+export interface UpcomingItem {
+  assignment: string;
+  due: string | null;
+  class: string | null;
+}
+
+/**
+ * Sanitize the due_next upcoming-assignment list for the client.
+ *
+ * Sync workers don't all key the assignment title the same way: the
+ * laptop workers write `assignment`, the ParentVUE fallback pull writes
+ * `title`. Read `assignment` first, then `title`, then `name` — a row
+ * whose entries use a different key must never silently blank This week.
+ */
+export function normalizeDueNext(dueNext: unknown): UpcomingItem[] {
+  if (!Array.isArray(dueNext)) return [];
+  const out: UpcomingItem[] = [];
+  for (const e of dueNext as DueNextEntry[]) {
+    const raw =
+      typeof e.assignment === "string" && e.assignment.trim()
+        ? e.assignment
+        : typeof e.title === "string" && e.title.trim()
+          ? e.title
+          : typeof e.name === "string"
+            ? e.name
+            : "";
+    const assignment = raw.trim();
+    if (!assignment) continue;
+    out.push({
+      assignment,
+      due: typeof e.due === "string" ? e.due.trim() : null,
+      class:
+        typeof e.class === "string" && e.class.trim() ? e.class.trim() : null,
+    });
+    if (out.length >= 60) break;
+  }
+  return out;
+}
