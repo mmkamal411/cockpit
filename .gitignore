@@ -17,6 +17,11 @@
 /.next/
 /out/
 
+# cloudflare / opennext deploy artifacts
+/.open-next/
+/.wrangler/
+/.pages-deploy/
+
 # production
 /build
 

@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Cloudflare Pages project: cockpit  ->  https://cockpit.pages.dev
+  // (Project must be created in the Cloudflare dashboard first; this deploy
+  // script does NOT create it.)
+  "name": "cockpit",
+  "main": ".open-next/worker.js",
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Non-secret public env vars. The publishable key is public by design
+  // (already in .env.example). NEXT_PUBLIC_* values are baked into the
+  // bundle at build time — the deploy script exports them from the
+  // environment/.env.local during `npm run build`, so these [vars] are a
+  // documented fallback; the authoritative runtime values live in the
+  // Pages project Settings > Environment variables (see DEPLOY.md).
+  //
+  // SUPABASE_SERVICE_ROLE_KEY is NEVER in this file or any file in the
+  // repo. Set it in the Pages dashboard (Production environment) only.
+  "vars": {
+    "NEXT_PUBLIC_SUPABASE_URL": "https://hwnesewathbnfvoxtbqh.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_-gpFmkywUHJ9G3Yg2tPueQ_0J4DjqL0"
+  }
+}
