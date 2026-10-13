@@ -1,6 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  AssignmentsGrouped,
+  CategoryBreakdown,
+  ExplainBack,
+  HonestSoon,
+  WhatIfSimulator,
+  type CategoryWeight,
+  type DetailAssignment,
+} from "./class-detail-sections";
 
 interface Assignment {
   title: string;
@@ -20,7 +29,7 @@ interface ClassInfo {
   teacher: string | null;
   period: string | null;
   has_category_weights: boolean;
-  categories: Record<string, unknown>;
+  categories: CategoryWeight[];
 }
 
 interface ClassDetailPayload {
@@ -28,6 +37,7 @@ interface ClassDetailPayload {
   missing: Assignment[];
   upcoming: Assignment[];
   recent: Assignment[];
+  assignments_all: DetailAssignment[];
   synced_at: string | null;
   stale?: boolean;
   hours_since_sync?: number | null;
@@ -388,101 +398,84 @@ export function ClassDetail({
         )}
       </div>
 
-      {/* Missing assignments */}
-      <div className="space-y-2">
-        <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-amber">
-          Missing · {data.missing.length}
-        </p>
-        {data.missing.length === 0 ? (
-          <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
-            Nothing missing — nice. Keeping it that way is the whole game.
-          </p>
-        ) : (
-          data.missing.map((a, i) => (
-            <div
-              key={`m-${i}-${a.title}`}
-              className="flex items-center justify-between gap-3 rounded-xl border border-neon-amber/25 bg-neon-amber/5 px-4 py-2.5"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm text-star">{a.title}</p>
-                <p className="text-xs text-dim">
-                  Due {a.due_label}
-                  {a.category ? ` · ${a.category}` : ""}
-                </p>
-              </div>
-              <span className="shrink-0 rounded-md border border-neon-amber/40 px-2 py-0.5 text-xs font-medium text-neon-amber">
-                Missing
-              </span>
-            </div>
-          ))
-        )}
-      </div>
+      {/* Categories — every grade category with weight + average */}
+      <CategoryBreakdown
+        categories={c.categories}
+        assignments={data.assignments_all}
+      />
 
-      {/* Upcoming assignments */}
-      <div className="space-y-2">
-        <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
-          Coming up · {data.upcoming.length}
-        </p>
-        {data.upcoming.length === 0 ? (
-          <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
-            Nothing on the calendar — enjoy the quiet, or get ahead.
-          </p>
-        ) : (
-          data.upcoming.map((a, i) => (
-            <div
-              key={`u-${i}-${a.title}`}
-              className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel-2/60 px-4 py-2.5"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm text-star">{a.title}</p>
-                <p className="text-xs text-dim">
-                  Due {a.due_label}
-                  {a.category ? ` · ${a.category}` : ""}
-                </p>
-              </div>
-              <span className="shrink-0 text-xs text-dim">{a.due_label}</span>
-            </div>
-          ))
-        )}
-      </div>
+      {/* 98% Playbook — peer tips (no backend yet, honest state) */}
+      <HonestSoon
+        title="98% Playbook"
+        body="Peer tips for this class are on the way — the students who aced it are sharing what actually worked."
+      />
 
-      {/* Recent graded work */}
-      {data.recent.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
-            Recently graded
-          </p>
-          {data.recent.map((a, i) => (
-            <div
-              key={`r-${i}-${a.title}`}
-              className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel-2/40 px-4 py-2.5"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm text-stardust">{a.title}</p>
-                <p className="text-xs text-dim">
-                  {a.due_label}
-                  {a.category ? ` · ${a.category}` : ""}
-                </p>
-              </div>
-              <span className={`shrink-0 text-sm font-semibold ${gradeTone(a.score)}`}>
-                {a.score !== null ? a.score.toFixed(0) : "—"}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Assignments grouped — Missing / Upcoming / Past, full history */}
+      <AssignmentsGrouped assignments={data.assignments_all} />
+
+      {/* What-if simulator */}
+      <WhatIfSimulator
+        assignments={data.assignments_all}
+        categories={c.categories}
+        currentGrade={c.grade}
+      />
+
+      {/* Explain it back — 60-second self-test */}
+      <ExplainBack topic={c.name} />
+
+      {/* Study materials (no backend yet, honest state) */}
+      <HonestSoon
+        title="Study materials"
+        body="Handouts and unit files for this class will appear here once they're synced — nothing uploaded yet."
+      />
+
+      {/* My resources (no backend yet, honest state) */}
+      <HonestSoon
+        title="My resources"
+        body="Your own links live here — Khan Academy, YouTube, Quizlet, Desmos, whatever works. Saving your own resources is coming soon."
+      />
+
+      {/* Curated study resources (no backend yet, honest state) */}
+      <HonestSoon
+        title="Study resources"
+        body="Curated picks for this class — topic overviews, videos, cheat sheets, and games — are on the way."
+      />
+
+      {/* Class files (no backend yet, honest state) */}
+      <HonestSoon
+        title="Class files"
+        body="Upload handouts, photos of the board, or study guides here — file uploads for classes are coming soon."
+      />
+
+      {/* Daily check-in (no backend yet, honest state) */}
+      <HonestSoon
+        title="Daily check-in"
+        body="A quick daily pulse for this class — what clicked, what's fuzzy — is coming soon."
+      />
+
+      {/* Dawson's word (no backend yet, honest state) */}
+      <HonestSoon
+        title="Dawson's word"
+        body="A word worth knowing, picked for this class — coming soon."
+      />
 
       {/* Teacher */}
-      <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+      <div className="space-y-2">
         <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
-          Teacher
+          Teacher inbox
         </p>
-        <p className="mt-1 text-sm text-star">
-          {c.teacher ?? "Not listed in the latest sync."}
-        </p>
-        {c.period && (
-          <p className="mt-0.5 text-xs text-dim">Period {c.period}</p>
-        )}
+        <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+          <p className="text-sm text-star">
+            {c.teacher ?? "Not listed in the latest sync."}
+          </p>
+          {c.period && (
+            <p className="mt-0.5 text-xs text-dim">Period {c.period}</p>
+          )}
+          <p className="mt-2 text-xs leading-relaxed text-dim">
+            Teacher messages for this class will land here — emailing the
+            teacher from the app is coming soon.
+          </p>
+        </div>
       </div>
 
       {data.synced_at && (
