@@ -22,6 +22,36 @@ interface Office365MailEntry {
   date?: string;
 }
 
+interface DueNextEntry {
+  assignment?: string;
+  due?: string;
+  class?: string;
+}
+
+interface UpcomingItem {
+  assignment: string;
+  due: string | null;
+  class: string | null;
+}
+
+/** Sanitize the due_next upcoming-assignment list for the client. */
+function normalizeDueNext(dueNext: unknown): UpcomingItem[] {
+  if (!Array.isArray(dueNext)) return [];
+  const out: UpcomingItem[] = [];
+  for (const e of dueNext as DueNextEntry[]) {
+    const assignment =
+      typeof e.assignment === "string" ? e.assignment.trim() : "";
+    if (!assignment) continue;
+    out.push({
+      assignment,
+      due: typeof e.due === "string" ? e.due.trim() : null,
+      class: typeof e.class === "string" && e.class.trim() ? e.class.trim() : null,
+    });
+    if (out.length >= 60) break;
+  }
+  return out;
+}
+
 interface SchoolMessage {
   source: "synergy" | "outlook";
   sender: string | null;
@@ -113,6 +143,7 @@ function letterFor(grade: number | null): string | null {
  * GET /api/crew/members/[id]/classes
  * Member school overview, derived from the latest full grade sync:
  * - classes with current grades + gap-to-90 + teacher lookup (via class_details)
+ * - due_next: upcoming assignments ({assignment, due, class}) for the 7-day due scan
  * - gpa (weighted/unweighted/cumulative when the sync carries it)
  * - attendance summary ({absences, tardies, ...} when present)
  * - messages: Synergy + Office 365 teacher mail merged, newest first (top 8)
@@ -156,7 +187,7 @@ export async function GET(
 
   const { data: latest } = await supabase
     .from("crew_grade_syncs")
-    .select("grades, class_details, synced_at, gpa, attendance, synergy_mail, office365_emails")
+    .select("grades, class_details, synced_at, gpa, due_next, attendance, synergy_mail, office365_emails")
     .eq("crew_member_id", crewMemberId)
     .filter("grades", "neq", "[]")
     .order("synced_at", { ascending: false })
@@ -168,6 +199,7 @@ export async function GET(
       classes: [],
       synced_at: null,
       gpa: null,
+      due_next: [],
       attendance: null,
       messages: [],
       stale: false,
@@ -214,6 +246,7 @@ export async function GET(
       latest.gpa && typeof latest.gpa === "object" && Object.keys(latest.gpa).length > 0
         ? latest.gpa
         : null,
+    due_next: normalizeDueNext(latest.due_next),
     attendance:
       latest.attendance && typeof latest.attendance === "object" && Object.keys(latest.attendance).length > 0
         ? latest.attendance
