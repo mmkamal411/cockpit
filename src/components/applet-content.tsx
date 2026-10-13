@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { AppletParams } from "@/lib/applet-bus";
+import { openApplet } from "@/lib/applet-bus";
 import { TodayApplet } from "./applets/today-applet";
 import { CrystalApplet } from "./applets/crystal-applet";
 import { ProgressApplet } from "./applets/progress-applet";
@@ -14,6 +15,9 @@ import { CalendarApplet } from "./applets/calendar-applet";
 import { ShoppingApplet } from "./applets/shopping-applet";
 import { HealthApplet } from "./applets/health-applet";
 import { NudgeCenterApplet } from "./applets/nudge-center-applet";
+import { SchoolStation } from "./applets/school-station";
+import { ClassDetail } from "./applets/class-detail";
+import { StationCategoryOverlay } from "./home-stations";
 
 /**
  * Settings placeholder — the full User Settings module (Profile,
@@ -128,6 +132,48 @@ export const APPLETS: Record<string, AppletDef> = {
     readout: "SYS",
     glow: "#67e8f9",
     render: () => <SettingsPlaceholderApplet />,
+  },
+  school: {
+    name: "School",
+    readout: "SCHL",
+    glow: "#86efac",
+    render: () => <SchoolStation />,
+  },
+  "station-category": {
+    name: "Stations",
+    readout: "NAV",
+    glow: "#67e8f9",
+    render: (params) => <StationCategoryOverlay params={params} />,
+  },
+  "class-detail": {
+    name: "Class",
+    readout: "CLS",
+    glow: "#86efac",
+    render: (params) =>
+      params.member && params.class ? (
+        <ClassDetail
+          memberId={params.member}
+          className={params.class}
+          onBack={() => openApplet("school", {}, { replace: true })}
+        />
+      ) : (
+        <div className="space-y-4">
+          <h2 className="text-xl font-semibold text-star">
+            That class didn&apos;t open
+          </h2>
+          <p className="text-sm leading-relaxed text-stardust">
+            We lost track of which class you tapped. Head back to the school
+            station and try the class again.
+          </p>
+          <button
+            type="button"
+            onClick={() => openApplet("school", {}, { replace: true })}
+            className="rounded-xl border border-neon-green/40 bg-neon-green/10 px-5 py-2.5 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20"
+          >
+            Back to School
+          </button>
+        </div>
+      ),
   },
 };
 

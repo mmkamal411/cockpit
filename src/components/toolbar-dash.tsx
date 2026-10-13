@@ -3,6 +3,8 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
+import { useHasLinkedChildren } from "@/lib/use-crew-roster";
+import { SchoolGlyph } from "./school-glyph";
 
 /* Glyphs copied verbatim from toolbar-legacy.tsx — the ship's station icons. */
 function HomeGlyph() {
@@ -42,17 +44,7 @@ function ProgressGlyph() {
   );
 }
 
-function MoreGlyph() {
-  return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <circle cx="5" cy="12" r="1.8" />
-      <circle cx="12" cy="12" r="1.8" />
-      <circle cx="19" cy="12" r="1.8" />
-    </svg>
-  );
-}
-
-type StationId = "home" | "today" | "crystal" | "progress" | "more";
+type StationId = "home" | "today" | "crystal" | "progress" | "school";
 
 interface DashStation {
   id: Exclude<StationId, "crystal">;
@@ -68,24 +60,38 @@ interface DashStation {
 
 /**
  * Station layout math (verified for 320px and 390px viewports):
- * - 4 keys × min 48px (PROGRESS renders ~64px at 11px/600/0.05em) = ~208px
- * - hex master bezel 76px + 4 gaps × 3px + 4px row padding = ~300px total
- * - nav px-2 leaves 304px at a 320px viewport → ~4px slack, no overflow.
+ * - 3–4 keys × min 48px (PROGRESS renders ~64px at 11px/600/0.05em)
+ * - hex master bezel 76px + gaps × 3px + 4px row padding → ≤300px total
+ * - nav px-2 leaves 304px at a 320px viewport → no overflow either way.
  * - Tilts and lifts are pure transforms (never affect layout), and the SVG
  *   arch uses preserveAspectRatio="none", so the arc cannot break at any width.
+ * The School key (right flank) renders only when the pilot has a linked child.
  */
-const STATIONS: DashStation[] = [
-  { id: "home", label: "Home", glyph: <HomeGlyph />, tilt: "-3deg", lift: "6px", accent: "#eef6fa" },
-  { id: "today", label: "Today", glyph: <TodayGlyph />, tilt: "-1.5deg", lift: "2.5px", accent: "#22d3ee" },
-  { id: "progress", label: "Progress", glyph: <ProgressGlyph />, tilt: "1.5deg", lift: "2.5px", accent: "#34d399" },
-  { id: "more", label: "More", glyph: <MoreGlyph />, tilt: "3deg", lift: "6px", accent: "#fbbf24" },
-];
+function buildStations(showSchool: boolean): DashStation[] {
+  return [
+    { id: "home", label: "Home", glyph: <HomeGlyph />, tilt: "-3deg", lift: "6px", accent: "#eef6fa" },
+    { id: "today", label: "Today", glyph: <TodayGlyph />, tilt: "-1.5deg", lift: "2.5px", accent: "#22d3ee" },
+    { id: "progress", label: "Progress", glyph: <ProgressGlyph />, tilt: "1.5deg", lift: "2.5px", accent: "#34d399" },
+    ...(showSchool
+      ? [
+          {
+            id: "school" as const,
+            label: "School",
+            glyph: <SchoolGlyph size={19} strokeWidth={1.9} />,
+            tilt: "3deg",
+            lift: "6px",
+            accent: "#86efac",
+          },
+        ]
+      : []),
+  ];
+}
 
 /**
  * ToolbarDash — the "Panoramic Dash" toolbar direction.
  *
  * A curved console dashboard: the top edge arcs gently like a panoramic
- * windshield frame, traced by a neon rail. Five stations ride the arc —
+ * windshield frame, traced by a neon rail. Stations ride the arc —
  * machined keys tilted to the curve tangent, with the Crystal orb set in a
  * hexagonal master bezel at the crown. Dark black panels (#04070a) with
  * subtle neon accents from the locked palette.
@@ -95,11 +101,14 @@ const STATIONS: DashStation[] = [
 export function ToolbarDash() {
   const router = useRouter();
   const { open } = useAppletBus();
+  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
     router.push("/home");
   }
+
+  const STATIONS = buildStations(showSchool);
 
   // Chrome-only active state: whichever applet is open (home when none).
   const activeId = (open?.id as StationId | undefined) ?? "home";
@@ -234,7 +243,7 @@ export function ToolbarDash() {
           </div>
 
           {keyButton(STATIONS[2])}
-          {keyButton(STATIONS[3])}
+          {STATIONS[3] && keyButton(STATIONS[3])}
         </div>
       </div>
       <style>{DASH_CSS}</style>

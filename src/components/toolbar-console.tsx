@@ -3,6 +3,8 @@
 import { Fragment } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
+import { useHasLinkedChildren } from "@/lib/use-crew-roster";
+import { SchoolGlyph } from "./school-glyph";
 
 /* Glyphs — copied from toolbar-legacy.tsx, resized to the console spec
    (22px, 1.5px stroke). Icon + word label, always. */
@@ -43,23 +45,14 @@ function ProgressGlyph() {
   );
 }
 
-function MoreGlyph() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <circle cx="5" cy="12" r="1.8" />
-      <circle cx="12" cy="12" r="1.8" />
-      <circle cx="19" cy="12" r="1.8" />
-    </svg>
-  );
-}
-
 /**
  * ToolbarConsole — "Cockpit Console" toolbar variant.
  *
  * A bottom-anchored, full-bleed black instrument shelf (#04070a) with a 2px
- * teal light strip along its top edge. Five backlit machined keys sit in a
+ * teal light strip along its top edge. Backlit machined keys sit in a
  * single shared inset key bank (milled recess, engraved dividers between the
- * Home | Today·Crystal | Progress·More groups). The 58px breathing Crystal
+ * Home | Today·Crystal | Progress·School groups) — the School key renders
+ * only when the pilot has a linked child. The 58px breathing Crystal
  * orb rides in a deeper circular well at dead center, overlapping the shelf's
  * top edge — the ship's reactor core, and the brightest element on the shelf.
  *
@@ -70,6 +63,9 @@ export function ToolbarConsole() {
   const router = useRouter();
   const pathname = usePathname();
   const { open, minimized } = useAppletBus();
+  // The School key renders iff the pilot has ≥1 linked child (D4: on child
+  // add, not after first sync). Childless pilots see zero parenting pixels.
+  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
@@ -109,14 +105,18 @@ export function ToolbarConsole() {
       aria: "Open Progress",
       active: open?.id === "progress",
     },
-    {
-      id: "more",
-      label: "More",
-      glyph: <MoreGlyph />,
-      run: () => openApplet("more"),
-      aria: "Open More",
-      active: open?.id === "more",
-    },
+    ...(showSchool
+      ? [
+          {
+            id: "school",
+            label: "School",
+            glyph: <SchoolGlyph size={22} strokeWidth={1.5} />,
+            run: () => openApplet("school"),
+            aria: "Open School",
+            active: open?.id === "school",
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -171,7 +171,7 @@ export function ToolbarConsole() {
                     <span className="console-key-label">{k.label}</span>
                   </button>
                 </span>
-                {/* Engraved dividers: Home alone | Today · Crystal | Progress · More */}
+                {/* Engraved dividers: Home alone | Today · Crystal | Progress · School */}
                 {(i === 0 || i === 2) && (
                   <span className="console-divider" aria-hidden="true" />
                 )}

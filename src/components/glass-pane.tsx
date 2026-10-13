@@ -158,6 +158,35 @@ export function GlassPane() {
       aria-label="Today at a glance"
       className="glass-pane pointer-events-auto w-full max-w-sm rounded-3xl border border-line bg-panel/55 p-5 shadow-[0_20px_70px_rgb(0_0_0/0.5)] backdrop-blur-xl"
     >
+      {/* Top row: pane label + Settings (primary entry — Phase D builds it). */}
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-dim">
+          Today at a glance
+        </p>
+        <button
+          type="button"
+          onClick={() => openApplet("settings")}
+          aria-label="Open Settings"
+          title="Settings"
+          className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-stardust transition-colors hover:bg-white/[0.04] hover:text-star"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34 1.7 1.7 0 0 0 1 1.55V3a2 2 0 1 1 4 0v.09c0 .68.4 1.3 1.01 1.55.61.26 1.31.11 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87c.26.61.86 1.01 1.55 1.01H21a2 2 0 1 1 0 4h-.09c-.68 0-1.29.4-1.55 1.01Z" />
+          </svg>
+          Settings
+        </button>
+      </div>
       {/* Weather — tap to open the full applet */}
       <button
         type="button"
