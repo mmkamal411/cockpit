@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { openApplet } from "@/lib/applet-bus";
 
 import { ClassDetail } from "./class-detail";
 import { DistrictCalendar } from "./district-calendar";
@@ -1802,6 +1803,13 @@ export function CrewApplet() {
               </button>
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => openApplet("data-review", { member: member.id })}
+            className="mt-2 text-xs font-medium text-neon-teal underline decoration-neon-teal/40 underline-offset-2 hover:decoration-neon-teal"
+          >
+            Review what the sync collected
+          </button>
           {reauthFor === member.id && (
             <div className="mt-3 border-t border-line pt-3">
               <p className="text-sm font-medium text-star">

@@ -269,24 +269,37 @@ export function SchoolStation() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-green">
-          School
-        </p>
-        <h2 className="mt-1 text-xl font-semibold text-star">School station</h2>
-        {classesSyncedAt && (
-          <p className="mt-1 text-xs text-dim">
-            Synced{" "}
-            {new Date(classesSyncedAt).toLocaleDateString(undefined, {
-              month: "short",
-              day: "numeric",
-            })}{" "}
-            at{" "}
-            {new Date(classesSyncedAt).toLocaleTimeString(undefined, {
-              hour: "numeric",
-              minute: "2-digit",
-            })}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-green">
+            School
           </p>
+          <h2 className="mt-1 text-xl font-semibold text-star">School station</h2>
+          {classesSyncedAt && (
+            <p className="mt-1 text-xs text-dim">
+              Synced{" "}
+              {new Date(classesSyncedAt).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+              })}{" "}
+              at{" "}
+              {new Date(classesSyncedAt).toLocaleTimeString(undefined, {
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </p>
+          )}
+        </div>
+        {selected && (
+          <button
+            type="button"
+            onClick={() =>
+              openApplet("data-review", { member: selected.id })
+            }
+            className="shrink-0 rounded-xl border border-neon-teal/40 bg-neon-teal/10 px-4 py-2 text-xs font-semibold text-neon-teal transition-colors hover:bg-neon-teal/20"
+          >
+            Data review
+          </button>
         )}
       </div>
 

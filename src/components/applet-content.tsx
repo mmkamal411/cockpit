@@ -16,6 +16,7 @@ import { ShoppingApplet } from "./applets/shopping-applet";
 import { HealthApplet } from "./applets/health-applet";
 import { NudgeCenterApplet } from "./applets/nudge-center-applet";
 import { SchoolStation } from "./applets/school-station";
+import { SyncDataReview } from "./applets/sync-data-review";
 import { ClassDetail } from "./applets/class-detail";
 import { StationCategoryOverlay } from "./home-stations";
 import { SchoolOverviewApplet } from "./applets/school-overview-applet";
@@ -145,6 +146,12 @@ export const APPLETS: Record<string, AppletDef> = {
     readout: "SCHL",
     glow: "#86efac",
     render: () => <SchoolStation />,
+  },
+  "data-review": {
+    name: "Sync data review",
+    readout: "SYNC",
+    glow: "#67e8f9",
+    render: (params) => <SyncDataReview memberId={params.member} />,
   },
   "station-category": {
     name: "Stations",
