@@ -14,7 +14,16 @@ export interface IntegrationHealth {
   last_checked: string;
 }
 
-const CRYSTAL_HEALTH_URL = "https://crystal.mehedikamal.workers.dev/health";
+/** Server-side only. The worker's /health endpoint requires the shared
+ *  secret (Phase 0) — this check attaches it like every other server
+ *  caller. The URL has a server-side default; CRYSTAL_URL is NOT a
+ *  NEXT_PUBLIC_ var, so the browser never learns the worker URL. */
+const CRYSTAL_HEALTH_URL = (
+  process.env.CRYSTAL_URL || "https://crystal.mehedikamal.workers.dev"
+).replace(/\/$/, "") + "/health";
+
+/** Shared secret for the crystal worker (server-side only). */
+const CRYSTAL_SECRET = process.env.CRYSTAL_WORKER_SECRET ?? "";
 
 function withTimeout(ms: number): { signal: AbortSignal; cancel: () => void } {
   const controller = new AbortController();
@@ -60,7 +69,9 @@ export async function checkCrystal(): Promise<IntegrationHealth> {
   const lastChecked = new Date().toISOString();
   const { signal, cancel } = withTimeout(8000);
   try {
-    const res = await fetch(CRYSTAL_HEALTH_URL, { signal });
+    const headers: Record<string, string> = {};
+    if (CRYSTAL_SECRET) headers["Authorization"] = `Bearer ${CRYSTAL_SECRET}`;
+    const res = await fetch(CRYSTAL_HEALTH_URL, { signal, headers });
     cancel();
     if (res.ok) {
       return {
@@ -68,6 +79,16 @@ export async function checkCrystal(): Promise<IntegrationHealth> {
         name: "Crystal worker",
         status: "ok",
         detail: `Health endpoint answered HTTP ${res.status}.`,
+        last_checked: lastChecked,
+      };
+    }
+    if (res.status === 401) {
+      return {
+        id: "crystal",
+        name: "Crystal worker",
+        status: "error",
+        detail:
+          "Health endpoint denied the request (unauthorized) — the CRYSTAL_WORKER_SECRET is missing or wrong.",
         last_checked: lastChecked,
       };
     }
