@@ -53,6 +53,27 @@ const GLUCOSE_REF = {
 const GLUCOSE_DISCLAIMER =
   "This is a tracking tool, not medical advice. Your estimated A1C is a rough calculation from your readings — it is not a substitute for lab tests. Talk to your doctor about your personal targets and treatment.";
 
+const glucoseContextLabel = (c: string) =>
+  GLUCOSE_CONTEXTS.find((g) => g.id === c)?.label ?? "Other";
+
+/** "2026-10-13T14:05:00" in the browser's local time — for datetime-local inputs. */
+function toLocalInput(iso: string) {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Short readable stamp for a logged entry, in the pilot's timezone. */
+function fmtEntryDate(iso: string) {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/New_York",
+  });
+}
+
 /** Health — the Med Bay. Manual logging, gentle trends, celebrating streaks. */
 export function HealthApplet() {
   const [latest, setLatest] = useState<Partial<Record<Metric, HealthLog>>>({});
@@ -64,6 +85,7 @@ export function HealthApplet() {
   const [sheet, setSheet] = useState<Metric | null>(null);
   const [trend, setTrend] = useState<Metric | null>(null);
   const [goalsSheet, setGoalsSheet] = useState<{ focus: Metric | null } | null>(null);
+  const [entriesFor, setEntriesFor] = useState<Metric | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -225,6 +247,18 @@ export function HealthApplet() {
             setGoalsSheet({ focus: sheet });
             setSheet(null);
           }}
+          onManageEntries={() => {
+            setEntriesFor(sheet);
+            setSheet(null);
+          }}
+        />
+      )}
+
+      {entriesFor && (
+        <EntriesView
+          metric={entriesFor}
+          onClose={() => setEntriesFor(null)}
+          onChanged={load}
         />
       )}
 
@@ -254,6 +288,7 @@ function LogSheet({
   onSaved,
   onViewTrend,
   onEditGoal,
+  onManageEntries,
 }: {
   metric: Metric;
   goal?: Goal;
@@ -261,6 +296,7 @@ function LogSheet({
   onSaved: () => void;
   onViewTrend: () => void;
   onEditGoal: () => void;
+  onManageEntries: () => void;
 }) {
   const def = METRICS.find((m) => m.id === metric)!;
   const [value, setValue] = useState("");
@@ -528,6 +564,13 @@ function LogSheet({
             >
               View 30-day trend →
             </button>
+            <button
+              type="button"
+              onClick={onManageEntries}
+              className="w-full py-1 text-sm text-dim hover:text-star hover:underline"
+            >
+              Manage past entries
+            </button>
           </div>
         )}
       </div>
@@ -690,7 +733,7 @@ interface A1CData {
     readings_count: number;
     window_days: number;
   } | null;
-  lab_results: { value: number; logged_at: string; lab_name: string | null }[];
+  lab_results: { id: string; value: number; logged_at: string; lab_name: string | null }[];
 }
 
 function GlucoseTrendView({ onClose }: { onClose: () => void }) {
@@ -699,6 +742,10 @@ function GlucoseTrendView({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showLabForm, setShowLabForm] = useState(false);
+  const [editingLab, setEditingLab] = useState<{ id: string; value: number; logged_at: string; lab_name: string | null } | null>(null);
+  const [deletingLab, setDeletingLab] = useState<string | null>(null);
+  const [labBusy, setLabBusy] = useState(false);
+  const [labActionError, setLabActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -731,6 +778,26 @@ function GlucoseTrendView({ onClose }: { onClose: () => void }) {
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
 
+  async function deleteLab(id: string) {
+    setLabBusy(true);
+    setLabActionError(null);
+    try {
+      const res = await fetch(`/api/health/logs/${id}`, { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof body?.error === "string" ? body.error : "Couldn't delete that result.",
+        );
+      }
+      setDeletingLab(null);
+      load();
+    } catch (err) {
+      setLabActionError(err instanceof Error ? err.message : "Couldn't delete that result.");
+    } finally {
+      setLabBusy(false);
+    }
+  }
+
   // Chart geometry: keep the reference bands in view even with few readings.
   const values = readings.map((r) => r.value);
   const lo = Math.min(60, ...(values.length > 0 ? values : [60]));
@@ -738,7 +805,6 @@ function GlucoseTrendView({ onClose }: { onClose: () => void }) {
   const span = Math.max(hi - lo, 1);
   const yOf = (v: number) => 128 - ((v - lo) / span) * 112;
   const xOf = (i: number) => 14 + (i / Math.max(readings.length - 1, 1)) * 272;
-  const ctxLabel = (c: string) => GLUCOSE_CONTEXTS.find((g) => g.id === c)?.label ?? "Other";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Blood sugar trend">
@@ -786,7 +852,7 @@ function GlucoseTrendView({ onClose }: { onClose: () => void }) {
               />
               {readings.map((r, i) => (
                 <circle key={`${r.logged_at}-${i}`} cx={xOf(i)} cy={yOf(r.value)} r="3.5" fill="#fca5a5">
-                  <title>{`${r.value} mg/dL — ${ctxLabel(r.context)}, ${fmtDate(r.logged_at)}`}</title>
+                  <title>{`${r.value} mg/dL — ${glucoseContextLabel(r.context)}, ${fmtDate(r.logged_at)}`}</title>
                 </circle>
               ))}
             </svg>
@@ -851,23 +917,81 @@ function GlucoseTrendView({ onClose }: { onClose: () => void }) {
                 setShowLabForm(false);
                 load();
               }}
+              onCancel={() => setShowLabForm(false)}
             />
           )}
+          {editingLab && (
+            <LabA1CForm
+              initial={editingLab}
+              onSaved={() => {
+                setEditingLab(null);
+                load();
+              }}
+              onCancel={() => setEditingLab(null)}
+            />
+          )}
+          {labActionError && <p className="mt-2 text-sm text-red-300">{labActionError}</p>}
           <div className="mt-2 space-y-2">
             {(a1c?.lab_results ?? []).length === 0 && !loading && (
               <p className="text-xs text-dim">No lab results logged yet.</p>
             )}
-            {(a1c?.lab_results ?? []).map((l, i) => (
-              <div key={`${l.logged_at}-${i}`} className="flex items-center justify-between rounded-xl border border-neon-cyan/25 bg-neon-cyan/5 px-4 py-2.5">
-                <div>
-                  <span className="mr-2 rounded-md bg-neon-cyan/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
-                    Lab
-                  </span>
-                  <span className="text-lg font-semibold text-star">{l.value}%</span>
+            {(a1c?.lab_results ?? []).map((l) => (
+              <div key={l.id} className="rounded-xl border border-neon-cyan/25 bg-neon-cyan/5 px-4 py-2.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="mr-2 rounded-md bg-neon-cyan/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
+                      Lab
+                    </span>
+                    <span className="text-lg font-semibold text-star">{l.value}%</span>
+                  </div>
+                  <p className="text-xs text-dim">
+                    {fmtDate(l.logged_at)}{l.lab_name ? ` · ${l.lab_name}` : ""}
+                  </p>
                 </div>
-                <p className="text-xs text-dim">
-                  {fmtDate(l.logged_at)}{l.lab_name ? ` · ${l.lab_name}` : ""}
-                </p>
+                {deletingLab === l.id ? (
+                  <div className="mt-2 flex items-center justify-end gap-2">
+                    <span className="text-xs text-stardust">Delete this result?</span>
+                    <button
+                      type="button"
+                      onClick={() => deleteLab(l.id)}
+                      disabled={labBusy}
+                      className="rounded-lg border border-red-300/50 bg-red-300/10 px-3 py-1 text-xs font-medium text-red-300 disabled:opacity-40"
+                    >
+                      {labBusy ? "Deleting…" : "Yes, delete"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeletingLab(null)}
+                      disabled={labBusy}
+                      className="rounded-lg border border-line px-3 py-1 text-xs text-dim disabled:opacity-40"
+                    >
+                      Keep
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-1 flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeletingLab(null);
+                        setEditingLab(l);
+                      }}
+                      className="text-xs text-neon-cyan hover:underline"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingLab(null);
+                        setDeletingLab(l.id);
+                      }}
+                      className="text-xs text-red-300/80 hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -885,10 +1009,20 @@ function GlucoseTrendView({ onClose }: { onClose: () => void }) {
 /* Lab A1C entry form                                                  */
 /* ------------------------------------------------------------------ */
 
-function LabA1CForm({ onSaved }: { onSaved: () => void }) {
-  const [value, setValue] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [labName, setLabName] = useState("");
+function LabA1CForm({
+  initial,
+  onSaved,
+  onCancel,
+}: {
+  initial?: { id: string; value: number; logged_at: string; lab_name: string | null };
+  onSaved: () => void;
+  onCancel?: () => void;
+}) {
+  const [value, setValue] = useState(initial ? String(initial.value) : "");
+  const [date, setDate] = useState(() =>
+    initial ? initial.logged_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+  );
+  const [labName, setLabName] = useState(initial?.lab_name ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -901,17 +1035,22 @@ function LabA1CForm({ onSaved }: { onSaved: () => void }) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/health/log", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          metric: "a1c_lab",
-          value: v,
-          unit: "%",
-          logged_at: new Date(date + "T12:00:00").toISOString(),
-          meta: labName.trim() ? { lab_name: labName.trim() } : {},
-        }),
-      });
+      const payload = {
+        value: v,
+        logged_at: new Date(date + "T12:00:00").toISOString(),
+        meta: labName.trim() ? { lab_name: labName.trim() } : {},
+      };
+      const res = initial
+        ? await fetch(`/api/health/logs/${initial.id}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        : await fetch("/api/health/log", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ metric: "a1c_lab", unit: "%", ...payload }),
+          });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(typeof body?.error === "string" ? body.error : "Couldn't save that.");
@@ -926,6 +1065,7 @@ function LabA1CForm({ onSaved }: { onSaved: () => void }) {
 
   return (
     <div className="mt-2 space-y-3 rounded-2xl border border-line bg-panel-2/40 p-4">
+      {initial && <p className="text-sm font-medium text-star">Correct this lab result</p>}
       <div className="flex gap-2">
         <input
           value={value}
@@ -954,14 +1094,25 @@ function LabA1CForm({ onSaved }: { onSaved: () => void }) {
         />
       </div>
       {error && <p className="text-sm text-red-300">{error}</p>}
-      <button
-        type="button"
-        onClick={save}
-        disabled={saving || !value.trim()}
-        className="w-full rounded-xl border border-neon-green/40 bg-neon-green/10 py-2.5 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {saving ? "Saving…" : "Save lab result"}
-      </button>
+      <div className="flex gap-2">
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-xl border border-line py-2.5 text-sm font-medium text-dim transition-colors hover:text-star"
+          >
+            Cancel
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !value.trim()}
+          className="flex-1 rounded-xl border border-neon-green/40 bg-neon-green/10 py-2.5 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {saving ? "Saving…" : initial ? "Save changes" : "Save lab result"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1064,6 +1215,292 @@ function TrendView({ metric, onClose }: { metric: Metric; onClose: () => void })
                 These are observations from your own log. If something worries you, talk to your doctor.
               </p>
             </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Entries view — the recent entries for one metric, with edit (PATCH) */
+/* and delete (DELETE). Mis-typed entries get corrected here.          */
+/* ------------------------------------------------------------------ */
+
+interface LogEntry {
+  id: string;
+  metric: Metric;
+  value: number;
+  unit: string;
+  meta: Record<string, unknown>;
+  logged_at: string;
+}
+
+function EntriesView({
+  metric,
+  onClose,
+  onChanged,
+}: {
+  metric: Metric;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const def = METRICS.find((m) => m.id === metric)!;
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const fetchEntries = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await fetch(`/api/health/logs?metric=${metric}&limit=50`, {
+        cache: "no-store",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof body?.error === "string" ? body.error : "Those entries didn't load.",
+        );
+      }
+      setEntries(body.logs ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Those entries didn't load.");
+    } finally {
+      setLoading(false);
+    }
+  }, [metric]);
+
+  useEffect(() => {
+    (async () => {
+      await fetchEntries();
+    })();
+  }, [fetchEntries]);
+
+  function startEdit(entry: LogEntry) {
+    setEditingId(entry.id);
+    setEditValue(String(entry.value));
+    setEditDate(toLocalInput(entry.logged_at));
+    setEditError(null);
+    setDeletingId(null);
+  }
+
+  async function saveEdit(id: string) {
+    const v = parseFloat(editValue);
+    if (!Number.isFinite(v)) {
+      setEditError("Enter a number.");
+      return;
+    }
+    const dt = new Date(editDate);
+    if (!editDate || Number.isNaN(dt.getTime())) {
+      setEditError("Pick a date and time.");
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const res = await fetch(`/api/health/logs/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ value: v, logged_at: dt.toISOString() }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof body?.error === "string" ? body.error : "Couldn't save that change.",
+        );
+      }
+      setEditingId(null);
+      onChanged();
+      await fetchEntries();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Couldn't save that change.");
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function confirmDelete(id: string) {
+    setDeleteBusy(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/health/logs/${id}`, { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof body?.error === "string" ? body.error : "Couldn't delete that entry.",
+        );
+      }
+      setDeletingId(null);
+      onChanged();
+      await fetchEntries();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't delete that entry.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  const contextOf = (e: LogEntry) =>
+    e.metric === "blood_glucose" && typeof e.meta.context === "string"
+      ? glucoseContextLabel(e.meta.context)
+      : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${def.label} entries`}
+    >
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-line bg-panel p-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-star">
+            {def.icon} {def.label} — past entries
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-full border border-line p-2 text-dim hover:text-star"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        {error ? (
+          <div className="py-6 text-center">
+            <p className="text-sm text-stardust">{error}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                fetchEntries();
+              }}
+              className="mt-2 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
+            >
+              Try again
+            </button>
+          </div>
+        ) : loading ? (
+          <div className="mt-4 space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-16 animate-pulse rounded-xl bg-panel-2/60" />
+            ))}
+          </div>
+        ) : entries.length === 0 ? (
+          <p className="py-6 text-center text-sm text-stardust">
+            No entries yet — log {def.label.toLowerCase()} and they&apos;ll show up here.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-2">
+            {actionError && <p className="text-sm text-red-300">{actionError}</p>}
+            {entries.map((e) => (
+              <div
+                key={e.id}
+                className="rounded-xl border border-line bg-panel-2/40 px-4 py-3"
+              >
+                {editingId === e.id ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        value={editValue}
+                        onChange={(ev) => setEditValue(ev.target.value)}
+                        inputMode="decimal"
+                        aria-label="Corrected value"
+                        className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-3 py-2 text-star focus:border-neon-green/60 focus:outline-none"
+                      />
+                      <span className="flex items-center text-sm text-dim">{e.unit}</span>
+                    </div>
+                    <input
+                      type="datetime-local"
+                      value={editDate}
+                      onChange={(ev) => setEditDate(ev.target.value)}
+                      aria-label="Corrected date and time"
+                      className="w-full rounded-xl border border-line bg-panel-2 px-3 py-2 text-sm text-star focus:border-neon-green/60 focus:outline-none"
+                    />
+                    {editError && <p className="text-sm text-red-300">{editError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="flex-1 rounded-xl border border-line py-2 text-sm text-dim transition-colors hover:text-star"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveEdit(e.id)}
+                        disabled={editSaving}
+                        className="flex-1 rounded-xl border border-neon-green/40 bg-neon-green/10 py-2 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {editSaving ? "Saving…" : "Save changes"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-star">
+                        {e.value} {e.unit}
+                        {contextOf(e) && (
+                          <span className="ml-2 rounded-md bg-panel px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-dim">
+                            {contextOf(e)}
+                          </span>
+                        )}
+                      </p>
+                      <p className="mt-0.5 text-xs text-dim">{fmtEntryDate(e.logged_at)}</p>
+                    </div>
+                    {deletingId === e.id ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => confirmDelete(e.id)}
+                          disabled={deleteBusy}
+                          className="rounded-lg border border-red-300/50 bg-red-300/10 px-3 py-1.5 text-xs font-medium text-red-300 disabled:opacity-40"
+                        >
+                          {deleteBusy ? "Deleting…" : "Yes, delete"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingId(null)}
+                          disabled={deleteBusy}
+                          className="rounded-lg border border-line px-3 py-1.5 text-xs text-dim disabled:opacity-40"
+                        >
+                          Keep
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => startEdit(e)}
+                          className="text-xs text-neon-cyan hover:underline"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingId(e.id)}
+                          className="text-xs text-red-300/80 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>

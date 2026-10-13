@@ -30,7 +30,7 @@ export async function GET() {
 
     const { data: labs, error: lErr } = await supabase
       .from("health_logs")
-      .select("value, logged_at, meta")
+      .select("id, value, logged_at, meta")
       .eq("metric", "a1c_lab")
       .order("logged_at", { ascending: false })
       .limit(10);
@@ -56,6 +56,7 @@ export async function GET() {
             }
           : null,
       lab_results: (labs ?? []).map((l) => ({
+        id: l.id,
         value: Number(l.value),
         logged_at: l.logged_at,
         lab_name:
