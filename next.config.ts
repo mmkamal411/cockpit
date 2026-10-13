@@ -6,7 +6,8 @@ const nextConfig: NextConfig = {
   // Workers (workerd kills the request). Re-evaluate after adapter/Next
   // compatibility is confirmed on staging.
   cacheComponents: false,
-  partialPrefetching: true,
+  // partialPrefetching requires cacheComponents — disabled together.
+  partialPrefetching: false,
   turbopack: {
     rules: {
       "*.css": {
