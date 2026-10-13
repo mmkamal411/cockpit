@@ -32,11 +32,11 @@ export function CrewApplet() {
 
   function nextFromBasics() {
     if (!name.trim()) {
-      setError("Give your crew member a name so Pookie knows who they are.");
+      setError("Give your crew member a name so Crystal knows who they are.");
       return;
     }
     if (!birthdate) {
-      setError("Add a birthdate — it helps Pookie get the details right.");
+      setError("Add a birthdate — it helps Crystal get the details right.");
       return;
     }
     setError("");
@@ -96,12 +96,12 @@ export function CrewApplet() {
       <div>
         <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-green">Crew · step {step} of 3</p>
         <h2 className="mt-1 text-xl font-semibold text-star">
-          {step === 1 ? "Who's joining your crew?" : step === 2 ? "School login" : "What should Pookie watch?"}
+          {step === 1 ? "Who's joining your crew?" : step === 2 ? "School login" : "What should Crystal watch?"}
         </h2>
         <p className="mt-1 text-sm text-stardust">
-          {step === 1 && "Just the basics — Pookie handles the rest."}
+          {step === 1 && "Just the basics — Crystal handles the rest."}
           {step === 2 && "Their school portal login, so grades and assignments can sync."}
-          {step === 3 && "Pick what Pookie keeps an eye on for them."}
+          {step === 3 && "Pick what Crystal keeps an eye on for them."}
         </p>
       </div>
 

@@ -48,7 +48,7 @@ export function MoreApplet() {
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           {[
             { id: "today", name: "Today", blurb: "Your attention, right now." },
-            { id: "pookie", name: "Pookie", blurb: "Your AI co-pilot." },
+            { id: "crystal", name: "Crystal", blurb: "Your AI co-pilot." },
             { id: "progress", name: "Progress", blurb: "Your goals, your momentum." },
           ].map((s) => (
             <button
@@ -71,8 +71,8 @@ export function MoreApplet() {
         <div className="rounded-2xl border border-neon-green/25 bg-panel-2/60 p-4">
           <p className="text-sm font-semibold text-star">Family aboard? Add your crew.</p>
           <p className="mt-1 text-xs leading-relaxed text-stardust">
-            Pookie is yours first. If you&apos;d like, bring children aboard and
-            Pookie will help watch over their school life too — grades,
+            Crystal is yours first. If you&apos;d like, bring children aboard and
+            Crystal will help watch over their school life too — grades,
             homework, and the gentle nudges.
           </p>
           {crew.length > 0 && (

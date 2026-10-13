@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import type { AppletParams } from "@/lib/applet-bus";
 import { TodayApplet } from "./applets/today-applet";
-import { PookieApplet } from "./applets/pookie-applet";
+import { CrystalApplet } from "./applets/crystal-applet";
 import { ProgressApplet } from "./applets/progress-applet";
 import { MoreApplet } from "./applets/more-applet";
 import { CrewApplet } from "./applets/crew-applet";
@@ -26,11 +26,11 @@ export const APPLETS: Record<string, AppletDef> = {
     glow: "#67e8f9",
     render: () => <TodayApplet />,
   },
-  pookie: {
-    name: "Pookie",
+  crystal: {
+    name: "Crystal",
     readout: "AI",
     glow: "#5eead4",
-    render: () => <PookieApplet />,
+    render: () => <CrystalApplet />,
   },
   progress: {
     name: "Progress",

@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pookie — Your personal co-pilot",
+  title: "Crystal — Your personal co-pilot",
   description:
-    "Pookie is the calm intelligence at the center of your life — your schedule, your goals, your money, your health — quietly handled while you fly.",
+    "Crystal is the calm intelligence at the center of your life — your schedule, your goals, your money, your health — quietly handled while you fly.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

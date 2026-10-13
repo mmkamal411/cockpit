@@ -23,10 +23,10 @@ function greeting(): string {
   return "Good evening";
 }
 
-/** Pookie — the pilot's AI co-pilot. Warm, proactive, ambient. */
-export function PookieApplet() {
+/** Crystal — the pilot's AI co-pilot. Warm, proactive, ambient. */
+export function CrystalApplet() {
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", text: `${greeting()}. I'm Pookie — your co-pilot. Tell me what's on your mind and I'll help you run the day.` },
+    { role: "assistant", text: `${greeting()}. I'm Crystal — your co-pilot. Tell me what's on your mind and I'll help you run the day.` },
   ]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -99,7 +99,7 @@ export function PookieApplet() {
         {sending && (
           <div className="flex justify-start">
             <div className="rounded-2xl border border-line bg-panel-2/70 px-4 py-2.5 text-sm text-dim">
-              <span className="pookie-typing" aria-label="Pookie is thinking">
+              <span className="crystal-typing" aria-label="Crystal is thinking">
                 <i /> <i /> <i />
               </span>
             </div>
@@ -107,7 +107,7 @@ export function PookieApplet() {
         )}
         {voiceDown && !sending && messages.length > 1 && (
           <p className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-2.5 text-xs leading-relaxed text-stardust">
-            Pookie&apos;s voice isn&apos;t connected on this build yet — your words are safe here,
+            Crystal&apos;s voice isn&apos;t connected on this build yet — your words are safe here,
             and the full co-pilot is being wired up.
           </p>
         )}
@@ -136,8 +136,8 @@ export function PookieApplet() {
           onKeyDown={(e) => {
             if (e.key === "Enter") send(draft);
           }}
-          placeholder="Ask Pookie anything…"
-          aria-label="Ask Pookie anything"
+          placeholder="Ask Crystal anything…"
+          aria-label="Ask Crystal anything"
           className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-teal/60 focus:outline-none"
         />
         <button
@@ -155,19 +155,19 @@ export function PookieApplet() {
 }
 
 const TYPING_CSS = `
-.pookie-typing { display: inline-flex; gap: 4px; }
-.pookie-typing i {
+.crystal-typing { display: inline-flex; gap: 4px; }
+.crystal-typing i {
   width: 6px; height: 6px; border-radius: 9999px;
   background: rgb(167 188 199 / 0.8);
-  animation: pookie-typing-blink 1.2s infinite;
+  animation: crystal-typing-blink 1.2s infinite;
 }
-.pookie-typing i:nth-child(2) { animation-delay: 0.2s; }
-.pookie-typing i:nth-child(3) { animation-delay: 0.4s; }
-@keyframes pookie-typing-blink {
+.crystal-typing i:nth-child(2) { animation-delay: 0.2s; }
+.crystal-typing i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes crystal-typing-blink {
   0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-3px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pookie-typing i { animation: none; opacity: 0.6; }
+  .crystal-typing i { animation: none; opacity: 0.6; }
 }
 `;

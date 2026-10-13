@@ -12,7 +12,7 @@ import { AppletHost } from "@/components/applet-host";
  *
  * - Video background layer (per route; /home brings its own daypart vista)
  * - Black-hole transit veil on route changes
- * - Persistent toolbar with the centered Pookie orb
+ * - Persistent toolbar with the centered Crystal orb
  * - SoothingOrb drift controller
  * - AppletHost for temporary module windows
  *

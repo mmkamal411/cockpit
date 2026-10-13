@@ -52,8 +52,8 @@ function MoreGlyph() {
 
 /**
  * Toolbar — the persistent bottom-center command bar.
- * Center: the Pookie orb (soothing, glowing, id="toolbar-pookie-orb").
- * Flanks: Home · Today · Pookie · Progress · More. Always a path back home.
+ * Center: the Crystal orb (soothing, glowing, id="toolbar-crystal-orb").
+ * Flanks: Home · Today · Crystal · Progress · More. Always a path back home.
  */
 export function Toolbar() {
   const router = useRouter();
@@ -65,7 +65,7 @@ export function Toolbar() {
 
   const stations = [
     { label: "Today", glyph: <TodayGlyph />, run: () => openApplet("today") },
-    { label: "Pookie", glyph: <ChatGlyph />, run: () => openApplet("pookie") },
+    { label: "Crystal", glyph: <ChatGlyph />, run: () => openApplet("crystal") },
     { label: "Progress", glyph: <ProgressGlyph />, run: () => openApplet("progress") },
     { label: "More", glyph: <MoreGlyph />, run: () => openApplet("more") },
   ];
@@ -94,16 +94,16 @@ export function Toolbar() {
           </button>
         ))}
 
-        {/* The Pookie orb — home base, centered in the toolbar. */}
+        {/* The Crystal orb — home base, centered in the toolbar. */}
         <button
           type="button"
-          id="toolbar-pookie-orb"
-          onClick={() => openApplet("pookie")}
-          aria-label="Talk to Pookie — your AI co-pilot"
-          title="Pookie"
-          className="pookie-orb"
+          id="toolbar-crystal-orb"
+          onClick={() => openApplet("crystal")}
+          aria-label="Talk to Crystal — your AI co-pilot"
+          title="Crystal"
+          className="crystal-orb"
         >
-          <span className="pookie-orb-core" aria-hidden="true" />
+          <span className="crystal-orb-core" aria-hidden="true" />
         </button>
 
         {stations.slice(2).map((s) => (
@@ -130,7 +130,7 @@ const TOOLBAR_CSS = `
 .toolbar-label { font-size: 10px; font-weight: 500; letter-spacing: 0.06em; }
 /* The orb — a ball of soft divine light. Breathing animation only; the
    SoothingOrb controller owns drift via the independent CSS translate. */
-.pookie-orb {
+.crystal-orb {
   position: relative;
   width: 58px; height: 58px; margin: 0 6px; flex-shrink: 0;
   border-radius: 9999px; border: none; cursor: pointer; padding: 0;
@@ -145,9 +145,9 @@ const TOOLBAR_CSS = `
   animation: orb-breathe 5.5s ease-in-out infinite;
   transition: transform 200ms ease;
 }
-.pookie-orb:hover { transform: scale(1.07); }
-.pookie-orb:active { transform: scale(0.97); }
-.pookie-orb-core {
+.crystal-orb:hover { transform: scale(1.07); }
+.crystal-orb:active { transform: scale(0.97); }
+.crystal-orb-core {
   position: absolute; inset: 0; border-radius: 9999px;
   background: radial-gradient(circle at 50% 42%, rgb(255 255 255 / 0.5) 0%, rgb(255 255 255 / 0) 46%);
   animation: orb-shimmer 7s ease-in-out infinite;
@@ -161,6 +161,6 @@ const TOOLBAR_CSS = `
   50% { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pookie-orb, .pookie-orb-core { animation: none; }
+  .crystal-orb, .crystal-orb-core { animation: none; }
 }
 `;

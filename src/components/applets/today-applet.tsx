@@ -70,7 +70,7 @@ export function TodayApplet() {
       {todos.length === 0 ? (
         <div className="rounded-2xl border border-line bg-panel-2/60 p-6 text-center">
           <p className="text-sm text-stardust">
-            Your list is empty. Add the first thing on your mind — Pookie will
+            Your list is empty. Add the first thing on your mind — Crystal will
             keep it in sight all day.
           </p>
         </div>

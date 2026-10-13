@@ -4,9 +4,9 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { planetaryVista } from "./pilot/vista-sources";
 
-/** LandingHero — the public face of the ship. Cosmic video, the Pookie
+/** LandingHero — the public face of the ship. Cosmic video, the Crystal
  *  brand, and one calm call to action. No mention of children or family —
- *  Pookie is the pilot's personal assistant, full stop. */
+ *  Crystal is the pilot's personal assistant, full stop. */
 export function LandingHero() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const vista = planetaryVista(new Date().getHours());
@@ -36,7 +36,7 @@ export function LandingHero() {
       <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10">
         <div className="flex items-center gap-3">
           <span aria-hidden="true" className="landing-orb" />
-          <span className="text-lg font-semibold tracking-wide text-star">Pookie</span>
+          <span className="text-lg font-semibold tracking-wide text-star">Crystal</span>
         </div>
         <Link
           href="/login"
@@ -54,7 +54,7 @@ export function LandingHero() {
           Take command of your day
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-stardust sm:text-lg">
-          Pookie is the calm intelligence at the center of your life — your
+          Crystal is the calm intelligence at the center of your life — your
           schedule, your goals, your money, your health — quietly handled
           while you fly.
         </p>
@@ -68,7 +68,7 @@ export function LandingHero() {
       </main>
 
       <footer className="relative z-10 px-6 pb-6 text-center text-xs text-dim sm:px-10">
-        Pookie — a ball of light, watching over your day.
+        Crystal — a ball of light, watching over your day.
       </footer>
       <style>{LANDING_CSS}</style>
     </div>

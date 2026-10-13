@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 /**
- * SoothingOrb — the Pookie orb as a calm companion (Mehedi 2026-10-12 ~22:30).
+ * SoothingOrb — the Crystal orb as a calm companion (Mehedi 2026-10-12 ~22:30).
  *
  * Behavior:
  *  - Slow wander cycles (20–40s): the orb drifts a short way from home on a
@@ -19,7 +19,7 @@ import { useEffect } from "react";
  * animations (breathing) instead of fighting them. Transform-only — GPU cheap.
  */
 
-const ORB_SELECTOR = "#toolbar-pookie-orb";
+const ORB_SELECTOR = "#toolbar-crystal-orb";
 
 // Wander tuning — calm companion in zero gravity, not a bouncing paperclip.
 const WANDER_RADIUS = 16; // px from home, max

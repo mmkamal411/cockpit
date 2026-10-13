@@ -135,7 +135,7 @@ export interface AppletLinkTarget {
 /** Pilot-level module routes that open as applets instead of navigating. */
 const MODULE_ROUTES: Record<string, string> = {
   "/today": "today",
-  "/pookie": "pookie",
+  "/crystal": "crystal",
   "/progress": "progress",
   "/more": "more",
   "/crew": "crew",

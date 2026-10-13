@@ -54,7 +54,7 @@ export function HeroVista({ pilotName }: { pilotName: string }) {
           {greeting}, {pilotName}
         </h1>
         <p className="mt-2 max-w-md text-sm leading-relaxed text-stardust">
-          Your bridge is quiet. Pookie is handling the small stuff in the
+          Your bridge is quiet. Crystal is handling the small stuff in the
           background — and will speak up when something needs you.
         </p>
       </div>
