@@ -246,7 +246,148 @@ function ConnectedAccounts({
   );
 }
 
-/** Calendar — AI-organized agenda, day, and week views. */
+interface ManagedCalendar {
+  id: string;
+  name: string;
+  color: string | null;
+  visible: boolean;
+  kind: string;
+  provider: string;
+}
+
+const KIND_OPTIONS = [
+  { value: "personal", label: "Personal" },
+  { value: "work", label: "Work" },
+  { value: "family", label: "Family" },
+  { value: "school", label: "School" },
+];
+
+/**
+ * Calendar manager: shows every calendar on the connected accounts and lets
+ * the pilot hide calendars and tag them Personal/Work/Family/School.
+ * Persists through PATCH /api/calendar/calendars/[id]; syncs preserve it.
+ */
+function CalendarManager({ onChanged }: { onChanged: () => void }) {
+  const [calendars, setCalendars] = useState<ManagedCalendar[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/calendar/calendars");
+        if (!r.ok) throw new Error(`calendars ${r.status}`);
+        const d = await r.json();
+        setCalendars(d.calendars ?? []);
+      } catch {
+        setFailed(true);
+      }
+    })();
+  }, []);
+
+  async function updateCalendar(id: string, patch: { visible?: boolean; kind?: string }) {
+    setSavingId(id);
+    setError(null);
+    const prev = calendars;
+    setCalendars((cs) => (cs ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    try {
+      const r = await fetch(`/api/calendar/calendars/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) throw new Error(`patch ${r.status}`);
+      onChanged();
+    } catch {
+      setCalendars(prev);
+      setError("Couldn't save that change — try again in a bit.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  if (failed || calendars === null || calendars.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-line bg-panel-2/60 p-4">
+      <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">Calendars</p>
+      <p className="mt-1 text-xs text-dim">Turn off calendars you don&apos;t want to see.</p>
+      <ul className="mt-3 space-y-2">
+        {calendars.map((c) => (
+          <li
+            key={c.id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-3 py-2"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span
+                aria-hidden="true"
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: c.color ?? "#22d3ee" }}
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium text-star">{c.name}</span>
+                <span className="block text-xs text-dim">{providerLabel(c.provider)}</span>
+              </span>
+            </span>
+            <span className="flex items-center gap-3">
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-stardust">
+                <input
+                  type="checkbox"
+                  checked={c.visible}
+                  disabled={savingId === c.id}
+                  onChange={(e) => updateCalendar(c.id, { visible: e.target.checked })}
+                  className="h-4 w-4 accent-cyan-400"
+                />
+                Show
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-stardust">
+                <span className="sr-only">Kind for {c.name}</span>
+                <select
+                  value={c.kind}
+                  disabled={savingId === c.id}
+                  onChange={(e) => updateCalendar(c.id, { kind: e.target.value })}
+                  className="rounded-lg border border-line bg-panel-2 px-2 py-1 text-xs text-stardust"
+                >
+                  {KIND_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-neon-amber">{error}</p>
+      )}
+    </div>
+  );
+}
+
+/** Connected accounts panel + calendar visibility manager, kept together. */
+function ManagementPanel({
+  connections,
+  onAccountsChanged,
+  onSynced,
+}: {
+  connections: CalendarConnection[];
+  onAccountsChanged: () => void;
+  onSynced: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <ConnectedAccounts
+        connections={connections}
+        onChanged={onAccountsChanged}
+        onSynced={onSynced}
+      />
+      <CalendarManager onChanged={onSynced} />
+    </div>
+  );
+}
 export function CalendarApplet() {
   const [view, setView] = useState<View>("agenda");
   const [dayOffset, setDayOffset] = useState(0);
@@ -371,7 +512,7 @@ export function CalendarApplet() {
         agenda ? (
           <div className="space-y-5">
             {connections !== null && connections.length > 0 && (
-              <ConnectedAccounts connections={connections} onChanged={loadConnections} onSynced={handleSynced} />
+              <ManagementPanel connections={connections} onAccountsChanged={loadConnections} onSynced={handleSynced} />
             )}
             <div>
               <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-cyan">{dayLabel}</p>
@@ -418,7 +559,7 @@ export function CalendarApplet() {
       ) : (
         <div className="space-y-5">
           {connections !== null && connections.length > 0 && (
-            <ConnectedAccounts connections={connections} onChanged={loadConnections} onSynced={handleSynced} />
+            <ManagementPanel connections={connections} onAccountsChanged={loadConnections} onSynced={handleSynced} />
           )}
           <ul className="space-y-2">
             {events.map((e) => <EventRow key={e.id} e={e} />)}
