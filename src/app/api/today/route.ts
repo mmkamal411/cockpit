@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import type {
   CalendarEvent,
-  HandledItem,
   NudgeItem,
   SchoolItem,
   TodayBriefing,
@@ -29,6 +28,7 @@ interface TodoRow {
   done: boolean;
   due_at: string | null;
   created_at: string;
+  completed_at?: string | null;
 }
 
 interface NudgeRow {
@@ -46,6 +46,15 @@ interface SyncRow {
 interface CrewMemberRow {
   id: string;
   name: string;
+}
+
+interface CalendarRow {
+  id: string;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  all_day: boolean;
+  location: string | null;
 }
 
 /** Start/end of the pilot's local day as epoch ms (timezone-aware). */
@@ -126,53 +135,81 @@ export async function GET() {
   };
 
   // --- Todos: overdue + due today + handled (single fetch, split client-side) ---
+  //
+  // completed_at comes from migration 024. If it hasn't been run yet the
+  // select fails — fall back to the old columns and skip date-dated
+  // "handled" todos (done-but-undated todos can't be placed on today).
+  let todoRows: TodoRow[] = [];
   try {
-    const { data, error } = await supabase
+    const attempt = await supabase
       .from("todos")
-      .select("id,title,done,due_at,created_at")
+      .select("id,title,done,due_at,created_at,completed_at")
       .eq("pilot_id", pilotId)
       .order("due_at", { ascending: true, nullsFirst: false })
       .limit(500);
-    if (error) throw error;
-    const rows = (data ?? []) as TodoRow[];
-    for (const row of rows) {
-      const dueAt = row.due_at ? Date.parse(row.due_at) : null;
-      if (row.done) {
-        briefing.sections.handled.push({ id: row.id, text: row.title, kind: "todo" } as HandledItem);
-      } else if (dueAt !== null && dueAt < startMs) {
-        briefing.sections.overdue.push(toTodo(row));
-      } else if (dueAt !== null && dueAt >= startMs && dueAt < endMs) {
-        briefing.sections.dueToday.push(toTodo(row));
-      }
-    }
+    if (attempt.error) throw attempt.error;
+    todoRows = (attempt.data ?? []) as TodoRow[];
   } catch {
-    warnings.push("Your task list couldn't be read right now — it may be back on the next refresh.");
+    try {
+      const fallback = await supabase
+        .from("todos")
+        .select("id,title,done,due_at,created_at")
+        .eq("pilot_id", pilotId)
+        .order("due_at", { ascending: true, nullsFirst: false })
+        .limit(500);
+      if (fallback.error) throw fallback.error;
+      todoRows = (fallback.data ?? []) as TodoRow[];
+    } catch {
+      warnings.push("Your task list couldn't be read right now — it may be back on the next refresh.");
+    }
+  }
+  for (const row of todoRows) {
+    const dueAt = row.due_at ? Date.parse(row.due_at) : null;
+    const completedAt = row.completed_at ? Date.parse(row.completed_at) : null;
+    if (row.done) {
+      // Only todos completed today fold into "Handled"; without a
+      // completion timestamp we can't place them, so they stay out.
+      if (completedAt !== null && !Number.isNaN(completedAt) && completedAt >= startMs) {
+        briefing.sections.handled.push({ id: row.id, text: row.title, kind: "todo" });
+      }
+    } else if (dueAt !== null && dueAt < startMs) {
+      briefing.sections.overdue.push(toTodo(row));
+    } else if (dueAt !== null && dueAt >= startMs && dueAt < endMs) {
+      briefing.sections.dueToday.push(toTodo(row));
+    }
   }
 
-  // --- Calendar: the table may not exist yet (Team A). Never crash on it. ---
+  // --- Schedule: today's events via calendars -> calendar_connections ---
+  //
+  // calendar_events has no pilot_id of its own (013_calendar.sql); events
+  // hang off calendars, which hang off calendar_connections (pilot_id).
+  // Cancelled events and hidden calendars are skipped. All-day events are
+  // flagged so the UI can render "All day" instead of midnight.
   try {
     const { data, error } = await supabase
       .from("calendar_events")
-      .select("id,title,start_at,end_at")
-      .eq("pilot_id", pilotId)
-      .gte("start_at", new Date(startMs).toISOString())
-      .lt("start_at", new Date(endMs).toISOString())
-      .order("start_at", { ascending: true })
+      .select(
+        "id,title,starts_at,ends_at,all_day,location," +
+          "calendars!inner(visible,calendar_connections!inner(pilot_id))",
+      )
+      .eq("calendars.calendar_connections.pilot_id", pilotId)
+      .eq("calendars.visible", true)
+      .neq("status", "cancelled")
+      .gte("starts_at", new Date(startMs).toISOString())
+      .lt("starts_at", new Date(endMs).toISOString())
+      .order("starts_at", { ascending: true })
       .limit(100);
     if (error) throw error;
-    briefing.sections.schedule = ((data ?? []) as Array<{
-      id: string;
-      title: string;
-      start_at: string;
-      end_at: string;
-    }>).map<CalendarEvent>((row) => ({
+    briefing.sections.schedule = ((data ?? []) as unknown as CalendarRow[]).map<CalendarEvent>((row) => ({
       id: row.id,
       title: row.title,
-      startAt: Date.parse(row.start_at),
-      endAt: Date.parse(row.end_at),
+      startAt: Date.parse(row.starts_at),
+      endAt: Date.parse(row.ends_at),
+      allDay: row.all_day === true,
+      location: row.location,
     }));
   } catch {
-    // Calendar isn't built yet — this is expected, not an error.
+    warnings.push("Your calendar couldn't be read right now — it may be back on the next refresh.");
   }
 
   // --- Nudges: active = not dismissed and due to surface today or overdue ---
@@ -196,6 +233,9 @@ export async function GET() {
   }
 
   // --- School: latest sync per crew member, due_next items due today ---
+  //
+  // Crew members are fetched in parallel; one member's sync failing never
+  // hides the others (allSettled).
   try {
     const { data: members, error: membersError } = await supabase
       .from("crew_members")
@@ -203,8 +243,9 @@ export async function GET() {
       .eq("pilot_id", pilotId);
     if (membersError) throw membersError;
     const crew = (members ?? []) as CrewMemberRow[];
-    for (const member of crew) {
-      try {
+
+    const results = await Promise.allSettled(
+      crew.map(async (member) => {
         const { data: syncs, error: syncError } = await supabase
           .from("crew_grade_syncs")
           .select("synced_at,due_next")
@@ -214,6 +255,7 @@ export async function GET() {
         if (syncError) throw syncError;
         const sync = (syncs ?? [])[0] as SyncRow | undefined;
         const items = Array.isArray(sync?.due_next) ? (sync?.due_next as Array<Record<string, unknown>>) : [];
+        const dueTodayItems: SchoolItem[] = [];
         for (const item of items) {
           const rawDue =
             item.due_date ?? item.due ?? item.date ?? item.due_at ?? item.dueAt ?? null;
@@ -231,16 +273,19 @@ export async function GET() {
                 ? item.name
                 : "School item";
           const className = typeof item.class === "string" ? item.class : null;
-          briefing.sections.school.push({
+          dueTodayItems.push({
             crewMemberId: member.id,
             crewMemberName: member.name,
             text: className ? `${className}: ${title}` : title,
             dueAt,
-          } as SchoolItem);
+          });
         }
-      } catch {
-        // One crew member's sync failing must not hide the others.
-      }
+        return dueTodayItems;
+      }),
+    );
+    for (const result of results) {
+      if (result.status === "fulfilled") briefing.sections.school.push(...result.value);
+      // One crew member's sync failing must not hide the others.
     }
   } catch {
     warnings.push("Crew school items couldn't be read right now.");

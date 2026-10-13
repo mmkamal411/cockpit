@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { parseTodo } from "@/lib/parse-todo";
-import { readLocal, writeLocal } from "@/lib/local-store";
 import { useTodos } from "@/lib/use-todos";
 import type {
   CalendarEvent,
@@ -12,34 +11,40 @@ import type {
   TodoItem,
 } from "@/lib/today-types";
 
-const TODOS_KEY = "cockpit.todos";
-const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const REFRESH_MS = 60_000;
 
 /** Today — the pilot's attention and agenda for right now.
  *
  * READ-ONLY briefing surface (overdue, schedule, due today, nudges, school)
- * composed server-side at /api/today. The quick-capture todo list below the
- * briefing is the device-local legacy list; Worker A is migrating todo logic
- * to the shared useTodos() hook — this file only restructures around it.
+ * composed server-side at /api/today. The quick-capture list below it is
+ * the full to-do list backed by useTodos() — cloud-synced when signed in,
+ * device-local fallback otherwise, with natural-language due dates.
  */
 export function TodayApplet() {
   const [briefing, setBriefing] = useState<TodayBriefing | null>(null);
   const [briefingError, setBriefingError] = useState<string | null>(null);
+  // True when the pilot's sign-in lapsed: retrying can't fix it, so the
+  // error panel offers a sign-in link instead of a useless "Try again".
+  const [briefingAuthExpired, setBriefingAuthExpired] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
 
-  const [todos, setTodos] = useState<TodoItem[]>(() => readLocal<TodoItem[]>(TODOS_KEY, []));
+  const { todos, loading, syncError, retrySync, addTodo, toggleTodo, deleteTodo } = useTodos();
   const [draft, setDraft] = useState("");
-
-  useEffect(() => {
-    writeLocal(TODOS_KEY, todos);
-  }, [todos]);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const loadBriefing = useCallback(async () => {
     setBriefingError(null);
+    setBriefingAuthExpired(false);
     try {
       const res = await fetch("/api/today", { cache: "no-store" });
       if (!res.ok) {
+        if (res.status === 401) {
+          setBriefingAuthExpired(true);
+          setBriefingError(
+            "Your sign-in has expired, so today's briefing can't load. Sign in again and it'll be right here.",
+          );
+          return;
+        }
         const body = await res.json().catch(() => null);
         throw new Error(
           typeof body?.error === "string"
@@ -66,27 +71,62 @@ export function TodayApplet() {
     return () => clearInterval(timer);
   }, []);
 
-  const dateLine = new Date().toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
+  // The server computes the briefing day in the pilot's own timezone;
+  // prefer that over the device's local date so the header never
+  // disagrees with the sections below it.
+  const dateLine = (() => {
+    const iso = briefing?.date;
+    if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      return new Date(`${iso}T12:00:00Z`).toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      });
+    }
+    return new Date().toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+  })();
 
   const attention =
     (briefing?.counts.overdue ?? 0) +
     (briefing?.counts.dueToday ?? 0) +
     (briefing?.counts.events ?? 0) +
-    (briefing?.counts.nudges ?? 0);
+    (briefing?.counts.nudges ?? 0) +
+    (briefing?.counts.school ?? 0);
 
-  function addTodo() {
-    const text = draft.trim();
-    if (!text) return;
-    setTodos((prev) => [...prev, { id: newId(), text, done: false, createdAt: Date.now(), dueAt: null }]);
+  /** Quick-capture add. The parser pulls dates out of the text
+   * ("call the dentist tomorrow at 3pm"); when it eats every word
+   * ("tomorrow"), the raw words become the text and the date is kept. */
+  async function addQuickTodo() {
+    setAddError(null);
+    const raw = draft.trim();
+    if (!raw) return;
+    const parsed = parseTodo(raw);
+    const text = parsed.text.trim() === "" ? raw : parsed.text;
+    const dueAt = parsed.dueAt ?? null;
     setDraft("");
+    try {
+      await addTodo(text, { dueAt });
+    } catch {
+      setDraft(raw);
+      setAddError("Give your to-do a few words first.");
+    }
   }
 
-  function toggleTodo(id: string) {
-    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+  function formatDue(dueAt: number | null | undefined): string | null {
+    if (typeof dueAt !== "number") return null;
+    const day = new Date(dueAt);
+    const today = new Date();
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const diffDays = Math.round((startOfDay(day) - startOfDay(today)) / 86_400_000);
+    const time = day.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    if (diffDays < 0) return `Overdue · ${day.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+    if (diffDays === 0) return `Today · ${time}`;
+    if (diffDays === 1) return `Tomorrow · ${time}`;
+    return day.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   }
 
   return (
@@ -108,32 +148,58 @@ export function TodayApplet() {
       <BriefingSections
         briefing={briefing}
         error={briefingError}
+        authExpired={briefingAuthExpired}
         onRetry={loadBriefing}
       />
 
-      {/* Device-local quick-capture list (Worker A's migration target — leave intact). */}
-      <div className="flex gap-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") addTodo();
-          }}
-          placeholder="Add something to today's list…"
-          aria-label="Add something to today's list"
-          className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none"
-        />
-        <button
-          type="button"
-          onClick={addTodo}
-          disabled={!draft.trim()}
-          className="shrink-0 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Add
-        </button>
+      {syncError !== null && (
+        <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-center">
+          <p className="text-sm text-star">{syncError}</p>
+          <button
+            type="button"
+            onClick={() => void retrySync()}
+            className="mt-2 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-1.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
+          >
+            Try syncing again
+          </button>
+        </div>
+      )}
+
+      {/* Quick-capture to-dos — cloud-synced when signed in, on this device otherwise. */}
+      <div>
+        <div className="flex gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void addQuickTodo();
+            }}
+            placeholder="Add a to-do — try “dentist tomorrow at 3pm”…"
+            aria-label="Add a to-do"
+            className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => void addQuickTodo()}
+            disabled={!draft.trim()}
+            className="shrink-0 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Add
+          </button>
+        </div>
+        {addError !== null && <p className="mt-1.5 text-xs text-red-400">{addError}</p>}
       </div>
 
-      {todos.length === 0 ? (
+      {loading ? (
+        <div className="space-y-2" aria-label="Loading your to-dos">
+          {[0, 1].map((i) => (
+            <div
+              key={i}
+              className="h-12 animate-pulse rounded-xl border border-line bg-panel-2/60"
+            />
+          ))}
+        </div>
+      ) : todos.length === 0 ? (
         <div className="rounded-2xl border border-line bg-panel-2/60 p-6 text-center">
           <p className="text-sm text-stardust">
             Your list is empty. Add the first thing on your mind — Crystal will
@@ -144,30 +210,43 @@ export function TodayApplet() {
         <ul className="space-y-2">
           {todos.map((t) => (
             <li key={t.id}>
-              <button
-                type="button"
-                onClick={() => toggleTodo(t.id)}
-                aria-pressed={t.done}
-                className="flex w-full items-center gap-3 rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-left transition-colors hover:border-neon-cyan/30"
-              >
-                <span
-                  aria-hidden="true"
+              <div className="flex w-full items-center gap-3 rounded-xl border border-line bg-panel-2/60 px-4 py-3 transition-colors hover:border-neon-cyan/30">
+                <button
+                  type="button"
+                  onClick={() => void toggleTodo(t.id)}
+                  aria-pressed={t.done}
+                  aria-label={t.done ? `Mark “${t.text}” as not done` : `Mark “${t.text}” as done`}
                   className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
                     t.done ? "border-neon-green bg-neon-green/20 text-neon-green" : "border-dim/60 text-transparent"
                   }`}
                 >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M4 12.5l5 5L20 6.5" />
                   </svg>
-                </span>
-                <span className={`text-sm ${t.done ? "text-dim line-through" : "text-star"}`}>{t.text}</span>
-              </button>
+                </button>
+                <div className="min-w-0 flex-1 text-left">
+                  <p className={`text-sm ${t.done ? "text-dim line-through" : "text-star"}`}>{t.text}</p>
+                  {formatDue(t.dueAt) !== null && (
+                    <p className="mt-0.5 text-xs text-neon-cyan">{formatDue(t.dueAt)}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void deleteTodo(t.id)}
+                  aria-label={`Delete “${t.text}”`}
+                  className="shrink-0 rounded-lg px-2 py-1 text-dim transition-colors hover:bg-red-400/10 hover:text-red-300"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </div>
             </li>
           ))}
         </ul>
       )}
 
-      <p className="text-xs text-dim">Saved on this device. Cloud sync for your lists is being built.</p>
+      <p className="text-xs text-dim">Saved on this device, synced to your cloud when you&apos;re signed in.</p>
     </div>
   );
 }
@@ -176,26 +255,47 @@ export function TodayApplet() {
 /* Briefing sections                                                   */
 /* ------------------------------------------------------------------ */
 
+/** "due yesterday" / "due 3 days ago" / "due Oct 5" — plain words, not date math. */
+function overdueLabel(dueAt: number | null | undefined): string {
+  if (typeof dueAt !== "number" || Number.isNaN(dueAt)) return "overdue";
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(new Date()) - startOfDay(new Date(dueAt))) / 86_400_000);
+  if (days <= 1) return "due yesterday";
+  if (days < 7) return `due ${days} days ago`;
+  return `due ${new Date(dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
 function BriefingSections({
   briefing,
   error,
+  authExpired,
   onRetry,
 }: {
   briefing: TodayBriefing | null;
   error: string | null;
+  authExpired: boolean;
   onRetry: () => void;
 }) {
   if (error !== null) {
     return (
       <div className="rounded-2xl border border-line bg-panel-2/60 p-5 text-center">
         <p className="text-sm text-stardust">{error}</p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-3 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
-        >
-          Try again
-        </button>
+        {authExpired ? (
+          <a
+            href="/login"
+            className="mt-3 inline-block rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
+          >
+            Sign in
+          </a>
+        ) : (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-2 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
+          >
+            Try again
+          </button>
+        )}
       </div>
     );
   }
@@ -229,7 +329,7 @@ function BriefingSections({
               className="rounded-lg border border-red-400/20 bg-red-400/5 px-3 py-2 text-sm text-star"
             >
               {t.text}
-              <span className="ml-2 text-xs text-red-400/80">overdue</span>
+              <span className="ml-2 text-xs text-red-400/80">{overdueLabel(t.dueAt)}</span>
             </li>
           ))}
         </ul>
@@ -246,12 +346,19 @@ function BriefingSections({
           {briefing.sections.schedule.map((e: CalendarEvent) => (
             <li key={e.id} className="flex items-baseline gap-3 px-3 py-2">
               <span className="shrink-0 text-xs text-neon-cyan">
-                {new Date(e.startAt).toLocaleTimeString(undefined, {
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
+                {e.allDay
+                  ? "All day"
+                  : new Date(e.startAt).toLocaleTimeString(undefined, {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
               </span>
-              <span className="text-sm text-star">{e.title}</span>
+              <span className="min-w-0">
+                <span className="block text-sm text-star">{e.title}</span>
+                {e.location ? (
+                  <span className="block truncate text-xs text-dim">{e.location}</span>
+                ) : null}
+              </span>
             </li>
           ))}
         </ul>
@@ -299,9 +406,20 @@ function BriefingSections({
       >
         <ul className="space-y-1.5">
           {briefing.sections.school.map((s: SchoolItem) => (
-            <li key={`${s.crewMemberId}-${s.text}`} className="rounded-lg border border-line bg-panel-2/60 px-3 py-2">
+            <li
+              key={`${s.crewMemberId}-${s.text}-${s.dueAt ?? ""}`}
+              className="rounded-lg border border-line bg-panel-2/60 px-3 py-2"
+            >
               <p className="text-sm text-star">{s.text}</p>
-              <p className="mt-0.5 text-xs text-dim">{s.crewMemberName}</p>
+              <p className="mt-0.5 text-xs text-dim">
+                {s.crewMemberName}
+                {typeof s.dueAt === "number"
+                  ? ` · due ${new Date(s.dueAt).toLocaleTimeString(undefined, {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}`
+                  : null}
+              </p>
             </li>
           ))}
         </ul>
