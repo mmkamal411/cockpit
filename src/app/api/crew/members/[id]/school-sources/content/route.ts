@@ -51,7 +51,7 @@ export async function GET(
 
   let query = supabase
     .from("crew_school_source_snapshots")
-    .select("label, url, content_html, fetched_at, status, error_note")
+    .select("label, url, content_html, fetched_at, status, error_note, parsed_json, parsed_at, parse_status, parse_note")
     .eq("crew_member_id", ownedId)
     .eq("kind", kind)
     .order("created_at", { ascending: true });
@@ -95,5 +95,9 @@ export async function GET(
     html: snapshot.content_html,
     url: snapshot.url,
     fetched_at: snapshot.fetched_at,
+    parsed: snapshot.parsed_json ?? null,
+    parsed_at: snapshot.parsed_at ?? null,
+    parse_status: snapshot.parse_status ?? "pending",
+    parse_note: snapshot.parse_note ?? null,
   });
 }

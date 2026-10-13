@@ -67,7 +67,7 @@ export async function GET(
 
   const { data: snapshots, error: snapshotsError } = await supabase
     .from("crew_school_source_snapshots")
-    .select("kind, label, url, fetched_at, status, error_note")
+    .select("kind, label, url, fetched_at, status, error_note, parsed_at, parse_status, parse_note")
     .eq("crew_member_id", ownedId);
   if (snapshotsError) {
     logError("select snapshots", snapshotsError);
@@ -110,6 +110,9 @@ function snapshotSummary(row: Record<string, unknown> | null) {
     fetched_at: (row.fetched_at as string | null) ?? null,
     status: typeof row.status === "string" ? row.status : "pending",
     error_note: (row.error_note as string | null) ?? null,
+    parsed_at: (row.parsed_at as string | null) ?? null,
+    parse_status: typeof row.parse_status === "string" ? row.parse_status : "pending",
+    parse_note: (row.parse_note as string | null) ?? null,
   };
 }
 
@@ -155,7 +158,7 @@ export async function PUT(
     calendar_source_url = body.calendar_source_url.trim();
   }
 
-  let bell_schedules: BellSchedule[] = [];
+  const bell_schedules: BellSchedule[] = [];
   if (body.bell_schedules !== undefined) {
     if (!Array.isArray(body.bell_schedules)) {
       return NextResponse.json(

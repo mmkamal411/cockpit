@@ -3,6 +3,23 @@
 import { useEffect, useState } from "react";
 
 import { ClassDetail } from "./class-detail";
+import {
+  BellRowInput,
+  BellScheduleRows,
+  IntakeItem,
+  IntakeSourceResult,
+  ParsedBellTable,
+  ParsedCalendarNote,
+  SourceCheck,
+  SourceCheckRow,
+  SourceUpload,
+  Spinner,
+  UploadPick,
+  normalizeBellPeriods,
+  normalizeCalendarSummary,
+  runSourceIntake,
+  validateUploadFile,
+} from "./school-source-intake";
 
 const SYNC_OPTIONS = ["Grades", "Attendance", "Assignments", "School messages"];
 
@@ -57,6 +74,9 @@ interface SchoolSourceSnapshot {
   fetched_at: string | null;
   status: string | null;
   error_note: string | null;
+  parsed_at?: string | null;
+  parse_status?: string | null;
+  parse_note?: string | null;
 }
 
 interface BellSourceSnapshot extends SchoolSourceSnapshot {
@@ -176,11 +196,18 @@ export function CrewApplet() {
   const [password, setPassword] = useState("");
   const [sync, setSync] = useState<string[]>(["Grades", "Assignments"]);
   const [added, setAdded] = useState<CrewMemberRow | null>(null);
-  // Optional school calendar + bell schedule captured in step 2.
+  // Optional school calendar + bell schedules captured in step 2.
   const [newCalendarUrl, setNewCalendarUrl] = useState("");
-  const [newBellLabel, setNewBellLabel] = useState("Daily");
-  const [newBellUrl, setNewBellUrl] = useState("");
+  const [newBellRows, setNewBellRows] = useState<BellRowInput[]>([
+    { label: "Daily", url: "" },
+  ]);
+  const [newUploads, setNewUploads] = useState<UploadPick[]>([]);
+  const [newUploadError, setNewUploadError] = useState("");
   const [sourcesNote, setSourcesNote] = useState("");
+  // Per-source intake status shown on the confirmation screen after adding.
+  const [intakeChecks, setIntakeChecks] = useState<SourceCheck[]>([]);
+  const [intakeRunning, setIntakeRunning] = useState(false);
+  const [retryingCheckKey, setRetryingCheckKey] = useState<string | null>(null);
   const [roster, setRoster] = useState<CrewMemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -242,9 +269,19 @@ export function CrewApplet() {
   const [srcDistrict, setSrcDistrict] = useState("");
   const [srcCalendarUrl, setSrcCalendarUrl] = useState("");
   const [srcBells, setSrcBells] = useState<BellScheduleEntry[]>([]);
+  const [srcUploads, setSrcUploads] = useState<UploadPick[]>([]);
+  const [srcUploadError, setSrcUploadError] = useState("");
   const [srcSaving, setSrcSaving] = useState(false);
   const [srcRefreshing, setSrcRefreshing] = useState(false);
   const [srcMessage, setSrcMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  // Per-source intake checks + parsed digital payloads from the content endpoint.
+  const [srcChecks, setSrcChecks] = useState<SourceCheck[]>([]);
+  const [srcRetryingKey, setSrcRetryingKey] = useState<string | null>(null);
+  const [calParsed, setCalParsed] = useState<unknown>(null);
+  const [calParseStatus, setCalParseStatus] = useState<string | null>(null);
+  const [calParseNote, setCalParseNote] = useState<string | null>(null);
+  const [bellParsed, setBellParsed] = useState<Record<number, unknown>>({});
+  const [bellParseStatus, setBellParseStatus] = useState<Record<number, string>>({});
   const [calHtml, setCalHtml] = useState<string | null>(null);
   const [calUrl, setCalUrl] = useState("");
   const [calFetchedAt, setCalFetchedAt] = useState<string | null>(null);
@@ -335,29 +372,41 @@ export function CrewApplet() {
       setRoster((prev) => [...prev, member]);
       setAdded(member);
       setSourcesNote("");
-      // Optional calendar/bell links captured in step 2 — saved against the
-      // new member. A failure here never blocks the add; the parent can add
-      // the links later from the member's profile.
-      const calLink = newCalendarUrl.trim();
-      const bellLink = newBellUrl.trim();
-      if (calLink || bellLink) {
-        const bellSchedules = bellLink
-          ? [{ label: newBellLabel.trim() || "Daily", url: bellLink }]
-          : [];
+      setIntakeChecks([]);
+      // Optional calendar/bell links + uploads captured in step 2 — sent to
+      // the intake for verify+parse. A failure here never blocks the add;
+      // the parent can add the links later from the member's profile.
+      const items = buildNewIntakeItems();
+      if (items.length > 0) {
+        setIntakeChecks(checksForItems(items));
+        setIntakeRunning(true);
         try {
-          await fetch(`/api/crew/members/${member.id}/school-sources`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              district: district.trim() || null,
-              calendar_source_url: calLink || null,
-              bell_schedules: bellSchedules,
-            }),
+          await runSourceIntake({
+            memberId: member.id,
+            district: district.trim() || null,
+            items,
+            onCheck: (key, patch) =>
+              setIntakeChecks((prev) =>
+                prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+              ),
+            legacySave: async (payload) => {
+              const putRes = await fetch(
+                `/api/crew/members/${member.id}/school-sources`,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    district: payload.district,
+                    calendar_source_url: payload.calendar_url,
+                    bell_schedules: payload.bell_schedules,
+                  }),
+                },
+              );
+              if (!putRes.ok) throw new Error("save failed");
+            },
           });
-        } catch {
-          setSourcesNote(
-            "Their profile is saved, but the calendar links didn't save. You can add them from their profile.",
-          );
+        } finally {
+          setIntakeRunning(false);
         }
       }
       // NOTE: school credentials (district/username/password) are NOT sent
@@ -372,6 +421,141 @@ export function CrewApplet() {
     }
   }
 
+  /** Build the full intake item list from the add-child step-2 fields. */
+  function buildNewIntakeItems(): IntakeItem[] {
+    const items: IntakeItem[] = [];
+    const calLink = newCalendarUrl.trim();
+    if (calLink)
+      items.push({
+        key: "calendar",
+        kind: "calendar",
+        label: "Calendar link",
+        url: calLink,
+      });
+    newBellRows
+      .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
+      .filter((b) => b.url)
+      .forEach((b, i) =>
+        items.push({ key: `bell-${i}`, kind: "bell", label: b.label, url: b.url }),
+      );
+    newUploads.forEach((pick, i) =>
+      items.push({
+        key: `upload-${i}`,
+        kind: "upload",
+        label: pick.file.name,
+        file: pick.file,
+        uploadKind: pick.kind,
+      }),
+    );
+    return items;
+  }
+
+  /** Build the full intake item list from the member-detail editor fields. */
+  function buildSrcIntakeItems(extraUpload?: SourceCheck): IntakeItem[] {
+    const items: IntakeItem[] = [];
+    const calUrl = srcCalendarUrl.trim();
+    if (calUrl)
+      items.push({
+        key: "calendar",
+        kind: "calendar",
+        label: "Calendar link",
+        url: calUrl,
+      });
+    srcBells
+      .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
+      .filter((b) => b.url)
+      .forEach((b, i) =>
+        items.push({ key: `bell-${i}`, kind: "bell", label: b.label, url: b.url }),
+      );
+    srcUploads.forEach((pick, i) =>
+      items.push({
+        key: `upload-${Date.now()}-${i}`,
+        kind: "upload",
+        label: pick.file.name,
+        file: pick.file,
+        uploadKind: pick.kind,
+      }),
+    );
+    if (extraUpload?.file) {
+      items.push({
+        key: extraUpload.key,
+        kind: "upload",
+        label: extraUpload.label,
+        file: extraUpload.file,
+        uploadKind: extraUpload.uploadKind,
+      });
+    }
+    return items;
+  }
+
+  /** Fresh "verifying" checks for an item list. */
+  function checksForItems(items: IntakeItem[]): SourceCheck[] {
+    return items.map((item) => ({
+      key: item.key,
+      kind: item.kind,
+      label: item.label,
+      url: item.url,
+      fileName: item.file?.name,
+      file: item.file,
+      uploadKind: item.uploadKind,
+      state: (item.kind === "upload" ? "uploading" : "verifying") as SourceCheck["state"],
+    }));
+  }
+
+  /** Retry one failed intake source from the confirmation screen. */
+  async function retryIntakeCheck(memberId: string, check: SourceCheck) {
+    if (check.state !== "error" || retryingCheckKey) return;
+    setRetryingCheckKey(check.key);
+    // Re-run the FULL payload: the backend replaces bell_schedules wholesale,
+    // so a partial retry would wipe the other saved links.
+    const items = buildNewIntakeItems();
+    // Keep the failed upload's file if the picks were cleared.
+    if (
+      check.kind === "upload" &&
+      check.file &&
+      !items.some((i) => i.file === check.file)
+    ) {
+      items.push({
+        key: check.key,
+        kind: "upload",
+        label: check.label,
+        file: check.file,
+        uploadKind: check.uploadKind,
+      });
+    }
+    setIntakeChecks(checksForItems(items));
+    try {
+      await runSourceIntake({
+        memberId,
+        district: district.trim() || null,
+        items,
+        onCheck: (key, patch) =>
+          setIntakeChecks((prev) =>
+            prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+          ),
+        // On retry the links are already saved — a full PUT keeps them intact
+        // if the intake endpoint isn't there.
+        legacySave: async (payload) => {
+          const putRes = await fetch(
+            `/api/crew/members/${memberId}/school-sources`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                district: payload.district,
+                calendar_source_url: payload.calendar_url,
+                bell_schedules: payload.bell_schedules,
+              }),
+            },
+          );
+          if (!putRes.ok) throw new Error("save failed");
+        },
+      });
+    } finally {
+      setRetryingCheckKey(null);
+    }
+  }
+
   function resetForm() {
     setAdded(null);
     setStep(1);
@@ -382,8 +566,12 @@ export function CrewApplet() {
     setPassword("");
     setSync(["Grades", "Assignments"]);
     setNewCalendarUrl("");
-    setNewBellLabel("Daily");
-    setNewBellUrl("");
+    setNewBellRows([{ label: "Daily", url: "" }]);
+    setNewUploads([]);
+    setNewUploadError("");
+    setIntakeChecks([]);
+    setIntakeRunning(false);
+    setRetryingCheckKey(null);
     setSourcesNote("");
     setError("");
     closeReauth();
@@ -583,9 +771,18 @@ export function CrewApplet() {
     setSrcDistrict("");
     setSrcCalendarUrl("");
     setSrcBells([]);
+    setSrcUploads([]);
+    setSrcUploadError("");
     setSrcSaving(false);
     setSrcRefreshing(false);
     setSrcMessage(null);
+    setSrcChecks([]);
+    setSrcRetryingKey(null);
+    setCalParsed(null);
+    setCalParseStatus(null);
+    setCalParseNote(null);
+    setBellParsed({});
+    setBellParseStatus({});
     setCalHtml(null);
     setCalUrl("");
     setCalFetchedAt(null);
@@ -608,6 +805,8 @@ export function CrewApplet() {
     setCalError("");
     setBellHtml({});
     setBellMeta({});
+    setBellParsed({});
+    setBellParseStatus({});
     setBellError("");
     setBellTab(0);
     try {
@@ -628,9 +827,13 @@ export function CrewApplet() {
             }
           : null;
         setSrcSources(sources);
+        const calendarSnap = json.snapshots?.calendar ?? null;
+        const bellSnaps: unknown[] = Array.isArray(json.snapshots?.bells)
+          ? json.snapshots.bells
+          : [];
         setSrcSnapshots({
-          calendar: json.snapshots?.calendar ?? null,
-          bells: Array.isArray(json.snapshots?.bells) ? json.snapshots.bells : [],
+          calendar: calendarSnap,
+          bells: bellSnaps as BellSourceSnapshot[],
         });
         if (sources?.calendar_source_url) await loadCalendarContent(memberId);
       } else {
@@ -652,6 +855,9 @@ export function CrewApplet() {
   async function loadCalendarContent(memberId: string) {
     setCalLoading(true);
     setCalError("");
+    setCalParsed(null);
+    setCalParseStatus(null);
+    setCalParseNote(null);
     try {
       const res = await fetch(
         `/api/crew/members/${memberId}/school-sources/content?kind=calendar`,
@@ -661,6 +867,13 @@ export function CrewApplet() {
         setCalHtml(json.html ?? "");
         setCalUrl(json.url ?? "");
         setCalFetchedAt(json.fetched_at ?? null);
+        setCalParsed(json.parsed ?? null);
+        setCalParseStatus(
+          typeof json.parse_status === "string" ? json.parse_status : null,
+        );
+        setCalParseNote(
+          typeof json.parse_note === "string" ? json.parse_note : null,
+        );
       } else {
         setCalError(json.error ?? "The calendar page didn't load.");
       }
@@ -671,7 +884,7 @@ export function CrewApplet() {
     }
   }
 
-  /** Fetch one bell schedule's snapshot HTML, cached per tab index. */
+  /** Fetch one bell schedule's snapshot HTML + parsed payload, cached per tab. */
   async function ensureBellContent(memberId: string, index: number, force = false) {
     if (!force && (bellHtml[index] !== undefined || bellLoading || bellError)) return;
     setBellLoading(true);
@@ -686,6 +899,12 @@ export function CrewApplet() {
         setBellMeta((prev) => ({
           ...prev,
           [index]: { url: json.url ?? "", fetchedAt: json.fetched_at ?? null },
+        }));
+        setBellParsed((prev) => ({ ...prev, [index]: json.parsed ?? null }));
+        setBellParseStatus((prev) => ({
+          ...prev,
+          [index]:
+            typeof json.parse_status === "string" ? json.parse_status : "pending",
         }));
       } else {
         setBellError(json.error ?? "That bell schedule didn't load.");
@@ -706,46 +925,71 @@ export function CrewApplet() {
       url: b.url,
     }));
     setSrcBells(bells.length > 0 ? bells : [{ label: "Daily", url: "" }]);
+    setSrcUploads([]);
+    setSrcUploadError("");
+    setSrcChecks([]);
+    setSrcRetryingKey(null);
     setSrcMessage(null);
     setSrcEditing(true);
   }
 
-  function addBellRow() {
-    setSrcBells((prev) =>
-      prev.length >= 5 ? prev : [...prev, { label: "", url: "" }],
-    );
-  }
-
-  function removeBellRow(i: number) {
-    setSrcBells((prev) => prev.filter((_, idx) => idx !== i));
-  }
-
-  function updateBellRow(i: number, field: "label" | "url", value: string) {
-    setSrcBells((prev) =>
-      prev.map((b, idx) => (idx === i ? { ...b, [field]: value } : b)),
-    );
-  }
-
-  /** Save the sources form, then re-pull sources + content. */
+  /** Save the sources form via the intake (verify+parse), then re-pull. */
   async function saveSchoolSources(memberId: string) {
     setSrcSaving(true);
     setSrcMessage(null);
     try {
-      const bells = srcBells
-        .map((b) => ({ label: b.label.trim() || "Schedule", url: b.url.trim() }))
-        .filter((b) => b.url);
-      const res = await fetch(`/api/crew/members/${memberId}/school-sources`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          district: srcDistrict.trim() || null,
-          calendar_source_url: srcCalendarUrl.trim() || null,
-          bell_schedules: bells,
-        }),
+      const items = buildSrcIntakeItems();
+      if (items.length === 0) {
+        // Nothing to verify — save the district via the plain route.
+        const res = await fetch(`/api/crew/members/${memberId}/school-sources`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            district: srcDistrict.trim() || null,
+            calendar_source_url: null,
+            bell_schedules: [],
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "save failed");
+        setSrcMessage({ ok: true, text: "Saved." });
+        setSrcEditing(false);
+        await loadSchoolSources(memberId);
+        return;
+      }
+      setSrcChecks(checksForItems(items));
+      await runSourceIntake({
+        memberId,
+        district: srcDistrict.trim() || null,
+        items,
+        onCheck: (key, patch) =>
+          setSrcChecks((prev) =>
+            prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+          ),
+        // The intake endpoint isn't deployed yet — fall back to the plain
+        // save so nothing the user typed is lost.
+        legacySave: async (payload) => {
+          const res = await fetch(
+            `/api/crew/members/${memberId}/school-sources`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                district: payload.district,
+                calendar_source_url: payload.calendar_url,
+                bell_schedules: payload.bell_schedules,
+              }),
+            },
+          );
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error ?? "save failed");
+        },
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "save failed");
-      setSrcMessage({ ok: true, text: "Saved — pulling the latest pages now." });
+      setSrcMessage({
+        ok: true,
+        text: "Saved — the results are under each link above.",
+      });
+      setSrcUploads([]);
       setSrcEditing(false);
       await loadSchoolSources(memberId);
       if (bellsOpen) await ensureBellContent(memberId, 0, true);
@@ -756,6 +1000,49 @@ export function CrewApplet() {
       });
     } finally {
       setSrcSaving(false);
+    }
+  }
+
+  /** Retry one failed intake source from the member detail editor. */
+  async function retrySrcCheck(memberId: string, check: SourceCheck) {
+    if (check.state !== "error" || srcRetryingKey) return;
+    setSrcRetryingKey(check.key);
+    // Re-run the FULL payload: the backend replaces bell_schedules wholesale,
+    // so a partial retry would wipe the other saved links.
+    const items = buildSrcIntakeItems(
+      check.kind === "upload" ? check : undefined,
+    );
+    setSrcChecks(checksForItems(items));
+    try {
+      await runSourceIntake({
+        memberId,
+        district: srcDistrict.trim() || null,
+        items,
+        onCheck: (key, patch) =>
+          setSrcChecks((prev) =>
+            prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+          ),
+        // The intake endpoint isn't deployed yet — fall back to the plain
+        // save so nothing the user typed is lost.
+        legacySave: async (payload) => {
+          const res = await fetch(
+            `/api/crew/members/${memberId}/school-sources`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                district: payload.district,
+                calendar_source_url: payload.calendar_url,
+                bell_schedules: payload.bell_schedules,
+              }),
+            },
+          );
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error ?? "save failed");
+        },
+      });
+    } finally {
+      setSrcRetryingKey(null);
     }
   }
 
@@ -770,16 +1057,17 @@ export function CrewApplet() {
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "refresh failed");
-      const results: { label: string; status: string; error_note?: string }[] =
-        json.results ?? [];
-      const failed = results.filter((r) => r.status !== "ok");
+      const results: IntakeSourceResult[] = Array.isArray(json.results)
+        ? json.results
+        : [];
+      const failed = results.filter((r) => !r.verified);
       setSrcMessage({
         ok: failed.length === 0,
         text:
           failed.length === 0
             ? `Checked ${results.length} ${results.length === 1 ? "page" : "pages"} — all fresh.`
             : `${failed.length} of ${results.length} didn't load: ${failed
-                .map((f) => `${f.label} — ${f.error_note ?? "try again"}`)
+                .map((f) => `${f.label || "Link"} — ${f.message ?? "try again"}`)
                 .join("; ")}`,
       });
       await loadSchoolSources(memberId);
@@ -958,6 +1246,18 @@ export function CrewApplet() {
         : status.tone === "warn"
           ? "bg-neon-amber"
           : "bg-dim";
+    // Digital (parsed) school-source results from the content endpoint.
+    const sourcesBusy = srcSaving || srcRefreshing;
+    const calSourceUrl = srcSources?.calendar_source_url ?? null;
+    const calSummary = normalizeCalendarSummary(calParsed);
+    const showCalDigital =
+      calSourceUrl !== null &&
+      (sourcesBusy ||
+        calSummary.eventCount !== null ||
+        !!calSummary.summary ||
+        !!calParseNote);
+    const activeBellPeriods = normalizeBellPeriods(bellParsed[bellTab]);
+    const activeBellParseStatus = bellParseStatus[bellTab] ?? null;
     return (
       <div className="space-y-5">
         <div>
@@ -1443,7 +1743,7 @@ export function CrewApplet() {
                     <input
                       value={srcDistrict}
                       onChange={(e) => setSrcDistrict(e.target.value)}
-                      placeholder="e.g. Cobb County School District"
+                      placeholder="e.g. Springfield School District"
                       autoComplete="off"
                       disabled={srcSaving}
                       className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
@@ -1452,12 +1752,12 @@ export function CrewApplet() {
                   <div>
                     <label className="block">
                       <span className="mb-1 block text-xs font-medium text-stardust">
-                        District calendar page URL
+                        School or district calendar link
                       </span>
                       <input
                         value={srcCalendarUrl}
                         onChange={(e) => setSrcCalendarUrl(e.target.value)}
-                        placeholder="https://…/calendars"
+                        placeholder="https://www.yourschooldistrict.org/calendar"
                         autoComplete="off"
                         inputMode="url"
                         disabled={srcSaving}
@@ -1478,62 +1778,46 @@ export function CrewApplet() {
                       </p>
                     )}
                   </div>
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-stardust">Bell schedules</p>
-                    {srcBells.map((b, i) => (
-                      <div key={i} className="space-y-1">
-                        <div className="grid grid-cols-[1fr_2fr_auto] items-center gap-2">
-                          <input
-                            aria-label={`Bell schedule ${i + 1} label`}
-                            value={b.label}
-                            onChange={(e) => updateBellRow(i, "label", e.target.value)}
-                            placeholder="Daily"
-                            autoComplete="off"
-                            disabled={srcSaving}
-                            className="w-full rounded-xl border border-line bg-panel-2/60 px-3 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
-                          />
-                          <input
-                            aria-label={`Bell schedule ${i + 1} URL`}
-                            value={b.url}
-                            onChange={(e) => updateBellRow(i, "url", e.target.value)}
-                            placeholder="https://…/bell-schedule"
-                            autoComplete="off"
-                            inputMode="url"
-                            disabled={srcSaving}
-                            className="w-full rounded-xl border border-line bg-panel-2/60 px-3 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
-                          />
-                          {srcBells.length > 1 ? (
-                            <button
-                              type="button"
-                              onClick={() => removeBellRow(i)}
-                              aria-label={`Remove bell schedule ${i + 1}`}
-                              disabled={srcSaving}
-                              className="rounded-lg border border-line bg-panel-2/60 px-2.5 py-2 text-sm text-dim transition-colors hover:text-red-400 disabled:opacity-50"
-                            >
-                              ✕
-                            </button>
-                          ) : (
-                            <span aria-hidden="true" className="w-[37px]" />
-                          )}
-                        </div>
-                        {srcSnapshots.bells[i] &&
-                          srcSnapshots.bells[i].status !== "ok" && (
-                            <p className="text-xs text-neon-amber">
-                              Last pull failed —{" "}
-                              {srcSnapshots.bells[i].error_note ?? "try Refresh."}
-                            </p>
-                          )}
-                      </div>
-                    ))}
-                    {srcBells.length < 5 && (
-                      <button
-                        type="button"
-                        onClick={addBellRow}
-                        className="text-xs font-medium text-neon-green transition-opacity hover:opacity-80"
-                      >
-                        + Add another schedule
-                      </button>
-                    )}
+                  <BellScheduleRows
+                    rows={srcBells}
+                    onChange={setSrcBells}
+                    disabled={srcSaving}
+                    idPrefix="edit"
+                  />
+                  {srcBells.map(
+                    (b, i) =>
+                      srcSnapshots.bells[i] &&
+                      srcSnapshots.bells[i].status !== "ok" && (
+                        <p key={`snap-${i}`} className="text-xs text-neon-amber">
+                          {b.label || `Schedule ${i + 1}`}: last pull failed —{" "}
+                          {srcSnapshots.bells[i].error_note ?? "try Refresh."}
+                        </p>
+                      ),
+                  )}
+                  <div className="border-t border-line pt-2.5">
+                    <SourceUpload
+                      files={srcUploads}
+                      onAdd={(picked, kind) => {
+                        const bad = picked.map(validateUploadFile).find(Boolean);
+                        if (bad) {
+                          setSrcUploadError(bad);
+                          return;
+                        }
+                        setSrcUploadError("");
+                        setSrcUploads((prev) => [
+                          ...prev,
+                          ...picked.map((file) => ({ file, kind })),
+                        ]);
+                      }}
+                      onRemove={(i) =>
+                        setSrcUploads((prev) =>
+                          prev.filter((_, idx) => idx !== i),
+                        )
+                      }
+                      disabled={srcSaving}
+                      error={srcUploadError}
+                      idPrefix="edit"
+                    />
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button
@@ -1556,12 +1840,52 @@ export function CrewApplet() {
                 </div>
               )}
 
+              {/* Per-source intake results — stay visible after the editor closes. */}
+              {srcChecks.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+                    Link check results
+                  </p>
+                  {srcChecks.map((check) => (
+                    <SourceCheckRow
+                      key={check.key}
+                      check={check}
+                      retrying={srcRetryingKey === check.key}
+                      onRetry={
+                        check.state === "error"
+                          ? () => retrySrcCheck(member.id, check)
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+
               {/* Calendar display — always text, never a blank panel */}
               {srcSources?.calendar_source_url ? (
                 <div className="space-y-2">
                   <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
                     Calendar
                   </p>
+                  {showCalDigital &&
+                    (sourcesBusy ? (
+                      <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                        <Spinner label="Reading the school's page…" />
+                      </div>
+                    ) : calSummary.eventCount !== null || calSummary.summary ? (
+                      <ParsedCalendarNote
+                        eventCount={calSummary.eventCount}
+                        summary={calSummary.summary}
+                      />
+                    ) : calParseStatus === "pending" ? (
+                      <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                        Saved — we&apos;ll read the calendar shortly.
+                      </p>
+                    ) : calParseNote ? (
+                      <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                        {calParseNote}
+                      </p>
+                    ) : null)}
                   {calLoading ? (
                     <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
                       Pulling the calendar in…
@@ -1692,7 +2016,23 @@ export function CrewApplet() {
                             </button>
                           ))}
                         </div>
-                        <div role="tabpanel" className="mt-2">
+                        <div role="tabpanel" className="mt-2 space-y-2">
+                          {sourcesBusy ? (
+                            <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                              <Spinner label="Reading the school's page…" />
+                            </div>
+                          ) : activeBellPeriods.length > 0 ? (
+                            <ParsedBellTable
+                              periods={activeBellPeriods}
+                              label={
+                                srcSources?.bell_schedules[bellTab]?.label
+                              }
+                            />
+                          ) : activeBellParseStatus === "pending" ? (
+                            <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                              Saved — we&apos;ll read this schedule shortly.
+                            </p>
+                          ) : null}
                           {bellLoading ? (
                             <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
                               Pulling that schedule in…
@@ -1911,6 +2251,30 @@ export function CrewApplet() {
           >
             {sourcesNote}
           </p>
+        )}
+        {intakeChecks.length > 0 && (
+          <div className="mx-auto max-w-sm space-y-2 text-left">
+            <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+              School links
+            </p>
+            {intakeRunning && (
+              <p className="text-xs text-dim">
+                Checking {intakeChecks.length === 1 ? "the link" : "the links"}…
+              </p>
+            )}
+            {intakeChecks.map((check) => (
+              <SourceCheckRow
+                key={check.key}
+                check={check}
+                retrying={retryingCheckKey === check.key}
+                onRetry={
+                  check.state === "error"
+                    ? () => retryIntakeCheck(added.id, check)
+                    : undefined
+                }
+              />
+            ))}
+          </div>
         )}
         {roster.length > 0 && (
           <div className="mx-auto max-w-sm space-y-2 text-left">
@@ -2158,7 +2522,7 @@ export function CrewApplet() {
             <input
               value={district}
               onChange={(e) => setDistrict(e.target.value)}
-              placeholder="e.g. Cobb County School District"
+              placeholder="e.g. Springfield School District"
               autoComplete="off"
               className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
             />
@@ -2170,47 +2534,50 @@ export function CrewApplet() {
             </p>
             <p className="mt-0.5 text-xs text-dim">
               Paste these now and Crystal will show them on{" "}
-              {name ? `${name}'s` : "their"} profile.
+              {name ? `${name}'s` : "their"} profile. We&apos;ll check each
+              link after you finish adding them.
             </p>
             <label className="mt-3 block">
               <span className="mb-1 block text-xs font-medium text-stardust">
-                District calendar page URL
+                School or district calendar link
               </span>
               <input
                 value={newCalendarUrl}
                 onChange={(e) => setNewCalendarUrl(e.target.value)}
-                placeholder="https://…/calendars"
+                placeholder="https://www.yourschooldistrict.org/calendar"
                 autoComplete="off"
                 inputMode="url"
                 className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
               />
             </label>
-            <div className="mt-2.5 grid grid-cols-[1fr_2fr] gap-2">
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-stardust">
-                  Bell schedule label
-                </span>
-                <input
-                  value={newBellLabel}
-                  onChange={(e) => setNewBellLabel(e.target.value)}
-                  placeholder="Daily"
-                  autoComplete="off"
-                  className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-stardust">
-                  Bell schedule URL
-                </span>
-                <input
-                  value={newBellUrl}
-                  onChange={(e) => setNewBellUrl(e.target.value)}
-                  placeholder="https://…/bell-schedule"
-                  autoComplete="off"
-                  inputMode="url"
-                  className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
-                />
-              </label>
+            <div className="mt-2.5">
+              <BellScheduleRows
+                rows={newBellRows}
+                onChange={setNewBellRows}
+                idPrefix="new"
+              />
+            </div>
+            <div className="mt-3 border-t border-line pt-3">
+              <SourceUpload
+                files={newUploads}
+                onAdd={(picked, kind) => {
+                  const bad = picked.map(validateUploadFile).find(Boolean);
+                  if (bad) {
+                    setNewUploadError(bad);
+                    return;
+                  }
+                  setNewUploadError("");
+                  setNewUploads((prev) => [
+                    ...prev,
+                    ...picked.map((file) => ({ file, kind })),
+                  ]);
+                }}
+                onRemove={(i) =>
+                  setNewUploads((prev) => prev.filter((_, idx) => idx !== i))
+                }
+                error={newUploadError}
+                idPrefix="new"
+              />
             </div>
           </div>
           <label className="block">
