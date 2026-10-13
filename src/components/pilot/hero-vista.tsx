@@ -15,6 +15,8 @@ export function HeroVista({ pilotName }: { pilotName: string }) {
   const [src] = useState(() => pickRotationVideo());
   const poster = src.replace(/\.mp4$/, "-poster.jpg");
 
+  const now = new Date();
+
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
