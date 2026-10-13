@@ -139,14 +139,19 @@ function letterFor(grade: number | null): string | null {
   return "F";
 }
 
+import { pickSectionSources, type SyncRow } from "@/lib/school-sections";
+
 /**
  * GET /api/crew/members/[id]/classes
- * Member school overview, derived from the latest full grade sync:
+ * Member school overview, derived from recent grade syncs:
  * - classes with current grades + gap-to-90 + teacher lookup (via class_details)
- * - due_next: upcoming assignments ({assignment, due, class}) for the 7-day due scan
+ *   from the NEWEST sync row with grades
+ * - due_next: upcoming assignments ({assignment, due, class}) for the 7-day due scan,
+ *   from the newest row that HAS due_next (laptop-worker rows can be grades-only)
  * - gpa (weighted/unweighted/cumulative when the sync carries it)
  * - attendance summary ({absences, tardies, ...} when present)
- * - messages: Synergy + Office 365 teacher mail merged, newest first (top 8)
+ * - messages: Synergy + Office 365 teacher mail merged, newest first (top 8),
+ *   from the newest row that HAS mail
  * - stale / hours_since_sync freshness flags (>24h since sync = stale)
  * Grant-scoped like the sync endpoints.
  */
@@ -185,15 +190,20 @@ export async function GET(
     );
   }
 
-  const { data: latest } = await supabase
+  // The latest row carries the freshest grades, but laptop-worker rows can be
+  // grades-only (empty due_next/mail) while the 4x-daily parent pulls carry
+  // the full payload. Take the newest row for classes, and the newest rows
+  // that actually have due_next / mail for those sections — a grades-only
+  // row must never blank "This week" or "Messages".
+  const { data: rows } = (await supabase
     .from("crew_grade_syncs")
     .select("grades, class_details, synced_at, gpa, due_next, attendance, synergy_mail, office365_emails")
     .eq("crew_member_id", crewMemberId)
     .filter("grades", "neq", "[]")
     .order("synced_at", { ascending: false })
-    .limit(1)
-    .single();
+    .limit(5)) as { data: SyncRow[] | null };
 
+  const latest = rows?.[0];
   if (!latest) {
     return NextResponse.json({
       classes: [],
@@ -224,6 +234,8 @@ export async function GET(
     Math.round((Date.now() - syncedAtMs) / 3600000),
   );
 
+  const { dueSource, mailSource } = pickSectionSources(rows);
+
   const raw = Array.isArray(latest.grades) ? (latest.grades as GradeEntry[]) : [];
   const classes = raw.map((g, i) => {
     const grade = toNumber(g.grade);
@@ -246,12 +258,12 @@ export async function GET(
       latest.gpa && typeof latest.gpa === "object" && Object.keys(latest.gpa).length > 0
         ? latest.gpa
         : null,
-    due_next: normalizeDueNext(latest.due_next),
+    due_next: normalizeDueNext(dueSource.due_next),
     attendance:
       latest.attendance && typeof latest.attendance === "object" && Object.keys(latest.attendance).length > 0
         ? latest.attendance
         : null,
-    messages: mergeMessages(latest.synergy_mail, latest.office365_emails, 8),
+    messages: mergeMessages(mailSource.synergy_mail, mailSource.office365_emails, 8),
     stale: hoursSinceSync > 24,
     hours_since_sync: hoursSinceSync,
   });

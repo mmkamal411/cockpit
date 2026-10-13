@@ -3,7 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getPilotId, unauthorized } from "@/lib/crew/auth";
 import { getOwnedCrewMemberId } from "@/lib/crew/member-access";
 import {
+  NOT_A_BELL_MESSAGE,
   NOT_A_CALENDAR_MESSAGE,
+  pageLooksLikeBell,
   pageLooksLikeCalendar,
 } from "@/lib/school-sources";
 
@@ -102,15 +104,18 @@ export async function GET(
   }
 
   // Legacy guard: snapshots stored before content validation existed may
-  // hold a homepage link farm. A calendar snapshot whose parse failed AND
-  // whose stored HTML has no date/event structure is never served — the
-  // pilot gets the honest message instead of the junk links.
+  // hold a homepage link farm. A snapshot whose parse failed AND whose
+  // stored HTML has no date/event (calendar) or time/period (bell) structure
+  // is never served — the pilot gets the honest message instead of the junk links.
   if (
-    kind === "calendar" &&
     snapshot.parse_status === "error" &&
-    !pageLooksLikeCalendar(snapshot.content_html)
+    ((kind === "calendar" && !pageLooksLikeCalendar(snapshot.content_html)) ||
+      (kind === "bell" && !pageLooksLikeBell(snapshot.content_html)))
   ) {
-    return NextResponse.json({ ok: false, error: NOT_A_CALENDAR_MESSAGE });
+    return NextResponse.json({
+      ok: false,
+      error: kind === "calendar" ? NOT_A_CALENDAR_MESSAGE : NOT_A_BELL_MESSAGE,
+    });
   }
 
   return NextResponse.json({

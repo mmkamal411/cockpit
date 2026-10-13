@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ClassDetail } from "./class-detail";
+import { pageLooksLikeBell } from "@/lib/school-sources";
 import {
   BellRowInput,
   BellScheduleRows,
@@ -2625,7 +2626,9 @@ export function CrewApplet() {
                                 {srcRefreshing ? "Checking…" : "Try again"}
                               </button>
                             </div>
-                          ) : bellHtml[bellTab] !== undefined ? (
+                          ) : bellHtml[bellTab] !== undefined &&
+                            activeBellPeriods.length === 0 &&
+                            pageLooksLikeBell(bellHtml[bellTab]) ? (
                             <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
                               <div
                                 className="school-source-content applet-scroll max-h-96 overflow-y-auto"

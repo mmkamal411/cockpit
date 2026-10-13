@@ -15,7 +15,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   fetchSourcePage,
+  NOT_A_BELL_MESSAGE,
   NOT_A_CALENDAR_MESSAGE,
+  pageLooksLikeBell,
   pageLooksLikeCalendar,
   sanitizeHtml,
   validateSourceUrl,
@@ -359,19 +361,31 @@ async function processGroup(
             }
           }
         } else {
-          write.content_html = sanitizeHtml(html, group.url);
-          const result = await parseBellSchedulePageImpl(html, group.url);
-          const mapped = parseStatusFor(result);
-          write.parse_status = mapped.status;
-          write.parse_note = mapped.note;
-          if (result.ok && Array.isArray(result.data)) {
-            parsedJson = result.data;
-            parsedAt = now;
-            scheduleCount = result.data.length;
-            periodCount = result.data.reduce(
-              (sum, s) => sum + (Array.isArray(s?.periods) ? s.periods.length : 0),
-              0,
-            );
+          // Validate the page is really a bell schedule BEFORE storing
+          // anything: a district homepage answers 200 with a link farm and
+          // zero real times — that chrome must never be saved or rendered.
+          if (!pageLooksLikeBell(html)) {
+            rejected = true;
+            write.content_html = null;
+            write.parse_status = "error";
+            write.parse_note = NOT_A_BELL_MESSAGE;
+            parsedJson = null;
+            parsedAt = null;
+          } else {
+            write.content_html = sanitizeHtml(html, group.url);
+            const result = await parseBellSchedulePageImpl(html, group.url);
+            const mapped = parseStatusFor(result);
+            write.parse_status = mapped.status;
+            write.parse_note = mapped.note;
+            if (result.ok && Array.isArray(result.data)) {
+              parsedJson = result.data;
+              parsedAt = now;
+              scheduleCount = result.data.length;
+              periodCount = result.data.reduce(
+                (sum, s) => sum + (Array.isArray(s?.periods) ? s.periods.length : 0),
+                0,
+              );
+            }
           }
         }
       } catch (err) {

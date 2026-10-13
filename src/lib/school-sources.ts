@@ -288,3 +288,28 @@ export function pageLooksLikeCalendar(html: string): boolean {
   if (links >= 25 && dates < 3) return false; // link farm
   return dates >= 3;
 }
+
+/** Plain-English rejection when a saved page isn't a bell schedule. */
+export const NOT_A_BELL_MESSAGE =
+  "That page doesn't look like a bell schedule — try the school's bell schedule page itself, not the district homepage.";
+
+/** Count time-like tokens (07:10, 8:20 AM, 9:13am) in page text. */
+function countTimeTokens(text: string): number {
+  return (text.match(/\b\d{1,2}:\d{2}\s*(?:am|pm)?\b/gi) ?? []).length;
+}
+
+/**
+ * Heuristic: does this HTML look like a bell schedule page rather than a
+ * homepage / link farm? True when the text carries several time-like tokens.
+ * A district homepage's link farm has dozens of links and ~zero real times.
+ * This is a backstop only — the parser's structured-period check decides first.
+ */
+export function pageLooksLikeBell(html: string): boolean {
+  if (!html) return false;
+  const text = textOf(html);
+  const times = countTimeTokens(text);
+  if (times >= 8) return true;
+  const links = countLinks(html);
+  if (links >= 25 && times < 4) return false; // link farm
+  return times >= 4;
+}
