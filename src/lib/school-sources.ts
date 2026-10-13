@@ -224,3 +224,92 @@ export function domainOf(url: string): string {
     return "";
   }
 }
+
+// ---------------------------------------------------------------------------
+// Calendar-likeness validation: never treat a homepage / link farm as a
+// school calendar. The district homepage answers 200 with a full template
+// ("Find it Fast" quick links etc.) and zero real dates — without this check
+// that chrome gets stored and rendered as the "calendar".
+// ---------------------------------------------------------------------------
+
+/** Plain-English rejection when a saved page isn't a school calendar. */
+export const NOT_A_CALENDAR_MESSAGE =
+  "That page doesn't look like a school calendar — try the calendar page itself, not the district homepage.";
+
+function textOf(html: string): string {
+  return (
+    html
+      // Client-rendered template placeholders ({{...}}) are code, not dates.
+      .replace(/\{\{[\s\S]*?\}\}/g, " ")
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&(amp|lt|gt|quot|nbsp);/g, " ")
+      .replace(/\s+/g, " ")
+  );
+}
+
+const MONTH_WORDS =
+  "(january|february|march|april|may|june|july|august|september|october|november|december" +
+  "|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)";
+
+/** Count date-like tokens (October 20, 10/20, 2026-10-20) in page text. */
+function countDateTokens(text: string): number {
+  const monthDay = new RegExp(
+    `\\b${MONTH_WORDS}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?\\b`,
+    "gi",
+  );
+  const numeric = /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g;
+  const iso = /\b\d{4}-\d{2}-\d{2}\b/g;
+  return (
+    (text.match(monthDay) ?? []).length +
+    (text.match(numeric) ?? []).length +
+    (text.match(iso) ?? []).length
+  );
+}
+
+function countLinks(html: string): number {
+  return (html.match(/<a\b[^>]*href/gi) ?? []).length;
+}
+
+/**
+ * Heuristic: does this HTML look like a school calendar page rather than a
+ * homepage / link farm? True when the text carries several date-like tokens.
+ * A district homepage's link farm has dozens of links and ~zero real dates.
+ * This is a backstop only — the parser's real-event check decides first.
+ */
+export function pageLooksLikeCalendar(html: string): boolean {
+  if (!html) return false;
+  const text = textOf(html);
+  const dates = countDateTokens(text);
+  if (dates >= 5) return true;
+  const links = countLinks(html);
+  if (links >= 25 && dates < 3) return false; // link farm
+  return dates >= 3;
+}
+
+/** Plain-English rejection when a saved page isn't a bell schedule. */
+export const NOT_A_BELL_MESSAGE =
+  "That page doesn't look like a bell schedule — try the school's bell schedule page itself, not the district homepage.";
+
+/** Count time-like tokens (07:10, 8:20 AM, 9:13am) in page text. */
+function countTimeTokens(text: string): number {
+  return (text.match(/\b\d{1,2}:\d{2}\s*(?:am|pm)?\b/gi) ?? []).length;
+}
+
+/**
+ * Heuristic: does this HTML look like a bell schedule page rather than a
+ * homepage / link farm? True when the text carries several time-like tokens.
+ * A district homepage's link farm has dozens of links and ~zero real times.
+ * This is a backstop only — the parser's structured-period check decides first.
+ */
+export function pageLooksLikeBell(html: string): boolean {
+  if (!html) return false;
+  const text = textOf(html);
+  const times = countTimeTokens(text);
+  if (times >= 8) return true;
+  const links = countLinks(html);
+  if (links >= 25 && times < 4) return false; // link farm
+  return times >= 4;
+}

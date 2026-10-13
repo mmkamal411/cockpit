@@ -51,6 +51,13 @@ export async function GET(req: Request) {
       return NextResponse.redirect(`${appUrl}/?cal=reconsent`);
     }
 
+    // Persist the scopes Google actually granted — the UI uses this to
+    // know whether the Tasks scope still needs a re-consent.
+    const grantedScopes =
+      typeof tokens.scope === "string"
+        ? tokens.scope.split(" ").map((s: string) => s.trim()).filter(Boolean)
+        : [];
+
     // Encrypted at rest (AES-256-GCM, key from CALENDAR_TOKEN_KEY).
     // Fail closed: a missing/misconfigured key errors the connect rather
     // than storing a plaintext refresh token.
@@ -72,6 +79,7 @@ export async function GET(req: Request) {
           refresh_token_enc: refreshTokenEnc,
           status: "active",
           last_synced_at: null,
+          granted_scopes: grantedScopes,
         },
         { onConflict: "pilot_id,provider,provider_account_email" },
       )

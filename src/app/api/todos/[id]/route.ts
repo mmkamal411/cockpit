@@ -1,32 +1,51 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { rowToItem } from "../route";
 
 export const dynamic = "force-dynamic";
 
 /**
  * PUT /api/todos/[id] — update a to-do. Body is a partial:
- *   { text?, dueAt?, done?, priority?, labels?, notes? }
- * DELETE /api/todos/[id] — delete a to-do.
+ *   { text?, dueAt?, done?, priority?, labels?, notes?, listId?,
+ *     parentTodoId?, section?, assignedToPilotId?, recurrence?,
+ *     reminderAt? }
+ * DELETE /api/todos/[id] — soft delete: stamps deleted_at (a tombstone),
+ * so shared lists merge deletions instead of resurrecting rows.
  *
- * RLS guarantees a pilot can only touch their own rows.
+ * RLS: the owner has full access; collaborators on a shared list get
+ * read ('view') or write ('edit') through todo_list_shares.
  */
 
 const UNAUTH = { error: "Sign in to sync your to-dos." };
 const GONE = { error: "That to-do is gone — it may have been deleted on another device." };
 
-type Priority = "low" | "medium" | "high";
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type Priority = "p1" | "p2" | "p3" | "p4";
 
 interface TodoRow {
   id: string;
+  pilot_id: string;
   title: string;
   done: boolean;
   created_at: string;
   completed_at: string | null;
+  updated_at: string;
+  deleted_at: string | null;
   due_at: string | null;
   priority: Priority | null;
   labels: string[] | null;
   notes: string | null;
   source: "manual" | "calendar" | "mail";
+  list_id: string | null;
+  parent_todo_id: string | null;
+  section: string | null;
+  assigned_to_pilot_id: string | null;
+  recurrence: string | null;
+  reminder_at: string | null;
+  google_task_id: string | null;
+  google_tasklist_id: string | null;
 }
 
 interface TodoBody {
@@ -36,22 +55,18 @@ interface TodoBody {
   priority?: unknown;
   labels?: unknown;
   notes?: unknown;
+  listId?: unknown;
+  parentTodoId?: unknown;
+  section?: unknown;
+  assignedToPilotId?: unknown;
+  recurrence?: unknown;
+  reminderAt?: unknown;
 }
 
-function toItem(row: TodoRow) {
-  return {
-    id: row.id,
-    text: row.title,
-    done: row.done,
-    createdAt: Date.parse(row.created_at) || Date.now(),
-    completedAt: row.completed_at ? Date.parse(row.completed_at) : null,
-    dueAt: row.due_at ? Date.parse(row.due_at) : null,
-    priority: row.priority,
-    labels: row.labels ?? [],
-    notes: row.notes,
-    source: row.source,
-  };
-}
+const COLUMNS =
+  "id,pilot_id,title,done,created_at,completed_at,updated_at,deleted_at,due_at," +
+  "priority,labels,notes,source,list_id,parent_todo_id,section,assigned_to_pilot_id," +
+  "recurrence,reminder_at,google_task_id,google_tasklist_id";
 
 async function requirePilot() {
   const supabase = await createClient();
@@ -62,7 +77,27 @@ async function requirePilot() {
   return { supabase, pilotId: user.id };
 }
 
-const COLUMNS = "id,title,done,created_at,completed_at,due_at,priority,labels,notes,source";
+function cleanPriority(value: unknown): Priority | null {
+  if (value === "p1" || value === "p2" || value === "p3" || value === "p4") return value;
+  if (value === "high") return "p1";
+  if (value === "medium") return "p2";
+  if (value === "low") return "p3";
+  return null;
+}
+
+function cleanEpochMs(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function cleanUuidOrNull(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return typeof value === "string" && UUID_RE.test(value) ? value : undefined;
+}
 
 /** Build the DB update object from the partial body. Null = clear the field. */
 function buildUpdate(body: TodoBody):
@@ -76,24 +111,14 @@ function buildUpdate(body: TodoBody):
     update.title = text.slice(0, 500);
   }
   if (body.dueAt !== undefined) {
-    if (body.dueAt === null) {
-      update.due_at = null;
-    } else if (typeof body.dueAt === "number" && Number.isFinite(body.dueAt)) {
-      const date = new Date(body.dueAt);
-      update.due_at = Number.isNaN(date.getTime()) ? null : date.toISOString();
-    }
+    update.due_at = cleanEpochMs(body.dueAt);
   }
   if (typeof body.done === "boolean") {
     update.done = body.done;
-    // Keep a completion timestamp so the Today briefing can fold this todo
-    // into "Handled today" instead of every done todo ever.
     update.completed_at = body.done ? new Date().toISOString() : null;
   }
   if (body.priority !== undefined) {
-    update.priority =
-      body.priority === "low" || body.priority === "medium" || body.priority === "high"
-        ? body.priority
-        : null;
+    update.priority = cleanPriority(body.priority);
   }
   if (body.labels !== undefined) {
     update.labels = Array.isArray(body.labels)
@@ -105,49 +130,74 @@ function buildUpdate(body: TodoBody):
       : [];
   }
   if (body.notes !== undefined) {
-    if (typeof body.notes !== "string" || body.notes.trim() === "") {
-      update.notes = null;
-    } else {
-      update.notes = body.notes.trim().slice(0, 2000);
-    }
+    update.notes =
+      typeof body.notes === "string" && body.notes.trim() !== ""
+        ? body.notes.trim().slice(0, 2000)
+        : null;
+  }
+  if (body.listId !== undefined) {
+    const listId = cleanUuidOrNull(body.listId);
+    if (listId !== undefined) update.list_id = listId;
+  }
+  if (body.parentTodoId !== undefined) {
+    const parentId = cleanUuidOrNull(body.parentTodoId);
+    if (parentId !== undefined) update.parent_todo_id = parentId;
+  }
+  if (body.section !== undefined) {
+    update.section =
+      typeof body.section === "string" && body.section.trim() !== ""
+        ? body.section.trim().slice(0, 80)
+        : null;
+  }
+  if (body.assignedToPilotId !== undefined) {
+    const assignee = cleanUuidOrNull(body.assignedToPilotId);
+    if (assignee !== undefined) update.assigned_to_pilot_id = assignee;
+  }
+  if (body.recurrence !== undefined) {
+    const rule =
+      typeof body.recurrence === "string" ? body.recurrence.trim().toLowerCase() : "";
+    update.recurrence =
+      rule !== "" && rule.startsWith("every ") ? rule.slice(0, 80) : null;
+  }
+  if (body.reminderAt !== undefined) {
+    update.reminder_at = cleanEpochMs(body.reminderAt);
   }
 
-  return Object.keys(update).length > 0
-    ? { ok: true, update }
-    : { ok: false, reason: "no-fields" };
+  if (Object.keys(update).length === 0) return { ok: false, reason: "no-fields" };
+  return { ok: true, update };
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requirePilot();
     if (!auth) return NextResponse.json(UNAUTH, { status: 401 });
-
     const { id } = await params;
-    const body = (await req.json().catch(() => ({}))) as TodoBody;
-    const result = buildUpdate(body);
 
-    if (!result.ok && result.reason === "empty-text") {
-      return NextResponse.json({ error: "Give your to-do a few words first." }, { status: 400 });
+    const body = (await req.json().catch(() => ({}))) as TodoBody;
+    const built = buildUpdate(body);
+    if (!built.ok) {
+      return NextResponse.json(
+        {
+          error:
+            built.reason === "empty-text"
+              ? "A to-do needs a few words of text."
+              : "Nothing to change.",
+        },
+        { status: 400 },
+      );
     }
-    if (!result.ok) {
-      return NextResponse.json({ error: "Nothing to update — send at least one field." }, { status: 400 });
-    }
-    const update = result.update;
 
     const { data, error } = await auth.supabase
       .from("todos")
-      .update(update)
+      .update(built.update)
       .eq("id", id)
-      .eq("pilot_id", auth.pilotId)
+      .is("deleted_at", null)
       .select(COLUMNS)
-      .single();
+      .maybeSingle();
 
-    if (error) {
-      // PGRST116 = no row matched: someone else's id or already deleted.
-      if (error.code === "PGRST116") return NextResponse.json(GONE, { status: 404 });
-      throw error;
-    }
-    return NextResponse.json(toItem(data as TodoRow));
+    if (error) throw error;
+    if (!data) return NextResponse.json(GONE, { status: 404 });
+    return NextResponse.json(rowToItem(data as unknown as TodoRow));
   } catch {
     return NextResponse.json(
       { error: "Couldn't update your to-do. Please try again in a moment." },
@@ -160,21 +210,21 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   try {
     const auth = await requirePilot();
     if (!auth) return NextResponse.json(UNAUTH, { status: 401 });
-
     const { id } = await params;
-    const { error } = await auth.supabase
-      .from("todos")
-      .delete()
-      .eq("id", id)
-      .eq("pilot_id", auth.pilotId)
-      .select("id")
-      .single();
 
-    if (error) {
-      if (error.code === "PGRST116") return NextResponse.json(GONE, { status: 404 });
-      throw error;
-    }
-    return NextResponse.json({ ok: true });
+    // Soft delete: the tombstone lets other devices (and shared-list
+    // collaborators) merge the deletion instead of resurrecting the row.
+    const { data, error } = await auth.supabase
+      .from("todos")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select(COLUMNS)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return NextResponse.json(GONE, { status: 404 });
+    return NextResponse.json({ ok: true, todo: rowToItem(data as unknown as TodoRow) });
   } catch {
     return NextResponse.json(
       { error: "Couldn't delete your to-do. Please try again in a moment." },

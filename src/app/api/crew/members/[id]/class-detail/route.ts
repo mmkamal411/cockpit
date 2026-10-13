@@ -182,6 +182,37 @@ export async function GET(
 
   const name = entry.class ?? entry.name ?? className;
 
+  // Full assignment history for the grouped view (Missing / Upcoming / Past).
+  // Capped to bound payload size — a per-class list, so 300 is generous.
+  const assignmentsAll = [...withDue]
+    .sort((a, b) => {
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return b.due_date.getTime() - a.due_date.getTime();
+    })
+    .slice(0, 300)
+    .map((a) => ({
+      title: a.title,
+      due: a.due,
+      due_label: a.due_label,
+      score: a.score,
+      percent: a.percent,
+      category: a.category,
+      notes: a.notes,
+    }));
+
+  // Normalize the raw category-weight record into a sorted array.
+  // The sync writes { [categoryName]: weightPercent }; averages are
+  // computed client-side from the graded assignments in each category.
+  const rawCats =
+    entry.categories && typeof entry.categories === "object" && !Array.isArray(entry.categories)
+      ? (entry.categories as Record<string, unknown>)
+      : {};
+  const categories = Object.entries(rawCats)
+    .map(([catName, w]) => ({ name: catName, weight: toNumber(w) ?? 0 }))
+    .filter((c) => c.name.trim().length > 0)
+    .sort((a, b) => b.weight - a.weight);
+
   return NextResponse.json({
     class: {
       name,
@@ -190,13 +221,13 @@ export async function GET(
       gap_to_90: gap,
       teacher: entry.teacher ?? null,
       period: entry.period ?? null,
-      has_category_weights:
-        !!entry.categories && Object.keys(entry.categories).length > 0,
-      categories: entry.categories ?? {},
+      has_category_weights: categories.length > 0,
+      categories,
     },
     missing,
     upcoming,
     recent,
+    assignments_all: assignmentsAll,
     synced_at: latest.synced_at,
     stale:
       Date.now() - new Date(latest.synced_at).getTime() > 24 * 60 * 60 * 1000,

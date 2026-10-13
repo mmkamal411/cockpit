@@ -87,6 +87,7 @@ function toTodo(row: TodoRow): TodoItem {
     done: row.done,
     dueAt: row.due_at ? Date.parse(row.due_at) : null,
     createdAt: Date.parse(row.created_at) || Date.now(),
+    updatedAt: Date.parse(row.created_at) || Date.now(),
   };
 }
 

@@ -34,32 +34,67 @@ export async function GET(request: NextRequest) {
       });
       const { error, data } = await supabase.auth.exchangeCodeForSession(code);
       if (!error) {
-        // Ensure the pilot row exists (no DB trigger creates it). Idempotent.
-        // Also backfills the sign-in email (powers share-by-email lookup) and
-        // claims any list shares addressed to this email (invite redemption).
+        // Ensure the pilot row exists. Migration 034's auth.users trigger
+        // provisions it at signup; this upsert is the email backfill plus
+        // the repair path for pre-trigger users. A missing pilots row breaks
+        // every pilot_id-keyed write (FK violation), so a failure here is
+        // FAIL-LOUD: the pilot goes back to /login with a plain-English
+        // retry path instead of into an app that silently can't save
+        // anything.
+        let provisioned = false;
         try {
           const uid = data.user?.id;
           const email = data.user?.email?.trim().toLowerCase() || null;
           if (uid) {
             const row: { id: string; email?: string | null } = { id: uid };
             if (email) row.email = email;
-            await supabase.from("pilots").upsert(row, { onConflict: "id" });
+            const { error: upsertErr } = await supabase
+              .from("pilots")
+              .upsert(row, { onConflict: "id" });
+            if (upsertErr) throw upsertErr;
+            const { data: check } = await supabase
+              .from("pilots")
+              .select("id")
+              .eq("id", uid)
+              .maybeSingle();
+            provisioned = !!check?.id;
             if (email) {
-              // Claim pending shares: RLS `shares_claim` policy lets the
-              // pilot set shared_with_pilot_id only on rows addressed to
-              // their own sign-in email that nobody has claimed yet.
-              await supabase
-                .from("shopping_list_shares")
-                .update({ shared_with_pilot_id: uid })
-                .is("shared_with_pilot_id", null)
-                .eq("shared_with_email", email);
+              // Claim pending shares: best-effort, never blocks sign-in.
+              try {
+                await supabase
+                  .from("shopping_list_shares")
+                  .update({ shared_with_pilot_id: uid })
+                  .is("shared_with_pilot_id", null)
+                  .eq("shared_with_email", email);
+              } catch {
+                /* invite redemption retries on the next sign-in */
+              }
+              // Same for to-do list shares (037).
+              try {
+                await supabase
+                  .from("todo_list_shares")
+                  .update({ shared_with_pilot_id: uid })
+                  .is("shared_with_pilot_id", null)
+                  .eq("shared_with_email", email);
+              } catch {
+                /* invite redemption retries on the next sign-in */
+              }
             }
           }
-        } catch {
-          // Non-fatal: the pilot can still use the app; crew features
-          // degrade gracefully until the row exists.
+        } catch (e) {
+          // Loud server-side log — the pilot-facing copy lives on /login.
+          console.error(
+            JSON.stringify({
+              route: "/auth/callback",
+              operation: "provisionPilot",
+              error: e instanceof Error ? e.message : String(e),
+              timestamp: new Date().toISOString(),
+            }),
+          );
         }
-        const response = NextResponse.redirect(`${origin}${next}`);
+        const dest =
+          data.user?.id && !provisioned ? `${origin}/login?error=provision` : `${origin}${next}`;
+        const response = NextResponse.redirect(dest);
         for (const { name, value, options } of pendingCookies) {
           response.cookies.set(name, value, options);
         }

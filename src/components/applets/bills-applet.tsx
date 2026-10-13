@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   effectiveStatus,
   groupBills,
@@ -9,6 +9,7 @@ import {
   daysOverdue,
   type BillGroup,
 } from "@/lib/bills/logic";
+import { extractBillFields, createBillReader, type BillReader } from "@/lib/bill-scan";
 
 interface Bill {
   id: string;
@@ -58,6 +59,131 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** Money — Bills: every obligation, one calm view, one-tap paid. */
+
+function CameraIcon() {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <path d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+      <path d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
+    </svg>
+  );
+}
+
+/**
+ * Pre-scan consent dialog for "Scan a bill". Exact copy per BILLSCAN-UX.md §2.
+ * Focus moves to the consent button on open, Tab is trapped inside, Esc
+ * dismisses as "Not now", and focus returns to the Scan button on close.
+ */
+function ScanDisclaimerDialog({
+  onConfirm,
+  onDismiss,
+  returnFocusRef,
+}: {
+  onConfirm: () => void;
+  onDismiss: () => void;
+  returnFocusRef: React.RefObject<HTMLButtonElement | null>;
+}) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    confirmRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        // Stop here: the applet-host has its own window-level Esc handler that
+        // closes the whole applet. Esc on this dialog means exactly "Not now" —
+        // the dialog goes away, the form is untouched, the applet stays open.
+        // (document fires before window in the bubble phase, so stopping here
+        // keeps the applet open.) The listener is attached unconditionally so
+        // Esc works even if the dialog ref is momentarily unset.
+        e.stopPropagation();
+        onDismiss();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const el = dialogRef.current;
+      if (!el) return;
+      const focusables = Array.from(
+        el.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((node) => node.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onDismiss]);
+
+  // Return focus to the "Scan a bill" button when the dialog goes away.
+  useEffect(
+    () => () => {
+      returnFocusRef.current?.focus();
+    },
+    [returnFocusRef],
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+      onClick={onDismiss}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="scan-disclaimer-title"
+        className="w-full max-w-sm rounded-2xl border border-line bg-panel-2 p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 id="scan-disclaimer-title" className="text-base font-semibold text-star">
+          Before you scan
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-stardust">
+          Your photo is read on this device to fill in the form — nothing is sent
+          anywhere. The photo is thrown away right after and is never saved,
+          stored, or shared. You&apos;re choosing to do this yourself, and nothing
+          fills in or saves until you check it and tap &ldquo;Add bill&rdquo;.
+        </p>
+        <button
+          ref={confirmRef}
+          type="button"
+          onClick={onConfirm}
+          className="mt-4 w-full rounded-xl border border-neon-amber/40 bg-neon-amber/10 px-4 py-2.5 text-sm font-medium text-neon-amber hover:bg-neon-amber/20"
+        >
+          I understand — scan the bill
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="mt-2 w-full rounded-xl border border-line px-4 py-2.5 text-sm text-dim hover:text-star"
+        >
+          Not now
+        </button>
+      </div>
+    </div>
+  );
+}
 export function BillsApplet() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -85,6 +211,155 @@ export function BillsApplet() {
   const [fCadence, setFCadence] = useState("one-off");
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Scan-a-bill state (BILLSCAN-UX.md). The photo is ephemeral: it exists only
+  // as an in-memory object URL during OCR and is revoked the moment OCR
+  // finishes or is cancelled — never POSTed, never stored.
+  const [scanNotice, setScanNotice] = useState<
+    "disclaimer" | "denied" | "reading" | "failed" | null
+  >(null);
+  const [scanAnnounce, setScanAnnounce] = useState("");
+  const [suggested, setSuggested] = useState({ name: false, amount: false, dueDate: false });
+  const consentRef = useRef(false); // dialog consent stands for this session (retries skip it)
+  const cancelledRef = useRef(false);
+  const readerRef = useRef<BillReader | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+  const scanBtnRef = useRef<HTMLButtonElement>(null);
+  const captureInputRef = useRef<HTMLInputElement>(null);
+  const pickerInputRef = useRef<HTMLInputElement>(null);
+
+  const dismissDisclaimer = useCallback(() => {
+    setScanNotice(null); // "Not now": back to the untouched form, nothing changes
+  }, []);
+
+  // Lock background scroll while the disclaimer dialog is open.
+  useEffect(() => {
+    if (scanNotice !== "disclaimer") return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [scanNotice]);
+
+  const startCapture = useCallback((preferCamera: boolean) => {
+    setScanNotice(null);
+    const mobile = /iphone|ipad|ipod|android/i.test(navigator.userAgent || "");
+    if (preferCamera && mobile) {
+      const canCamera =
+        typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+      if (!canCamera) {
+        setScanNotice("denied");
+        setScanAnnounce(
+          "We couldn't open your camera. You can pick a photo instead — or type the bill in below. Nothing was saved.",
+        );
+        return;
+      }
+      captureInputRef.current?.click();
+    } else {
+      pickerInputRef.current?.click();
+    }
+  }, []);
+
+  const confirmDisclaimer = useCallback(() => {
+    consentRef.current = true;
+    startCapture(true);
+  }, [startCapture]);
+
+  const openScan = useCallback(() => {
+    // Consent stands for the session: retries re-open capture directly.
+    if (consentRef.current) startCapture(true);
+    else setScanNotice("disclaimer");
+  }, [startCapture]);
+
+  const cancelScan = useCallback(() => {
+    cancelledRef.current = true;
+    readerRef.current?.cancel(); // terminates the worker immediately
+    readerRef.current = null;
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    setScanNotice(null);
+    setScanAnnounce("");
+  }, []);
+
+  const runScan = useCallback(
+    async (file: File) => {
+      cancelledRef.current = false;
+      const url = URL.createObjectURL(file);
+      objectUrlRef.current = url;
+      setScanNotice("reading");
+      setScanAnnounce("Reading your bill…");
+      try {
+        // Tesseract.js is lazy-loaded here — the WASM engine never enters the
+        // initial bundle; it is fetched only after the user confirms the scan.
+        readerRef.current = await createBillReader();
+        const text = await readerRef.current.read(url);
+        if (cancelledRef.current) return;
+        const fields = extractBillFields(text);
+        const read = [fields.name, fields.amount, fields.dueDate].filter(Boolean).length;
+        if (read === 0) {
+          setScanNotice("failed");
+          setScanAnnounce(
+            "We couldn't read that bill. You can type it in below — nothing was saved.",
+          );
+          return;
+        }
+        // Never overwrite what the user already typed: OCR fills empty fields
+        // only. Each filled field is marked "Suggested — check me".
+        const fillName = fields.name && fName.trim() === "" ? fields.name : null;
+        const fillAmount = fields.amount && fAmount.trim() === "" ? fields.amount : null;
+        const fillDueDate =
+          fields.dueDate && fDueDate.trim() === "" ? fields.dueDate : null;
+        if (fillName) setFName(fillName);
+        if (fillAmount) setFAmount(fillAmount);
+        if (fillDueDate) setFDueDate(fillDueDate);
+        setSuggested({
+          name: !!fillName,
+          amount: !!fillAmount,
+          dueDate: !!fillDueDate,
+        });
+        setScanNotice(null);
+        setScanAnnounce(
+          fillName || fillAmount || fillDueDate
+            ? "We filled in what we could read — please check before saving."
+            : "We read your bill, but your entries were already filled in — nothing was changed.",
+        );
+      } catch {
+        if (!cancelledRef.current) {
+          setScanNotice("failed");
+          setScanAnnounce(
+            "We couldn't read that bill. You can type it in below — nothing was saved.",
+          );
+        }
+      } finally {
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
+        }
+        if (!cancelledRef.current) {
+          readerRef.current?.cancel(); // worker cleanup (terminates the engine)
+        }
+        readerRef.current = null;
+      }
+    },
+    [fName, fAmount, fDueDate],
+  );
+
+  const handleScanFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] ?? null;
+      e.target.value = ""; // allow re-picking the same photo
+      if (!file) {
+        // Picker dismissed without a photo: back to the untouched form.
+        setScanNotice(null);
+        return;
+      }
+      void runScan(file);
+    },
+    [runScan],
+  );
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -227,6 +502,9 @@ export function BillsApplet() {
       setFAmount("");
       setFDueDate("");
       setFCadence("one-off");
+      setSuggested({ name: false, amount: false, dueDate: false });
+      setScanNotice(null);
+      setScanAnnounce("");
       setView("list");
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Couldn't add that bill.");
@@ -292,72 +570,223 @@ export function BillsApplet() {
       </div>
 
       {view === "add" && (
-        <form onSubmit={addBill} className="space-y-3 rounded-2xl border border-line bg-panel-2/60 p-4">
-          <h3 className="text-sm font-semibold text-star">Add a bill</h3>
-          {formError && <p className="text-xs text-red-400">{formError}</p>}
-          <div>
-            <label htmlFor="bill-name" className="mb-1 block text-xs text-dim">
-              Name
-            </label>
-            <input
-              id="bill-name"
-              value={fName}
-              onChange={(e) => setFName(e.target.value)}
-              placeholder="Electric bill"
-              className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-amber/60 focus:outline-none"
-            />
+        <>
+          {/* Single live region for all scan announcements (BILLSCAN-UX.md §8). */}
+          <div aria-live="polite" className="sr-only">
+            {scanAnnounce}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="bill-amount" className="mb-1 block text-xs text-dim">
-                Amount
-              </label>
-              <input
-                id="bill-amount"
-                value={fAmount}
-                onChange={(e) => setFAmount(e.target.value)}
-                placeholder="87.40"
-                inputMode="decimal"
-                className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-amber/60 focus:outline-none"
-              />
+          {scanNotice === "reading" ? (
+            <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-2xl border border-line bg-panel-2/60 p-8">
+              <svg
+                aria-hidden="true"
+                className="h-10 w-10 animate-spin text-neon-amber motion-reduce:animate-none"
+                viewBox="0 0 40 40"
+                fill="none"
+              >
+                <circle
+                  cx="20"
+                  cy="20"
+                  r="16"
+                  stroke="currentColor"
+                  strokeOpacity="0.2"
+                  strokeWidth="4"
+                />
+                <path
+                  d="M36 20a16 16 0 00-16-16"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <p aria-hidden="true" className="text-sm text-stardust">
+                Reading your bill…
+              </p>
+              <button
+                type="button"
+                onClick={cancelScan}
+                className="rounded-xl border border-line px-4 py-2 text-sm text-dim hover:text-star"
+              >
+                Cancel
+              </button>
             </div>
-            <div>
-              <label htmlFor="bill-due" className="mb-1 block text-xs text-dim">
-                Due date
-              </label>
-              <input
-                id="bill-due"
-                type="date"
-                value={fDueDate}
-                onChange={(e) => setFDueDate(e.target.value)}
-                className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star focus:border-neon-amber/60 focus:outline-none"
-              />
-            </div>
-          </div>
-          <div>
-            <label htmlFor="bill-cadence" className="mb-1 block text-xs text-dim">
-              Repeats
-            </label>
-            <select
-              id="bill-cadence"
-              value={fCadence}
-              onChange={(e) => setFCadence(e.target.value)}
-              className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star focus:border-neon-amber/60 focus:outline-none"
+          ) : (
+            <form
+              onSubmit={addBill}
+              className="space-y-3 rounded-2xl border border-line bg-panel-2/60 p-4"
             >
-              <option value="one-off">Just once</option>
-              <option value="monthly">Every month</option>
-              <option value="quarterly">Every 3 months</option>
-              <option value="annual">Every year</option>
-            </select>
-          </div>
-          <button
-            type="submit"
-            disabled={saving}
-            className="w-full rounded-xl border border-neon-amber/40 bg-neon-amber/10 px-4 py-2.5 text-sm font-medium text-neon-amber transition-colors hover:bg-neon-amber/20 disabled:opacity-50"
-          >
-            {saving ? "Adding…" : "Add bill"}
-          </button>
-        </form>
+              <h3 className="text-sm font-semibold text-star">Add a bill</h3>
+              <button
+                ref={scanBtnRef}
+                type="button"
+                onClick={openScan}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm font-medium text-stardust hover:text-star"
+              >
+                <CameraIcon />
+                Scan a bill
+              </button>
+              {scanNotice === "denied" && (
+                <div className="space-y-2 rounded-xl border border-line bg-panel-2/60 px-4 py-2.5">
+                  <p className="text-xs leading-relaxed text-stardust">
+                    We couldn&apos;t open your camera. You can pick a photo
+                    instead — or type the bill in below. Nothing was saved.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => startCapture(false)}
+                    className="w-full rounded-xl border border-line px-4 py-2 text-sm text-stardust hover:text-star"
+                  >
+                    Choose a photo
+                  </button>
+                </div>
+              )}
+              {scanNotice === "failed" && (
+                <div className="space-y-2 rounded-xl border border-line bg-panel-2/60 px-4 py-2.5">
+                  <p className="text-xs leading-relaxed text-stardust">
+                    We couldn&apos;t read that bill. You can type it in below —
+                    nothing was saved.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => startCapture(true)}
+                    className="w-full rounded-xl border border-line px-4 py-2 text-sm text-stardust hover:text-star"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+              {(suggested.name || suggested.amount || suggested.dueDate) &&
+                scanNotice !== "denied" && (
+                  <p className="rounded-xl border border-neon-amber/40 bg-neon-amber/10 px-4 py-2.5 text-xs leading-relaxed text-neon-amber">
+                    We filled in what we could read — please check before saving.
+                  </p>
+                )}
+              {formError && <p className="text-xs text-red-400">{formError}</p>}
+              <div>
+                <label
+                  htmlFor="bill-name"
+                  className="mb-1 flex items-center gap-2 text-xs text-dim"
+                >
+                  Name
+                  {suggested.name && (
+                    <span className="text-[11px] text-neon-amber/90">
+                      Suggested — check me
+                    </span>
+                  )}
+                </label>
+                <input
+                  id="bill-name"
+                  value={fName}
+                  onChange={(e) => {
+                    setFName(e.target.value);
+                    if (suggested.name) setSuggested((s) => ({ ...s, name: false }));
+                  }}
+                  placeholder="Electric bill"
+                  className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-amber/60 focus:outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="bill-amount"
+                    className="mb-1 flex items-center gap-2 text-xs text-dim"
+                  >
+                    Amount
+                    {suggested.amount && (
+                      <span className="text-[11px] text-neon-amber/90">
+                        Suggested — check me
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    id="bill-amount"
+                    value={fAmount}
+                    onChange={(e) => {
+                      setFAmount(e.target.value);
+                      if (suggested.amount)
+                        setSuggested((s) => ({ ...s, amount: false }));
+                    }}
+                    placeholder="87.40"
+                    inputMode="decimal"
+                    className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-amber/60 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="bill-due"
+                    className="mb-1 flex items-center gap-2 text-xs text-dim"
+                  >
+                    Due date
+                    {suggested.dueDate && (
+                      <span className="text-[11px] text-neon-amber/90">
+                        Suggested — check me
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    id="bill-due"
+                    type="date"
+                    value={fDueDate}
+                    onChange={(e) => {
+                      setFDueDate(e.target.value);
+                      if (suggested.dueDate)
+                        setSuggested((s) => ({ ...s, dueDate: false }));
+                    }}
+                    className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star focus:border-neon-amber/60 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label htmlFor="bill-cadence" className="mb-1 block text-xs text-dim">
+                  Repeats
+                </label>
+                <select
+                  id="bill-cadence"
+                  value={fCadence}
+                  onChange={(e) => setFCadence(e.target.value)}
+                  className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star focus:border-neon-amber/60 focus:outline-none"
+                >
+                  <option value="one-off">Just once</option>
+                  <option value="monthly">Every month</option>
+                  <option value="quarterly">Every 3 months</option>
+                  <option value="annual">Every year</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full rounded-xl border border-neon-amber/40 bg-neon-amber/10 px-4 py-2.5 text-sm font-medium text-neon-amber transition-colors hover:bg-neon-amber/20 disabled:opacity-50"
+              >
+                {saving ? "Adding…" : "Add bill"}
+              </button>
+              {/* Hidden capture inputs. The photo is ephemeral: it is read
+                  on-device and the object URL is revoked right after OCR. */}
+              <input
+                ref={captureInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                aria-label="Scan a bill"
+                className="hidden"
+                onChange={handleScanFile}
+              />
+              <input
+                ref={pickerInputRef}
+                type="file"
+                accept="image/*"
+                aria-label="Scan a bill"
+                className="hidden"
+                onChange={handleScanFile}
+              />
+            </form>
+          )}
+          {scanNotice === "disclaimer" && (
+            <ScanDisclaimerDialog
+              onConfirm={confirmDisclaimer}
+              onDismiss={dismissDisclaimer}
+              returnFocusRef={scanBtnRef}
+            />
+          )}
+        </>
       )}
 
       {view === "month" && (

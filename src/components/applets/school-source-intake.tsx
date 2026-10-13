@@ -252,6 +252,43 @@ export function normalizeBellPeriods(parsed: unknown): BellPeriod[] {
   return out;
 }
 
+/**
+ * Pick one bell schedule's periods out of a `parsed` payload that may hold
+ * several schedules (one page can carry "Daily" and "WEB"). The active tab's
+ * label wins (case-insensitive match); otherwise the tab index; otherwise
+ * everything merged. Defensive: unknown shapes yield [].
+ */
+export function pickBellSchedulePeriods(
+  parsed: unknown,
+  label: string,
+  index: number,
+): BellPeriod[] {
+  if (!parsed || typeof parsed !== "object") return [];
+  const o = parsed as Record<string, unknown>;
+  const schedules: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(o.schedules)
+      ? o.schedules
+      : [parsed];
+  if (schedules.length <= 1) return normalizeBellPeriods(parsed);
+  const want = label.trim().toLowerCase();
+  const match =
+    want.length > 0
+      ? schedules.find((s) => {
+          if (!s || typeof s !== "object") return false;
+          const schedLabel = String(
+            (s as Record<string, unknown>).label ?? "",
+          ).toLowerCase();
+          return (
+            schedLabel.length > 0 &&
+            (schedLabel.includes(want) || want.includes(schedLabel))
+          );
+        })
+      : undefined;
+  const chosen = match ?? schedules[index] ?? schedules[0];
+  return normalizeBellPeriods(chosen);
+}
+
 /** Count the events in a calendar `parsed` payload (DigitalCalendarEvent[]). */
 export function countCalendarEvents(parsed: unknown): number | null {
   if (!parsed) return null;
@@ -285,6 +322,69 @@ export function normalizeCalendarSummary(parsed: unknown): {
 
 const LINK_ERROR_FALLBACK =
   "We couldn't open that link. Check it in your browser and try again.";
+
+/**
+ * Defensive copy when the backend's per-source message is missing: per kind,
+ * plain-English, and pointing at the upload fallback (the message appears
+ * directly above it).
+ */
+export function intakeErrorFallback(kind: IntakeItem["kind"]): string {
+  return kind === "bell"
+    ? "We couldn't read that bell schedule. Upload a photo or PDF of it instead."
+    : "We couldn't read that calendar page. Upload a photo or PDF of it instead.";
+}
+
+/**
+ * Match per-source intake results back to the requested items and push each
+ * item's check to saved/error.
+ *
+ * Matching is by (kind, url) — the backend keys results that way — with a
+ * URL-only fallback for results that carry no kind (so two items sharing one
+ * URL each get their own kind's result instead of colliding on one entry).
+ *
+ * A source counts as saved only when the page both answered AND yielded
+ * readable data (verified && parsed). A page that opens but has nothing we
+ * can read (a JS-driven calendar, an unrecognized layout) is an error: the
+ * pilot still needs to supply the data, which is exactly when the upload
+ * fallback is offered.
+ */
+export function applyIntakeResults(
+  items: IntakeItem[],
+  results: IntakeSourceResult[],
+  onCheck: (key: string, patch: Partial<SourceCheck>) => void,
+): void {
+  const byKindUrl = new Map<string, IntakeSourceResult>();
+  const byUrl = new Map<string, IntakeSourceResult>();
+  for (const r of results) {
+    if (!r || typeof r.url !== "string") continue;
+    if (!byUrl.has(r.url)) byUrl.set(r.url, r);
+    if (typeof r.kind === "string" && r.kind)
+      byKindUrl.set(`${r.kind}::${r.url}`, r);
+  }
+  for (const item of items) {
+    if (item.kind === "upload" || !item.url) continue;
+    const result =
+      byKindUrl.get(`${item.kind}::${item.url}`) ?? byUrl.get(item.url);
+    if (!result) {
+      onCheck(item.key, {
+        state: "error",
+        message: LINK_ERROR_FALLBACK,
+      });
+      continue;
+    }
+    if (result.verified && result.parsed) {
+      onCheck(item.key, {
+        state: "saved",
+        message: result.message ?? "Saved — the link opened fine.",
+      });
+    } else {
+      onCheck(item.key, {
+        state: "error",
+        message: result.message ?? intakeErrorFallback(item.kind),
+      });
+    }
+  }
+}
 
 export interface RunIntakeOptions {
   memberId: string;
@@ -393,31 +493,7 @@ export async function runSourceIntake(opts: RunIntakeOptions): Promise<void> {
       }
       return;
     }
-    const byUrl = new Map<string, IntakeSourceResult>();
-    for (const r of results) {
-      if (r && typeof r.url === "string") byUrl.set(r.url, r);
-    }
-    for (const item of urlItems) {
-      const result = item.url ? byUrl.get(item.url) : undefined;
-      if (!result) {
-        onCheck(item.key, {
-          state: "error",
-          message: LINK_ERROR_FALLBACK,
-        });
-        continue;
-      }
-      if (result.verified) {
-        onCheck(item.key, {
-          state: "saved",
-          message: result.message ?? "Saved — the link opened fine.",
-        });
-      } else {
-        onCheck(item.key, {
-          state: "error",
-          message: result.message ?? LINK_ERROR_FALLBACK,
-        });
-      }
-    }
+    applyIntakeResults(urlItems, results, onCheck);
   } catch (e) {
     for (const item of urlItems) {
       onCheck(item.key, {

@@ -10,9 +10,22 @@
  * no dependencies, no timezone database (uses the pilot's local time).
  */
 
+import { nextOccurrence } from "./recurrence.ts";
+
 export interface ParsedTodo {
   text: string;
   dueAt?: number;
+  /** True when the pilot typed an explicit time ("at 3pm") — drives the
+   *  default reminder policy (30 min before); date-only todos get a
+   *  morning reminder instead. */
+  hasTime?: boolean;
+  priority?: "p1" | "p2" | "p3" | "p4";
+  /** "#Project" — matched against list names by the caller. */
+  project?: string;
+  /** "+name" — matched against known people by the caller. */
+  assignee?: string;
+  /** "every Monday" — validated by the caller with parseRecurrence. */
+  recurrence?: string;
 }
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -35,7 +48,9 @@ export function parseTodo(input: string, now: number = Date.now()): ParsedTodo {
   let day: Date | null = null;
   let hour: number | null = null;
   let minute = 0;
+  let hasTime = false;
   const base = new Date(now);
+  const out: ParsedTodo = { text };
 
   // Remove the match and collapse leftover whitespace.
   const eat = (match: RegExpMatchArray) => {
@@ -45,8 +60,36 @@ export function parseTodo(input: string, now: number = Date.now()): ParsedTodo {
   };
   const find = (re: RegExp) => text.match(re);
 
+  // --- Priority: "p1".."p4" (Todoist-style) ---
+  let m = find(/\bp([1-4])\b/i);
+  if (m) {
+    out.priority = `p${m[1]}` as ParsedTodo["priority"];
+    eat(m);
+  }
+
+  // --- Recurrence: "every Monday", "every 2 weeks", "every day" ---
+  m = find(/\bevery\s+(day|daily|weekday|weekdays|weekend|weekends|week|weekly|month|monthly|year|yearly|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\d+\s+(?:days?|weeks?|months?|years?))\b/i);
+  if (m) {
+    out.recurrence = m[0].toLowerCase().replace(/\s+/g, " ").trim();
+    eat(m);
+  }
+
+  // --- Project: "#Family" (matched to a list name by the caller) ---
+  m = find(/#([\p{L}\p{N}_-]+)/u);
+  if (m) {
+    out.project = m[1];
+    eat(m);
+  }
+
+  // --- Assignee: "+Dawson" (matched to a known person by the caller) ---
+  m = find(/\+([\p{L}\p{N}_-]+)/u);
+  if (m) {
+    out.assignee = m[1];
+    eat(m);
+  }
+
   // --- Time of day: "at 3pm", "at 3:30pm", "at 15:00", "at noon", "at midnight" ---
-  let m =
+  m =
     find(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i) ??
     find(/\bat\s+(\d{1,2}):(\d{2})\b/);
   if (m) {
@@ -57,13 +100,16 @@ export function parseTodo(input: string, now: number = Date.now()): ParsedTodo {
     if (meridiem === "am" && h === 12) h = 0;
     if (h >= 0 && h < 24 && minute < 60) {
       hour = h;
+      hasTime = true;
       eat(m);
     }
   } else if ((m = find(/\bat\s+noon\b/i))) {
     hour = 12;
+    hasTime = true;
     eat(m);
   } else if ((m = find(/\bat\s+midnight\b/i))) {
     hour = 0;
+    hasTime = true;
     eat(m);
   }
 
@@ -91,7 +137,22 @@ export function parseTodo(input: string, now: number = Date.now()): ParsedTodo {
     eat(m);
   }
 
-  if (day === null && hour === null) return { text };
+  // A recurring todo also seeds its first due date from the rule
+  // ("water the plants every Monday" is due next Monday). An explicit time
+  // ("every Friday at 6pm") lands on that occurrence's date.
+  if (out.recurrence && day === null) {
+    const first = nextOccurrence(out.recurrence, now);
+    if (first !== null) {
+      const d = new Date(first);
+      d.setHours(hour ?? 9, hour === null ? 0 : minute, 0, 0);
+      day = d;
+    }
+  }
+
+  if (day === null && hour === null) {
+    out.text = text;
+    return out;
+  }
 
   // A bare time ("at 3pm") means today — or tomorrow if it already passed.
   const due = day ?? new Date(base);
@@ -101,5 +162,8 @@ export function parseTodo(input: string, now: number = Date.now()): ParsedTodo {
   } else {
     day = atTime(due, 9, 0); // Date without a time defaults to 9am.
   }
-  return { text, dueAt: day.getTime() };
+  out.text = text;
+  out.dueAt = day.getTime();
+  out.hasTime = hasTime;
+  return out;
 }

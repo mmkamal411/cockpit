@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPilotId, unauthorized } from "@/lib/crew/auth";
 import { getOwnedCrewMemberId } from "@/lib/crew/member-access";
+import {
+  NOT_A_BELL_MESSAGE,
+  NOT_A_CALENDAR_MESSAGE,
+  pageLooksLikeBell,
+  pageLooksLikeCalendar,
+} from "@/lib/school-sources";
 
 function logError(operation: string, error: unknown) {
   console.error(
@@ -84,9 +90,31 @@ export async function GET(
   }
 
   if (snapshot.status === "pending" || !snapshot.content_html) {
+    // No page chrome was stored. When the parse already ran and failed, say
+    // what happened instead of pretending the fetch is still in flight —
+    // a rejected page (district homepage saved as "calendar") leaves
+    // content_html empty on purpose: its chrome is never rendered.
+    if (snapshot.parse_status === "error" && snapshot.parse_note) {
+      return NextResponse.json({ ok: false, error: snapshot.parse_note });
+    }
     return NextResponse.json({
       ok: false,
       error: "That page is still being fetched. Tap Refresh, then try again in a moment.",
+    });
+  }
+
+  // Legacy guard: snapshots stored before content validation existed may
+  // hold a homepage link farm. A snapshot whose parse failed AND whose
+  // stored HTML has no date/event (calendar) or time/period (bell) structure
+  // is never served — the pilot gets the honest message instead of the junk links.
+  if (
+    snapshot.parse_status === "error" &&
+    ((kind === "calendar" && !pageLooksLikeCalendar(snapshot.content_html)) ||
+      (kind === "bell" && !pageLooksLikeBell(snapshot.content_html)))
+  ) {
+    return NextResponse.json({
+      ok: false,
+      error: kind === "calendar" ? NOT_A_CALENDAR_MESSAGE : NOT_A_BELL_MESSAGE,
     });
   }
 

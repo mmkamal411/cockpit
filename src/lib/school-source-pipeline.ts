@@ -15,6 +15,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   fetchSourcePage,
+  NOT_A_BELL_MESSAGE,
+  NOT_A_CALENDAR_MESSAGE,
+  pageLooksLikeBell,
+  pageLooksLikeCalendar,
   sanitizeHtml,
   validateSourceUrl,
 } from "@/lib/school-sources";
@@ -86,6 +90,12 @@ export interface SourceOutcome {
   verified: boolean;
   /** Digital output was produced and stored. */
   parsed: boolean;
+  /**
+   * True when the page answered but isn't what it claims to be (e.g. a
+   * district homepage saved as a "calendar"). The pilot must fix the link;
+   * nothing from the page is stored or rendered.
+   */
+  rejected?: boolean;
   /** Plain-English summary for the pilot. */
   message: string;
   eventCount?: number;
@@ -176,13 +186,25 @@ function looksLikeTemplateCode(title: string): boolean {
   return TEMPLATE_CODE_RES.some((re) => re.test(title));
 }
 
-async function storeCalendarEvents(
-  supabase: SupabaseClient,
-  crewMemberId: string,
-  sourceUrl: string,
+interface CleanCalendarRow {
+  title: string;
+  event_date: string;
+  end_date: string | null;
+  location: string | null;
+  description: string | null;
+  source_url: string;
+}
+
+/**
+ * Keep only genuinely real events: a title, a real calendar date, and no
+ * template-code artifacts (Angular {{...}} / vm.* placeholders that leak out
+ * of client-rendered page shells are never events).
+ */
+function cleanCalendarRows(
   events: DigitalCalendarEvent[],
-): Promise<{ stored: number; droppedTemplateRows: number }> {
-  const rows = [];
+  sourceUrl: string,
+): { rows: CleanCalendarRow[]; droppedTemplateRows: number } {
+  const rows: CleanCalendarRow[] = [];
   let droppedTemplateRows = 0;
   for (const event of events) {
     const title = cleanText(event?.title, 300);
@@ -199,7 +221,6 @@ async function storeCalendarEvents(
     const location = cleanText(event?.location, 300);
     const description = cleanText(event?.description, 2000);
     rows.push({
-      crew_member_id: crewMemberId,
       title,
       event_date: date,
       end_date: endDate,
@@ -209,11 +230,22 @@ async function storeCalendarEvents(
       source_url: sourceUrl,
     });
   }
+  return { rows, droppedTemplateRows };
+}
+
+async function storeCalendarEvents(
+  supabase: SupabaseClient,
+  crewMemberId: string,
+  sourceUrl: string,
+  events: DigitalCalendarEvent[],
+): Promise<{ stored: number; droppedTemplateRows: number }> {
+  const { rows, droppedTemplateRows } = cleanCalendarRows(events, sourceUrl);
+  const crewRows = rows.map((r) => ({ crew_member_id: crewMemberId, ...r }));
 
   // Nothing valid to store (all rows filtered as template code, or the page
   // simply listed no events): keep the member's existing events rather than
   // wiping them on a bad read.
-  if (rows.length === 0) return { stored: 0, droppedTemplateRows };
+  if (crewRows.length === 0) return { stored: 0, droppedTemplateRows };
 
   // Replace the member's events with this fresh parse (only called after a
   // successful parse, so a failed refresh never wipes good data).
@@ -226,12 +258,12 @@ async function storeCalendarEvents(
   // Insert in small batches; a single bad row shouldn't sink the batch.
   const BATCH = 100;
   let stored = 0;
-  for (let i = 0; i < rows.length; i += BATCH) {
+  for (let i = 0; i < crewRows.length; i += BATCH) {
     const { error: insertError } = await supabase
       .from("crew_school_calendar_events")
-      .insert(rows.slice(i, i + BATCH));
+      .insert(crewRows.slice(i, i + BATCH));
     if (insertError) throw insertError;
-    stored += Math.min(BATCH, rows.length - i);
+    stored += Math.min(BATCH, crewRows.length - i);
   }
   return { stored, droppedTemplateRows };
 }
@@ -277,67 +309,83 @@ async function processGroup(
       message: fetchError ?? "The school's page didn't answer.",
     };
   } else {
-    write.content_html = sanitizeHtml(html, group.url);
     let parsedJson: unknown = null;
     let parsedAt: string | null = null;
     let eventCount = 0;
     let scheduleCount = 0;
     let periodCount = 0;
+    let rejected = false;
 
     {
       try {
         if (group.kind === "calendar") {
-          // Calendar pages may be JS app shells — prefer an advertised ICS
-          // feed, which is parseable server-side.
-          const { result, viaFeed } = await parseCalendarSource(html, group.url);
-          const mapped = parseStatusFor(result);
-          write.parse_status = mapped.status;
-          write.parse_note =
-            viaFeed && (mapped.status === "ok" || mapped.status === "partial")
-              ? `Read from the school's calendar feed. ${mapped.note}`
-              : mapped.note;
-          if (result.ok && Array.isArray(result.data)) {
-            parsedJson = result.data;
-            parsedAt = now;
-            if (mapped.status === "ok" || mapped.status === "partial") {
-              const { stored, droppedTemplateRows } = await storeCalendarEvents(
-                supabase,
-                crewMemberId,
-                group.url,
-                result.data,
-              );
-              eventCount = stored;
-              if (droppedTemplateRows > 0 && eventCount > 0) {
-                write.parse_note =
-                  `${write.parse_note} Skipped ${droppedTemplateRows} ` +
-                  `${droppedTemplateRows === 1 ? "row" : "rows"} that looked like page template code, not real events.`;
+          // Validate the page is really a calendar BEFORE storing anything:
+          // a district homepage answers 200 with a link farm and zero real
+          // events — that chrome must never be saved or rendered.
+          const validation = await validateCalendarContent(html, group.url);
+          if (!validation.looksLikeCalendar) {
+            rejected = true;
+            write.content_html = null;
+            write.parse_status = "error";
+            write.parse_note = validation.message;
+            parsedJson = null;
+            parsedAt = null;
+          } else {
+            write.content_html = sanitizeHtml(html, group.url);
+            // Calendar pages may be JS app shells — prefer an advertised ICS
+            // feed, which is parseable server-side.
+            const { result, viaFeed } = validation;
+            const mapped = parseStatusFor(result);
+            write.parse_status = mapped.status;
+            write.parse_note =
+              viaFeed && (mapped.status === "ok" || mapped.status === "partial")
+                ? `Read from the school's calendar feed. ${mapped.note}`
+                : mapped.note;
+            if (result.ok && Array.isArray(result.data)) {
+              parsedJson = result.data;
+              parsedAt = now;
+              if (mapped.status === "ok" || mapped.status === "partial") {
+                const { stored, droppedTemplateRows } = await storeCalendarEvents(
+                  supabase,
+                  crewMemberId,
+                  group.url,
+                  result.data,
+                );
+                eventCount = stored;
+                if (droppedTemplateRows > 0 && eventCount > 0) {
+                  write.parse_note =
+                    `${write.parse_note} Skipped ${droppedTemplateRows} ` +
+                    `${droppedTemplateRows === 1 ? "row" : "rows"} that looked like page template code, not real events.`;
+                }
               }
             }
           }
-          // Honest JS-shell handling: a client-rendered calendar carries no
-          // real events in the server response (template placeholders like
-          // {{...}} are not events). Never fabricate — say so in plain
-          // English instead.
-          if (eventCount === 0 && !viaFeed && hasClientRenderMarkers(html)) {
+        } else {
+          // Validate the page is really a bell schedule BEFORE storing
+          // anything: a district homepage answers 200 with a link farm and
+          // zero real times — that chrome must never be saved or rendered.
+          if (!pageLooksLikeBell(html)) {
+            rejected = true;
+            write.content_html = null;
             write.parse_status = "error";
-            write.parse_note =
-              "This calendar loads its events with JavaScript, so we couldn't read them yet. The saved copy is here if you'd like to look.";
+            write.parse_note = NOT_A_BELL_MESSAGE;
             parsedJson = null;
             parsedAt = null;
-          }
-        } else {
-          const result = await parseBellSchedulePageImpl(html, group.url);
-          const mapped = parseStatusFor(result);
-          write.parse_status = mapped.status;
-          write.parse_note = mapped.note;
-          if (result.ok && Array.isArray(result.data)) {
-            parsedJson = result.data;
-            parsedAt = now;
-            scheduleCount = result.data.length;
-            periodCount = result.data.reduce(
-              (sum, s) => sum + (Array.isArray(s?.periods) ? s.periods.length : 0),
-              0,
-            );
+          } else {
+            write.content_html = sanitizeHtml(html, group.url);
+            const result = await parseBellSchedulePageImpl(html, group.url);
+            const mapped = parseStatusFor(result);
+            write.parse_status = mapped.status;
+            write.parse_note = mapped.note;
+            if (result.ok && Array.isArray(result.data)) {
+              parsedJson = result.data;
+              parsedAt = now;
+              scheduleCount = result.data.length;
+              periodCount = result.data.reduce(
+                (sum, s) => sum + (Array.isArray(s?.periods) ? s.periods.length : 0),
+                0,
+              );
+            }
           }
         }
       } catch (err) {
@@ -356,6 +404,7 @@ async function processGroup(
     outcome = {
       verified: true,
       parsed,
+      ...(rejected ? { rejected: true } : {}),
       message: parsed
         ? group.kind === "calendar"
           ? `Saved and read — ${eventCount} ${eventCount === 1 ? "event" : "events"} found.`
@@ -991,5 +1040,79 @@ export async function parseCalendarSource(
     result: await parseCalendarPageImpl(html, url),
     viaFeed: false,
     feedUrl: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Calendar content validation: a URL that answers 200 is not automatically
+// a calendar. District homepages serve the full site template (dozens of
+// "Find it Fast" quick links, zero real dates) — saving and rendering that
+// chrome as the "calendar" is the junk-link bug. Validate content before we
+// store or render anything.
+// ---------------------------------------------------------------------------
+
+export interface CalendarValidation {
+  /** The page genuinely looks like a school calendar. */
+  looksLikeCalendar: boolean;
+  /** Events came from an advertised ICS feed. */
+  viaFeed: boolean;
+  /** The underlying parse result (for status notes). */
+  result: ParsedPage<DigitalCalendarEvent[]>;
+  /** Real, non-template events found on the page. */
+  realEventCount: number;
+  /** Plain-English reason when the page is not a calendar. */
+  message: string | null;
+}
+
+/**
+ * Decide whether a fetched page is really a school calendar:
+ * 1. an advertised ICS feed with events, or
+ * 2. at least one real (non-template-code) parsed event.
+ * Anything else is rejected with a plain-English reason — a homepage link
+ * farm, a JavaScript app shell, or a page with no date/event structure at
+ * all. Never fabricates; never passes chrome off as a calendar.
+ */
+export async function validateCalendarContent(
+  html: string,
+  url: string,
+): Promise<CalendarValidation> {
+  const { result, viaFeed } = await parseCalendarSource(html, url);
+  const data = result.ok && Array.isArray(result.data) ? result.data : [];
+  const { rows } = cleanCalendarRows(data, url);
+  if (rows.length > 0) {
+    return {
+      looksLikeCalendar: true,
+      viaFeed,
+      result,
+      realEventCount: rows.length,
+      message: null,
+    };
+  }
+  if (!pageLooksLikeCalendar(html)) {
+    return {
+      looksLikeCalendar: false,
+      viaFeed,
+      result,
+      realEventCount: 0,
+      message: NOT_A_CALENDAR_MESSAGE,
+    };
+  }
+  if (hasClientRenderMarkers(html)) {
+    return {
+      looksLikeCalendar: false,
+      viaFeed,
+      result,
+      realEventCount: 0,
+      message:
+        "This calendar loads its events with JavaScript, so we couldn't read them yet. Upload a photo or PDF of the printed calendar instead.",
+    };
+  }
+  return {
+    looksLikeCalendar: false,
+    viaFeed,
+    result,
+    realEventCount: 0,
+    message:
+      "We couldn't find any dates or events on that page. Check that the link opens the school's calendar — not a news page or the homepage — and try again.",
   };
 }
