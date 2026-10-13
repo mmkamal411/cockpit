@@ -190,16 +190,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: ensured.message }, { status: 503 });
   }
 
-  // Self-heal: a pilot row must exist or the thread insert fails its FK.
-  // The auth callback normally upserts it, but sign-ins that skipped the
-  // callback (or a deleted row) left pilots with permanently broken chat:
-  // "Couldn't open a conversation" on every retry. Idempotent.
-  try {
-    await supabase.from("pilots").upsert({ id: pilotId }, { onConflict: "id" });
-  } catch {
-    /* worst case the thread insert fails as before — never block chat on this */
-  }
-
   try {
     // 1. Resolve the thread (RLS keeps every query pilot-scoped).
     let threadId = typeof body?.thread_id === "string" ? body.thread_id : null;

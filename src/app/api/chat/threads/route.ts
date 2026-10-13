@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { ensurePilot } from "@/lib/auth/ensure-pilot";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ async function requirePilot() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
-  return { supabase, pilotId: user.id };
+  return { supabase, pilotId: user.id, email: user.email ?? null };
 }
 
 interface ThreadRow {
@@ -64,13 +65,10 @@ export async function POST(req: Request) {
   if (!auth) return NextResponse.json(UNAUTH, { status: 401 });
   // Self-heal the pilot row (same reasoning as POST /api/chat): without it
   // the thread insert fails its FK and "new conversation" is permanently
-  // broken for that pilot.
-  try {
-    await auth.supabase
-      .from("pilots")
-      .upsert({ id: auth.pilotId }, { onConflict: "id" });
-  } catch {
-    /* worst case the insert below fails as before */
+  // broken for that pilot. LOUD on failure — never a silent 500 loop.
+  const ensured = await ensurePilot(auth.supabase, auth.pilotId, auth.email);
+  if (!ensured.ok) {
+    return NextResponse.json({ error: ensured.message }, { status: 503 });
   }
   try {
     let title: string | null = null;

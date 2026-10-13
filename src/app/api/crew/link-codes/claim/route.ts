@@ -6,15 +6,11 @@ interface ClaimBody {
   code?: unknown;
 }
 
-interface ClaimResult {
+interface RedeemResult {
   ok?: unknown;
-  member?: {
-    id?: string;
-    name?: string;
-    relationship?: string | null;
-    birthdate?: string | null;
-  } | null;
-  already_owner?: unknown;
+  crew_member_id?: unknown;
+  already?: unknown;
+  reason?: unknown;
 }
 
 /**
@@ -23,9 +19,9 @@ interface ClaimResult {
  *
  * This is the CHILD's half of the link-code flow: the steward mints the
  * code from a crew member's profile, the family member enters it here, and
- * the server (via the claim_link_code definer RPC) burns the code and
- * creates a steward-authored access grant. The caller can never insert a
- * grant under their own RLS, so the RPC does it.
+ * the server (via the redeem_link_code definer RPC, migration 036) burns
+ * the code and creates the child's own access grant. The caller can never
+ * insert a grant under their own RLS, so the RPC does it.
  *
  * Every failure is plain English with a next step — never a raw 500.
  */
@@ -51,13 +47,13 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("claim_link_code", { p_code: digits });
+  const { data, error } = await supabase.rpc("redeem_link_code", { p_code: digits });
 
   if (error) {
     console.error(
       JSON.stringify({
         route: "POST /api/crew/link-codes/claim",
-        operation: "rpc claim_link_code",
+        operation: "rpc redeem_link_code",
         error: error.message,
       }),
     );
@@ -67,9 +63,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = (data ?? {}) as ClaimResult;
+  const result = (data ?? {}) as RedeemResult;
   if (result.ok !== true) {
-    if (result.already_owner === true) {
+    if (result.reason === "already_steward") {
       return NextResponse.json(
         {
           error:
@@ -87,5 +83,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({ member: result.member ?? null }, { status: 200 });
+  const crewMemberId =
+    typeof result.crew_member_id === "string" ? result.crew_member_id : null;
+  return NextResponse.json(
+    { member: crewMemberId ? { id: crewMemberId } : null },
+    { status: 200 },
+  );
 }

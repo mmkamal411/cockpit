@@ -7,20 +7,22 @@
 -- bills, crew_members, health_*, calendar_connections, shopping_*,
 -- subscriptions, nudges, cockpit_layouts, pilot_integrations and
 -- nudge_preferences all carry `pilot_id references public.pilots(id)`.
--- The ONLY writer of pilots rows is the auth callback's upsert, wrapped in
--- a try/catch that swallows every failure silently. When that upsert fails
+-- The ONLY writer of pilots rows was the auth callback's upsert, wrapped in
+-- a try/catch that swallowed every failure silently. When that upsert failed
 -- (deploy skew vs a migration, a transient error, any reason at all), the
--- pilot is left with an auth.users row but NO pilots row, and EVERY later
--- insert FK-fails: chat thread creation dies ("Couldn't open a
--- conversation"), todos/bills/health inserts die, crew member creation dies.
--- The RLS insert policy itself (pilots_insert_own, 001) is fine — the
--- fragility is having a single, silent, app-side writer.
+-- pilot was left with an auth.users row but NO pilots row, and EVERY later
+-- insert FK-failed: chat thread creation died ("Couldn't open a
+-- conversation"), todos/bills/health inserts died, crew member creation died,
+-- and a grantee whose row was missing broke the steward's
+-- crew_access_grants insert (grantee_pilot_id FK), hiding classes.
 --
 -- This migration moves pilots-row creation into the database where it
 -- cannot be skipped or swallowed:
---   1. handle_new_pilot() trigger on auth.users (AFTER INSERT) — every new
---      signup gets a pilots row automatically, idempotent, RLS-independent
---      (SECURITY DEFINER runs as postgres).
+--   1. handle_new_auth_user() trigger on auth.users (AFTER INSERT) —
+--      every new signup gets a pilots row automatically, idempotent,
+--      RLS-independent (SECURITY DEFINER runs as postgres). On conflict it
+--      only backfills the email when the row exists without one — never
+--      overwrites an email the callback already set.
 --   2. One-time backfill for auth.users rows that already exist without a
 --      pilots row (pilots who signed up while the callback was the only
 --      writer). REVIEW NOTE: this is the only statement in this file that
@@ -28,40 +30,51 @@
 --   3. Idempotent guard re-creating 001's pilots RLS policies if the live
 --      DB ever drifted from the repo (insert/update/select/delete own).
 --
--- The auth callback's upsert stays as-is (harmless duplicate path, keeps
--- the email backfill + share-claim behavior); the trigger is the guarantee.
+-- The auth callback's upsert stays as the email-backfill + share-claim
+-- path; the trigger is the guarantee. App-side ensurePilot() (lazy path
+-- in the chat routes) is the belt-and-braces repair for pre-trigger users.
 --
 -- RUN: paste into the Supabase dashboard SQL editor (project: cockpit).
 -- Idempotent: safe to re-run.
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
--- 1. Trigger: every new auth.users row gets a pilots row.
+-- 1. Trigger: every new auth.users row gets a pilots row. SECURITY DEFINER
+--    as the dashboard's postgres superuser, so it bypasses RLS on
+--    public.pilots even though that table has FORCE ROW LEVEL SECURITY.
+--    It can only ever insert the NEW user's OWN id (taken from NEW, not
+--    from any caller), so there is no privilege escalation: no caller
+--    input reaches the insert.
 -- ---------------------------------------------------------------------------
-create or replace function public.handle_new_pilot()
+create or replace function public.handle_new_auth_user()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
 as $$
 begin
-  insert into public.pilots (id, email, created_at)
-  values (new.id, nullif(new.email, ''), now())
+  insert into public.pilots (id, email)
+  values (NEW.id, nullif(lower(NEW.email), ''))
   on conflict (id) do update
-    -- Never clobber an email the callback already backfilled; only fill
-    -- the gap when the row somehow exists without one.
-    set email = coalesce(public.pilots.email, excluded.email);
-  return new;
+    -- Repair path: a pre-trigger row created without an email (e.g. the old
+    -- callback upsert ran before 017 added the column) gets it backfilled.
+    -- Never overwrites an existing email.
+    set email = excluded.email
+    where public.pilots.email is null
+      and excluded.email is not null;
+  return NEW;
 end;
 $$;
 
-comment on function public.handle_new_pilot() is
-  'Auth trigger: creates the pilots row for every new signup (idempotent). The database — not the app callback — is the authoritative pilots-row writer.';
+comment on function public.handle_new_auth_user() is
+  'Signup trigger (034): every new auth.users row gets a matching public.pilots row. SECURITY DEFINER as postgres bypasses pilots RLS; inserts only NEW.id, so no privilege escalation.';
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
+drop trigger if exists trg_provision_pilot_on_signup on auth.users;
+
+create trigger trg_provision_pilot_on_signup
   after insert on auth.users
-  for each row execute function public.handle_new_pilot();
+  for each row
+  execute function public.handle_new_auth_user();
 
 -- ---------------------------------------------------------------------------
 -- 2. Backfill: pilots rows for signups that predate the trigger.
@@ -70,7 +83,7 @@ create trigger on_auth_user_created
 --    modified. Safe to skip if you prefer a strict schema-only run.
 -- ---------------------------------------------------------------------------
 insert into public.pilots (id, email, created_at)
-select u.id, nullif(u.email, ''), coalesce(u.created_at, now())
+select u.id, nullif(lower(u.email), ''), coalesce(u.created_at, now())
 from auth.users u
 where not exists (
   select 1 from public.pilots p where p.id = u.id
@@ -120,3 +133,21 @@ begin
       for delete using (auth.uid() = id);
   end if;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- VERIFY (second query after running):
+--
+-- -- Trigger exists on auth.users:
+-- select tgname from pg_trigger
+-- where tgrelid = 'auth.users'::regclass and not tgisinternal;
+-- -- expect: trg_provision_pilot_on_signup
+--
+-- -- Backfill check for pre-trigger users (read-only): every auth user
+-- -- should have a pilots row. Rows listed here are healed automatically
+-- -- the next time that user signs in (the /auth/callback upsert retries),
+-- -- or by the app's ensurePilot() lazy path on the next chat message.
+-- select u.id, u.email
+-- from auth.users u
+-- left join public.pilots p on p.id = u.id
+-- where p.id is null;
+-- =============================================================================
