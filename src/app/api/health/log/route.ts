@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePilot, serverError } from "@/lib/api-auth";
 
-const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab"] as const;
+const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab", "steps"] as const;
 type Metric = (typeof METRICS)[number];
 
 /** Sanity bounds per metric (value is in the posted unit). Plain-English rejections. */
@@ -12,6 +12,7 @@ const BOUNDS: Record<Metric, { min: number; max: number; what: string }> = {
   exercise: { min: 0, max: 1440, what: "exercise minutes" },
   blood_glucose: { min: 20, max: 1000, what: "blood sugar reading" },
   a1c_lab: { min: 3, max: 20, what: "A1C value" },
+  steps: { min: 0, max: 100000, what: "step count" },
 };
 
 /** Allowed context tags for a blood glucose reading. */
@@ -23,6 +24,7 @@ const GLUCOSE_CONTEXTS = ["fasting", "before_meal", "after_meal", "bedtime", "ot
  * Weight upserts same-day (latest wins); others append.
  * blood_glucose meta: { context: fasting|before_meal|after_meal|bedtime|other }
  * a1c_lab meta: { lab_name? }
+ * steps: append only — multiple entries per day accumulate into the day's total.
  */
 export async function POST(req: Request) {
   const auth = await requirePilot();
@@ -34,7 +36,7 @@ export async function POST(req: Request) {
     const metric = body.metric as Metric;
     if (!METRICS.includes(metric)) {
       return NextResponse.json(
-        { error: "Pick weight, sleep, water, exercise, blood sugar, or lab A1C." },
+        { error: "Pick weight, sleep, water, exercise, steps, blood sugar, or lab A1C." },
         { status: 400 },
       );
     }
@@ -56,6 +58,7 @@ export async function POST(req: Request) {
       : metric === "water" ? "glasses"
       : metric === "blood_glucose" ? "mg/dL"
       : metric === "a1c_lab" ? "%"
+      : metric === "steps" ? "steps"
       : "min";
     const meta = body.meta && typeof body.meta === "object" ? body.meta : {};
 

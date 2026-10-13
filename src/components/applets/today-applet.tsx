@@ -28,7 +28,7 @@ export function TodayApplet() {
   const [briefingAuthExpired, setBriefingAuthExpired] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
 
-  const { todos, loading, addTodo, toggleTodo, deleteTodo } = useTodos();
+  const { todos, loading, syncError, retrySync, addTodo, toggleTodo, deleteTodo } = useTodos();
   const [draft, setDraft] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
 

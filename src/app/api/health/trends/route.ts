@@ -8,6 +8,8 @@ const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_l
  * Daily points, 7-day rolling average, and delta vs the prior period.
  * For blood_glucose, also returns individual readings (with context tags)
  * so the chart can show each reading against the reference bands.
+ * For steps, each daily point is the SUM of that day's entries (entries
+ * accumulate), not an average.
  * Plain numbers only — no interpretation, no advice.
  */
 export async function GET(req: Request) {

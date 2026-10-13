@@ -6,7 +6,11 @@ import { LandingHero } from "@/components/landing-hero";
 export const dynamic = "force-dynamic";
 
 /** Public landing. Signed-in pilots go straight to their bridge. */
-export default async function LandingPage() {
+export default async function LandingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cal?: string }>;
+}) {
   let user = null;
   try {
     const supabase = await createClient();
@@ -22,7 +26,10 @@ export default async function LandingPage() {
       timestamp: new Date().toISOString(),
     }));
   }
-  if (user) redirect("/home");
+  // Carry the calendar connect result (e.g. ?cal=connected) into the app
+  // so the calendar applet can show a friendly confirmation notice.
+  const { cal } = await searchParams;
+  if (user) redirect(cal ? `/home?cal=${encodeURIComponent(cal)}` : "/home");
 
   return <LandingHero />;
 }

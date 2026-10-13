@@ -1,21 +1,19 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { planetaryVista } from "./vista-sources";
+import { useEffect, useRef, useState } from "react";
+import { pickRotationVideo } from "./vista-sources";
 
 /**
- * HeroVista — the opening viewport. Fills its positioned parent with the
- * live planetary vista behind the glass pane, chosen by daypart
- * (dawn / day / dusk / night). Greeting + date float over the frame —
+ * HeroVista — the opening viewport. Fills its positioned parent with a
+ * random background vista on every page load, looping seamlessly until
+ * the next refresh. Greeting + date float over the frame —
  * calm, not a wall of cards.
  */
 export function HeroVista({ pilotName }: { pilotName: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-
-  const now = new Date();
-  const vista = planetaryVista(now.getHours());
-  const src = vista.src;
-  const poster = vista.poster;
+  // Pick once per mount — random video per page load, stable across re-renders.
+  const [src] = useState(() => pickRotationVideo());
+  const poster = src.replace(/\.mp4$/, "-poster.jpg");
 
   useEffect(() => {
     const v = videoRef.current;

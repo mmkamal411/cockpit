@@ -30,6 +30,9 @@ export interface TodoItem {
 export interface UseTodos {
   todos: TodoItem[];
   loading: boolean;
+  /** Plain-English reason the last cloud sync failed; null when sync is healthy. */
+  syncError: string | null;
+  retrySync: () => Promise<void>;
   addTodo(text: string, opts?: Partial<TodoItem>): Promise<TodoItem>;
   toggleTodo(id: string): Promise<void>;
   updateTodo(id: string, patch: Partial<TodoItem>): Promise<void>;
@@ -136,6 +139,7 @@ export function useTodos(): UseTodos {
     readLocal<unknown[]>(TODOS_KEY, []).map(normalizeItem),
   );
   const [loading, setLoading] = useState(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const todosRef = useRef(todos);
   const signedInRef = useRef<boolean | null>(null);
@@ -197,8 +201,25 @@ export function useTodos(): UseTodos {
           signedInRef.current = false;
           break;
         }
-        // A 404 on update/delete means the row is already gone server-side.
-        if (!res.ok && !(res.status === 404 && op.kind !== "add")) break;
+        if (res.status === 404 && op.kind !== "add") {
+          // Row already gone server-side — the update/delete had its effect.
+          queue = queue.slice(1);
+          writeQueue(queue);
+          continue;
+        }
+        if (res.status === 400) {
+          // Malformed op — it will never succeed, so drop it and keep going.
+          queue = queue.slice(1);
+          writeQueue(queue);
+          continue;
+        }
+        if (!res.ok) {
+          setSyncError(
+            "Your to-dos aren't syncing to the cloud right now. " +
+              "Everything is still saved on this device and will sync on its own once the connection is back.",
+          );
+          break;
+        }
         if (op.kind === "add" && res.ok) {
           try {
             const row = (await res.json()) as { id?: string };
@@ -210,6 +231,7 @@ export function useTodos(): UseTodos {
         queue = queue.slice(1);
         writeQueue(queue);
       }
+      if (queue.length === 0) setSyncError(null);
     } finally {
       flushingRef.current = false;
     }
@@ -267,7 +289,7 @@ export function useTodos(): UseTodos {
             if (!cancelled) persist([...posted, ...remaining]);
           } else {
             // Dedupe: queued adds that already exist server-side are done.
-            let queue = readQueue();
+            const queue = readQueue();
             const createdById = new Map(
               todosRef.current.map((t) => [t.id, t.createdAt] as const),
             );
@@ -287,6 +309,11 @@ export function useTodos(): UseTodos {
             if (!cancelled) persist(serverItems);
           }
           await flush();
+        } else {
+          setSyncError(
+            "Couldn't reach your cloud list. Showing what's saved on this device — " +
+              "it will reconnect on its own.",
+          );
         }
       } catch {
         // Offline or unreachable — the local list stays on screen.
@@ -355,5 +382,11 @@ export function useTodos(): UseTodos {
     [persist, enqueue],
   );
 
-  return { todos, loading, addTodo, toggleTodo, updateTodo, deleteTodo };
+  /** Manual retry of the background sync — clears the error when it succeeds. */
+  const retrySync = useCallback(async () => {
+    setSyncError(null);
+    await flush();
+  }, [flush]);
+
+  return { todos, loading, syncError, retrySync, addTodo, toggleTodo, updateTodo, deleteTodo };
 }

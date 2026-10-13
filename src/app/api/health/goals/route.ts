@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePilot, serverError } from "@/lib/api-auth";
 
-const METRICS = ["weight", "sleep", "water", "exercise"];
+const METRICS = ["weight", "sleep", "water", "exercise", "steps"];
 
 /**
  * GET /api/health/goals — the pilot's active goals per metric.
@@ -37,7 +37,7 @@ export async function PUT(req: Request) {
     const metric = body.metric;
     if (!METRICS.includes(metric)) {
       return NextResponse.json(
-        { error: "Pick weight, sleep, water, or exercise." },
+        { error: "Pick weight, sleep, water, exercise, or steps." },
         { status: 400 },
       );
     }
@@ -47,6 +47,7 @@ export async function PUT(req: Request) {
     }
     const unit = typeof body.unit === "string" && body.unit.trim()
       ? body.unit.trim().slice(0, 12)
+      : metric === "steps" ? "steps"
       : "lb";
 
     const { data, error } = await supabase
