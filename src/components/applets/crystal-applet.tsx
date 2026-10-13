@@ -10,19 +10,6 @@ import {
 } from "@/lib/chat/mode";
 import { parseSSEFrame } from "@/lib/chat/sse";
 
-const TUTOR_URL = (
-  process.env.NEXT_PUBLIC_CRYSTAL_URL ||
-  process.env.NEXT_PUBLIC_POOKIE_TUTOR_URL ||
-  ""
-).replace(/\/$/, "");
-
-/**
- * Server API path (POST /api/chat) — the browser stops calling the worker
- * directly (spec §5). Flag-gated: the client-direct path stays the default
- * until /api/chat is verified working end-to-end.
- */
-const SERVER_MODE = process.env.NEXT_PUBLIC_CHAT_SERVER_API === "1";
-
 interface ChatMessage {
   role: "user" | "assistant";
   text: string;
@@ -45,6 +32,25 @@ const SUGGESTIONS = [
   "Help me plan my week",
   "Remind me to drink water",
 ];
+
+/**
+ * Every error the pilot sees is plain English (grandmother test). The
+ * server (/api/chat) always answers failures with a plain-English
+ * `{ error }` body; this is the fallback when we can't even reach it.
+ */
+const FALLBACK_ERROR =
+  "I went quiet for a moment — check your connection and try again. I'm still here.";
+
+/** Pull the server's plain-English error out of a failed /api/chat response. */
+async function readServerError(res: Response): Promise<string> {
+  try {
+    const data = (await res.json()) as { error?: unknown };
+    if (typeof data.error === "string" && data.error.trim()) return data.error.trim();
+  } catch {
+    /* not JSON — fall through to the fallback */
+  }
+  return FALLBACK_ERROR;
+}
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -93,7 +99,6 @@ export function CrystalApplet() {
   const [messages, setMessages] = useState<ChatMessage[]>([greetingMessage()]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [voiceDown, setVoiceDown] = useState(!TUTOR_URL && !SERVER_MODE);
   /** Sticky mode — keyword flips persist until the pilot flips back. */
   const [mode, setMode] = useState<Persona>("crystal");
   /** Thread persistence (server mode only). */
@@ -109,9 +114,8 @@ export function CrystalApplet() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, sending]);
 
-  // Load today's thread on open (server mode).
+  // Load today's thread on open.
   useEffect(() => {
-    if (!SERVER_MODE) return;
     let cancelled = false;
     (async () => {
       const list = await fetchThreads();
@@ -140,33 +144,32 @@ export function CrystalApplet() {
     const flipped = persona !== mode;
     if (flipped) {
       setMode(persona);
-      if (SERVER_MODE) {
-        fetch("/api/chat/mode", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: persona }),
-        }).catch(() => {});
-      }
+      fetch("/api/chat/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: persona }),
+      }).catch(() => {});
     }
-    // UI shows what the pilot typed; the worker gets the directive stripped.
+    // UI shows what the pilot typed; the server gets the directive stripped.
     const userMsg: ChatMessage = { role: "user", text: clean };
     const history = [...messages, userMsg];
-    const workerHistory = [...messages, { ...userMsg, text: outbound }];
     setMessages(flipped ? [...history, flipNote(persona)] : history);
 
     try {
-      if (SERVER_MODE) {
-        await sendViaServer(persona, outbound);
-      } else {
-        await sendDirect(workerHistory, persona);
-      }
+      await sendViaServer(persona, outbound);
+    } catch (err) {
+      // No blank screen, no dead end: surface the plain-English error
+      // as Crystal's reply so the pilot always knows what happened.
+      const text = err instanceof Error && err.message ? err.message : FALLBACK_ERROR;
+      setMessages((prev) => [...prev, { role: "assistant", text, persona }]);
     } finally {
       setSending(false);
     }
   }
 
   /** Server path: POST /api/chat — context assembled server-side, thread
-   *  persisted, reply streamed back over SSE (spec §3). */
+   *  persisted, reply streamed back over SSE (spec §3). The browser never
+   *  calls the worker directly; the server attaches the shared secret. */
   async function sendViaServer(persona: Persona, outbound: string) {
     let res: Response;
     try {
@@ -181,9 +184,10 @@ export function CrystalApplet() {
         }),
       });
     } catch {
-      throw new Error("chat unreachable");
+      throw new Error(FALLBACK_ERROR);
     }
-    if (!res.ok || !res.body) throw new Error(`chat ${res.status}`);
+    if (!res.ok) throw new Error(await readServerError(res));
+    if (!res.body) throw new Error(FALLBACK_ERROR);
     // Placeholder bubble that fills in as SSE chunks arrive.
     setMessages((prev) => [...prev, { role: "assistant", text: "", persona }]);
     try {
@@ -231,55 +235,18 @@ export function CrystalApplet() {
           }
         }
       }
-      if (!fullText.trim()) throw new Error("empty stream");
+      if (!fullText.trim()) throw new Error(FALLBACK_ERROR);
       void fetchThreads();
-    } catch {
-      // Stream broke mid-flight: drop the placeholder and fall back to the
-      // direct worker path so chat never breaks.
+    } catch (err) {
+      // Stream broke mid-flight: drop the placeholder and surface the
+      // plain-English error. No silent fallback to any direct path.
       setMessages((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
         if (last && last.role === "assistant" && !last.text) next.pop();
         return next;
       });
-      const workerHistory = [...messages, { role: "user" as const, text: outbound }];
-      await sendDirect(workerHistory, persona);
-    }
-  }
-
-  /** Direct browser → worker path (legacy; stays until /api/chat is verified). */
-  async function sendDirect(
-    workerHistory: ChatMessage[],
-    persona: Persona,
-  ) {
-    if (!TUTOR_URL) {
-      setVoiceDown(true);
-      return;
-    }
-    try {
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), 30000);
-      const res = await fetch(`${TUTOR_URL}/chat`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: workerHistory.slice(-20).map((m) => ({ role: m.role, text: m.text })),
-          context: { pilot: true },
-          mode: persona,
-        }),
-      });
-      window.clearTimeout(timer);
-      if (!res.ok) throw new Error(`tutor ${res.status}`);
-      const data = (await res.json()) as { reply?: unknown };
-      const reply = typeof data.reply === "string" && data.reply.trim() ? data.reply.trim() : "";
-      if (!reply) throw new Error("empty reply");
-      setMessages((prev) => [...prev, { role: "assistant", text: reply, persona }]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: "I went quiet for a moment — check your connection and try again. I'm still here.", persona },
-      ]);
+      throw err instanceof Error ? err : new Error(FALLBACK_ERROR);
     }
   }
 
@@ -387,23 +354,21 @@ export function CrystalApplet() {
 
   return (
     <div className="flex min-h-[320px] flex-col">
-      {SERVER_MODE && (
-        <div className="mb-2 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setDrawerOpen((v) => !v);
-              if (!drawerOpen) void fetchThreads();
-            }}
-            aria-expanded={drawerOpen}
-            className="rounded-full border border-line bg-panel-2/60 px-3 py-1 text-xs text-stardust transition-colors hover:border-neon-teal/40 hover:text-star"
-          >
-            {drawerOpen ? "Close conversations" : "Conversations"}
-          </button>
-        </div>
-      )}
+      <div className="mb-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setDrawerOpen((v) => !v);
+            if (!drawerOpen) void fetchThreads();
+          }}
+          aria-expanded={drawerOpen}
+          className="rounded-full border border-line bg-panel-2/60 px-3 py-1 text-xs text-stardust transition-colors hover:border-neon-teal/40 hover:text-star"
+        >
+          {drawerOpen ? "Close conversations" : "Conversations"}
+        </button>
+      </div>
 
-      {SERVER_MODE && drawerOpen && (
+      {drawerOpen && (
         <div className="mb-3 rounded-xl border border-line bg-panel-2/50 p-3">
           <div className="mb-2 flex gap-2">
             <input
@@ -507,12 +472,6 @@ export function CrystalApplet() {
               </span>
             </div>
           </div>
-        )}
-        {voiceDown && !sending && messages.length > 1 && (
-          <p className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-2.5 text-xs leading-relaxed text-stardust">
-            Crystal&apos;s voice isn&apos;t connected on this build yet — your words are safe here,
-            and the full co-pilot is being wired up.
-          </p>
         )}
         <div ref={bottomRef} />
       </div>

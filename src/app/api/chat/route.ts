@@ -11,7 +11,11 @@ export const dynamic = "force-dynamic";
  *
  * Assembles the context bundle, calls the crystal worker, persists both
  * messages to the thread, and returns the reply. The browser never calls
- * the worker directly through this path (spec §5).
+ * the worker directly (spec §5).
+ *
+ * Worker auth (Phase 0): the worker requires a shared secret on every
+ * request. This route attaches `Authorization: Bearer <CRYSTAL_WORKER_SECRET>`
+ * from the server-side env. The secret is NEVER exposed to the browser.
  */
 
 type Persona = "crystal" | "fireball";
@@ -24,6 +28,9 @@ const CRYSTAL_URL = (
   process.env.NEXT_PUBLIC_POOKIE_TUTOR_URL ||
   "https://crystal.mehedikamal.workers.dev"
 ).replace(/\/$/, "");
+
+/** Shared secret for the crystal worker (server-side only — never NEXT_PUBLIC). */
+const CRYSTAL_SECRET = process.env.CRYSTAL_WORKER_SECRET ?? "";
 
 const MAX_MESSAGE = 4000;
 const WORKER_TIMEOUT_MS = 30000;
@@ -88,21 +95,35 @@ async function createThread(
 
 class WorkerDown extends Error {}
 
+/** The worker denied the request (bad/missing shared secret) — a setup
+ *  problem, not a chat problem. Surfaced to the pilot in plain English. */
+class WorkerMisconfigured extends WorkerDown {}
+
 async function callWorker(
   messages: { role: string; text: string }[],
   context: ChatContextBundle,
   mode: Persona,
 ): Promise<string> {
+  if (!CRYSTAL_SECRET) {
+    // Fail closed: never call the worker without the secret.
+    throw new WorkerMisconfigured("CRYSTAL_WORKER_SECRET is not set");
+  }
   let res: Response;
   try {
     res = await fetch(`${CRYSTAL_URL}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${CRYSTAL_SECRET}`,
+      },
       signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
       body: JSON.stringify({ messages, context, mode }),
     });
   } catch {
     throw new WorkerDown("worker unreachable");
+  }
+  if (res.status === 401) {
+    throw new WorkerMisconfigured("worker rejected the shared secret (401)");
   }
   if (!res.ok) throw new WorkerDown(`worker ${res.status}`);
   const data = (await res.json().catch(() => null)) as { reply?: unknown } | null;
@@ -215,6 +236,15 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ reply, thread_id: threadId, mode });
   } catch (err) {
+    if (err instanceof WorkerMisconfigured) {
+      return NextResponse.json(
+        {
+          error:
+            "I can't reach my voice service right now — the app setup is missing a key. The team has been notified.",
+        },
+        { status: 502 },
+      );
+    }
     if (err instanceof WorkerDown) {
       return NextResponse.json(
         {
