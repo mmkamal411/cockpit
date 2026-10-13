@@ -40,7 +40,8 @@ export async function isAdminInDb(email: string): Promise<boolean> {
 
 /**
  * Guard for admin route handlers (App Router). Resolves the caller from the
- * session cookie and checks the ADMIN_EMAILS allowlist.
+ * session cookie and checks BOTH admin layers: the ADMIN_EMAILS env allowlist
+ * and the admin_users table (via the is_admin RPC). Either layer grants access.
  *
  * Returns the admin's email on success. Throws a 403 Response on failure.
  * Handlers should catch it and return it:
@@ -61,7 +62,19 @@ export async function requireAdmin(request?: Request): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
   const email = data?.user?.email ?? null;
 
-  if (error || !email || !isAdminEmail(email)) {
+  if (error || !email) {
+    throw new Response(JSON.stringify({ error: "Forbidden" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Either layer grants access: the ADMIN_EMAILS env allowlist OR the
+  // admin_users table (via the is_admin RPC). Env is checked first (no DB
+  // round-trip); the table lets founders manage admins without redeploys.
+  const allowed =
+    isAdminEmail(email) || (await isAdminInDb(email));
+  if (!allowed) {
     throw new Response(JSON.stringify({ error: "Forbidden" }), {
       status: 403,
       headers: { "Content-Type": "application/json" },
