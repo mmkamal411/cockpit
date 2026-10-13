@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { ensurePilot } from "@/lib/auth/ensure-pilot";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ async function requirePilot() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
-  return { supabase, pilotId: user.id };
+  return { supabase, pilotId: user.id, email: user.email ?? null };
 }
 
 export async function POST(req: Request) {
@@ -27,6 +28,13 @@ export async function POST(req: Request) {
     /* default: crystal */
   }
   try {
+    // pilots.default_mode lives on the pilots row — make sure it exists
+    // first, otherwise the update below would silently affect zero rows
+    // and report success. LOUD on failure.
+    const ensured = await ensurePilot(auth.supabase, auth.pilotId, auth.email);
+    if (!ensured.ok) {
+      return NextResponse.json({ error: ensured.message }, { status: 503 });
+    }
     const { error } = await auth.supabase
       .from("pilots")
       .update({ default_mode: mode })

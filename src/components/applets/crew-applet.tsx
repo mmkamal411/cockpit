@@ -14,6 +14,7 @@ import {
   SourceCheckRow,
   SourceFallbackUpload,
   Spinner,
+  applyIntakeResults,
   normalizeBellPeriods,
   normalizeCalendarSummary,
   runSourceIntake,
@@ -31,6 +32,11 @@ interface CrewMemberRow {
   birthdate: string | null;
   relationship: string;
   created_at: string;
+  /** True when this profile is linked to the pilot through someone else's
+   *  live access grant (e.g. a child who claimed a steward's link code).
+   *  Steward-only controls (school logins, remove, share codes) are hidden
+   *  for these — the steward manages them. */
+  via_grant?: boolean;
   school_sync?: {
     sync_status: string;
     last_synced_at: string | null;
@@ -165,6 +171,11 @@ function needsAttention(m: CrewMemberRow): boolean {
 /** Plain-English sync status for the roster. */
 function syncStatusText(m: CrewMemberRow): { text: string; tone: "ok" | "warn" | "idle" } {
   const s = m.school_sync;
+  // Linked profiles: the steward's sync status isn't visible to the grantee
+  // under RLS — say exactly that instead of "Not connected yet" (a lie).
+  if (m.via_grant) {
+    return { text: "Linked to your cockpit", tone: "ok" };
+  }
   if (!s || !s.last_synced_at) {
     return { text: "Not connected yet", tone: "idle" };
   }
@@ -241,6 +252,9 @@ export function CrewApplet() {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesSyncedAt, setClassesSyncedAt] = useState<string | null>(null);
   const [classesMessage, setClassesMessage] = useState("");
+  // True when the last classes load failed (not just "no data yet") — drives
+  // the retry button. A failed load and an empty sync are different stories.
+  const [classesLoadFailed, setClassesLoadFailed] = useState(false);
   // Grade freshness from the same sync row.
   const [classesStale, setClassesStale] = useState(false);
   const [classesHours, setClassesHours] = useState<number | null>(null);
@@ -260,6 +274,11 @@ export function CrewApplet() {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
+  // Link-code claim (the child's half): enter a 6-digit code minted by a
+  // steward to link their crew profile to this pilot.
+  const [claimCode, setClaimCode] = useState("");
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimMessage, setClaimMessage] = useState<{ ok: boolean; text: string } | null>(null);
   // Class detail drill-down: when set, shows one class's full page.
   const [selectedClassName, setSelectedClassName] = useState<string | null>(null);
   // School calendar + bell schedules (member detail view).
@@ -477,6 +496,34 @@ export function CrewApplet() {
     return items;
   }
 
+  /**
+   * Intake items for the SAVED links — what Refresh actually re-checks.
+   * Keys mirror the editor's ("calendar", "bell-<n>") so the per-source
+   * checks land on the same rows the fallback gates watch.
+   */
+  function buildSavedIntakeItems(): IntakeItem[] {
+    const items: IntakeItem[] = [];
+    const calUrl = srcSources?.calendar_source_url?.trim();
+    if (calUrl)
+      items.push({
+        key: "calendar",
+        kind: "calendar",
+        label: "Calendar link",
+        url: calUrl,
+      });
+    (srcSources?.bell_schedules ?? []).forEach((b, i) => {
+      const url = b.url.trim();
+      if (url)
+        items.push({
+          key: `bell-${i}`,
+          kind: "bell",
+          label: b.label.trim() || "Schedule",
+          url,
+        });
+    });
+    return items;
+  }
+
   /** Fresh "verifying" checks for an item list. */
   function checksForItems(items: IntakeItem[]): SourceCheck[] {
     return items.map((item) => ({
@@ -545,10 +592,54 @@ export function CrewApplet() {
     }
   }
 
+  /**
+   * Parse-aware snapshot helpers (R3). The pipeline writes snapshot
+   * `status: "ok"` whenever the page fetched, even when the read failed, so
+   * `status` alone can't say whether we got usable data. `parse_status` is
+   * the honest signal: "ok"/"partial" = readable, anything else set (e.g.
+   * "error") = couldn't read, "pending"/null = the read hasn't been
+   * attempted yet (neutral).
+   */
+  function parseSucceededSnapshot(
+    snap: SchoolSourceSnapshot | null | undefined,
+  ): boolean {
+    const ps = snap?.parse_status;
+    return ps === "ok" || ps === "partial";
+  }
+
+  function snapshotFailed(
+    snap: SchoolSourceSnapshot | null | undefined,
+  ): boolean {
+    if (!snap) return false;
+    const ps = snap.parse_status;
+    if (ps === "ok" || ps === "partial") return false;
+    if (ps && ps !== "pending") return true;
+    // "pending"/null: the read hasn't happened — fail only if the fetch
+    // itself failed.
+    return snap.status === "error";
+  }
+
+  /**
+   * Plain-English note for a failed snapshot: the backend's parse_note when
+   * present (already plain-English), else per-kind fallback copy.
+   */
+  function snapshotFailureNote(
+    snap: SchoolSourceSnapshot | null | undefined,
+    kind: "calendar" | "bell",
+  ): string {
+    return (
+      snap?.parse_note ??
+      snap?.error_note ??
+      (kind === "calendar"
+        ? "We couldn't read the calendar page, so there's nothing saved from it yet."
+        : "We couldn't read that bell schedule, so there's nothing saved from it yet.")
+    );
+  }
+
   /** Did the calendar source fail? (stale snapshot or a fresh check error) */
   function calendarSourceFailed(): boolean {
     return Boolean(
-      (srcSnapshots.calendar && srcSnapshots.calendar.status !== "ok") ||
+      snapshotFailed(srcSnapshots.calendar) ||
         srcChecks.some((c) => c.key === "calendar" && c.state === "error"),
     );
   }
@@ -556,8 +647,69 @@ export function CrewApplet() {
   /** Did bell row i fail? (stale snapshot or a fresh check error) */
   function bellSourceFailed(i: number): boolean {
     return Boolean(
-      (srcSnapshots.bells[i] && srcSnapshots.bells[i].status !== "ok") ||
+      snapshotFailed(srcSnapshots.bells[i]) ||
         srcChecks.some((c) => c.key === `bell-${i}` && c.state === "error"),
+    );
+  }
+
+  /**
+   * Status line under the calendar link. A fresh check beats the snapshot:
+   * when the editor has run a check for the calendar link, the line shows
+   * the check's state — never a stale "looks good" next to a fresh failure.
+   */
+  function calendarStatusLine() {
+    const fresh = srcChecks.find((c) => c.key === "calendar");
+    if (fresh && fresh.state !== "saved") {
+      const failed = fresh.state === "error";
+      return (
+        <p className={`mt-1 text-xs ${failed ? "text-neon-amber" : "text-dim"}`}>
+          {failed
+            ? (fresh.message ?? "The calendar link didn't read — try Refresh.")
+            : "Checking the calendar link…"}
+        </p>
+      );
+    }
+    const snap = srcSnapshots.calendar;
+    if (!snap) return null;
+    // A failure and "looks good" can never show for the same source at once:
+    // "looks good" only when the read succeeded; otherwise the honest note.
+    if (snapshotFailed(snap)) {
+      return (
+        <p className="mt-1 text-xs text-neon-amber">
+          Last pull didn&apos;t come through —{" "}
+          {snapshotFailureNote(snap, "calendar")}
+        </p>
+      );
+    }
+    if (parseSucceededSnapshot(snap)) {
+      return (
+        <p className="mt-1 text-xs text-dim">
+          Last pull {timeAgo(snap.fetched_at) ?? "recently"} — looks good.
+        </p>
+      );
+    }
+    // Read not attempted yet and the fetch didn't fail — nothing to report.
+    return null;
+  }
+
+  /**
+   * Bell row i's failure message, from the freshest source: a fresh check
+   * error first, then the snapshot's error note. Renders nothing when the
+   * row has no failure from either source.
+   */
+  function bellRowStatus(i: number, label: string) {
+    const fresh = srcChecks.find((c) => c.key === `bell-${i}`);
+    const freshFailed = fresh?.state === "error";
+    const snap = srcSnapshots.bells[i];
+    const snapFailed = snapshotFailed(snap);
+    if (!snapFailed && !freshFailed) return null;
+    const message = freshFailed
+      ? (fresh?.message ?? "We couldn't read that link. Try again.")
+      : `last pull didn't come through — ${snapshotFailureNote(snap, "bell")}`;
+    return (
+      <p className="text-xs text-neon-amber">
+        {label || `Schedule ${i + 1}`}: {message}
+      </p>
     );
   }
 
@@ -816,6 +968,54 @@ export function CrewApplet() {
     }
   }
 
+  /**
+   * Claim a 6-digit same-room link code minted by a steward. On success the
+   * member lands on this pilot's roster (via_grant) and opens in the detail
+   * view — the child is no longer stranded with an empty crew.
+   */
+  async function claimLinkCode() {
+    const digits = claimCode.replace(/[^0-9]/g, "");
+    if (digits.length !== 6) {
+      setClaimMessage({
+        ok: false,
+        text: "Enter the 6-digit code — just the numbers.",
+      });
+      return;
+    }
+    setClaimBusy(true);
+    setClaimMessage(null);
+    try {
+      const res = await fetch("/api/crew/link-codes/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: digits }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setClaimMessage({
+          ok: false,
+          text: json.error ?? "That code didn't work. Try again.",
+        });
+        return;
+      }
+      const member = json.member as { id: string } | null;
+      setClaimCode("");
+      setClaimMessage({
+        ok: true,
+        text: "Linked. Opening their school life…",
+      });
+      await refreshRoster();
+      if (member?.id) openMemberDetail(member.id);
+    } catch {
+      setClaimMessage({
+        ok: false,
+        text: "We couldn't reach the server. Check your connection and try again.",
+      });
+    } finally {
+      setClaimBusy(false);
+    }
+  }
+
   /** Test + save the ParentVUE (parent portal) login. */
   async function submitParentLogin(memberId: string) {
     if (!parentUsername.trim() || !parentPassword) {
@@ -898,6 +1098,7 @@ export function CrewApplet() {
     setSelectedClassName(null);
     setClasses([]);
     setClassesMessage("");
+    setClassesLoadFailed(false);
     setClassesSyncedAt(null);
     setGpa(null);
     setAttendance(null);
@@ -917,6 +1118,7 @@ export function CrewApplet() {
     setSelectedMemberId(null);
     setClasses([]);
     setClassesMessage("");
+    setClassesLoadFailed(false);
     setClassesSyncedAt(null);
     setGpa(null);
     setAttendance(null);
@@ -933,6 +1135,7 @@ export function CrewApplet() {
 
   async function loadMemberClasses(memberId: string) {
     setClassesLoading(true);
+    setClassesLoadFailed(false);
     try {
       const res = await fetch(`/api/crew/members/${memberId}/classes`);
       const json = await res.json();
@@ -946,9 +1149,11 @@ export function CrewApplet() {
         setClassesHours(json.hours_since_sync ?? null);
         if (json.message) setClassesMessage(json.message);
       } else {
+        setClassesLoadFailed(true);
         setClassesMessage("Couldn't load classes right now.");
       }
     } catch {
+      setClassesLoadFailed(true);
       setClassesMessage("Couldn't load classes right now.");
     } finally {
       setClassesLoading(false);
@@ -1204,14 +1409,24 @@ export function CrewApplet() {
     setSrcRetryingKey(check.key);
     // Re-run the FULL payload: the backend replaces bell_schedules wholesale,
     // so a partial retry would wipe the other saved links.
-    const items = buildSrcIntakeItems(
+    const draft = buildSrcIntakeItems(
       check.kind === "upload" ? [check] : undefined,
     );
+    const draftUploads = draft.filter((i) => i.kind === "upload");
+    const draftUrls = draft.filter((i) => i.kind !== "upload");
+    // The editor draft may be empty (e.g. Refresh ran with the editor
+    // closed) — retry the saved links rather than wiping the checks.
+    const items = [
+      ...(draftUrls.length > 0 ? draftUrls : buildSavedIntakeItems()),
+      ...draftUploads,
+    ];
     setSrcChecks(checksForItems(items));
     try {
       await runSourceIntake({
         memberId,
-        district: srcDistrict.trim() || null,
+        // Keep the saved district when the editor draft is empty — a retry
+        // re-checks the links, it must not wipe the district.
+        district: srcDistrict.trim() || srcSources?.district || null,
         items,
         onCheck: (key, patch) =>
           setSrcChecks((prev) =>
@@ -1246,6 +1461,15 @@ export function CrewApplet() {
     setSrcRefreshing(true);
     setSrcMessage(null);
     try {
+      // Refresh checks the SAVED links — seed per-source checks from them so
+      // the fresh results land on the right rows, exactly like the Save flow.
+      // The fallback gates and status lines below read these checks first.
+      const items = buildSavedIntakeItems();
+      setSrcChecks(checksForItems(items));
+      const patchCheck = (key: string, patch: Partial<SourceCheck>) =>
+        setSrcChecks((prev) =>
+          prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+        );
       const res = await fetch(
         `/api/crew/members/${memberId}/school-sources/refresh`,
         { method: "POST" },
@@ -1255,13 +1479,16 @@ export function CrewApplet() {
       const results: IntakeSourceResult[] = Array.isArray(json.results)
         ? json.results
         : [];
-      const failed = results.filter((r) => !r.verified);
+      applyIntakeResults(items, results, patchCheck);
+      // A page that opened but gave us nothing readable still needs the
+      // pilot's help — count it as failed, same as the per-source checks.
+      const failed = results.filter((r) => !r.verified || !r.parsed);
       setSrcMessage({
         ok: failed.length === 0,
         text:
           failed.length === 0
-            ? `Checked ${results.length} ${results.length === 1 ? "page" : "pages"} — all fresh.`
-            : `${failed.length} of ${results.length} didn't load: ${failed
+            ? `Checked ${results.length} ${results.length === 1 ? "page" : "pages"} — all read.`
+            : `${failed.length} of ${results.length} didn't come through: ${failed
                 .map((f) => `${f.label || "Link"} — ${f.message ?? "try again"}`)
                 .join("; ")}`,
       });
@@ -1482,7 +1709,23 @@ export function CrewApplet() {
           >
             ID: {member.id.slice(0, 8)}… tap to copy
           </button>
+          {member.via_grant && (
+            <p className="mt-1.5 inline-block rounded-full border border-neon-teal/40 bg-neon-teal/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-neon-teal">
+              🔗 Linked profile
+            </p>
+          )}
         </div>
+
+        {member.via_grant && (
+          <div className="rounded-xl border border-neon-teal/30 bg-neon-teal/[0.06] px-4 py-3">
+            <p className="text-sm font-medium text-star">Shared with you by a parent</p>
+            <p className="mt-1 text-xs leading-relaxed text-stardust">
+              The school login stays with them — you can see the classes and
+              grades, but only they can update the connection. If the grades
+              look stale, ask them to run a sync.
+            </p>
+          </div>
+        )}
 
         {/* School sync status */}
         <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
@@ -1821,9 +2064,27 @@ export function CrewApplet() {
               ))}
             </div>
           ) : (
-            <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
-              {classesMessage || "No school data yet — connect a school login to see classes and grades."}
-            </p>
+            <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+              <p className="text-sm text-dim">
+                {classesLoadFailed
+                  ? "The classes didn't load. Nothing is lost — try again."
+                  : classesMessage
+                    ? classesMessage
+                    : member.via_grant
+                      ? "No school data yet — it shows up here once the school sync runs."
+                      : "No school data yet — connect a school login to see classes and grades."}
+              </p>
+              {classesLoadFailed && (
+                <button
+                  type="button"
+                  onClick={() => loadMemberClasses(member.id)}
+                  disabled={classesLoading}
+                  className="mt-2 rounded-lg border border-neon-green/40 bg-neon-green/10 px-3 py-1.5 text-xs font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+                >
+                  {classesLoading ? "Loading…" : "Try again"}
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -1892,7 +2153,7 @@ export function CrewApplet() {
             <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
               School calendar &amp; bell schedules
             </p>
-            {!srcLoading && (
+            {!srcLoading && !member.via_grant && (
               <button
                 type="button"
                 onClick={() => (srcEditing ? setSrcEditing(false) : openSourcesEditor())}
@@ -1959,19 +2220,7 @@ export function CrewApplet() {
                         className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
                       />
                     </label>
-                    {srcSnapshots.calendar && (
-                      <p
-                        className={`mt-1 text-xs ${
-                          srcSnapshots.calendar.status === "ok"
-                            ? "text-dim"
-                            : "text-neon-amber"
-                        }`}
-                      >
-                        {srcSnapshots.calendar.status === "ok"
-                          ? `Last pull ${timeAgo(srcSnapshots.calendar.fetched_at) ?? "recently"} — looks good.`
-                          : `Last pull failed — ${srcSnapshots.calendar.error_note ?? "try Refresh."}`}
-                      </p>
-                    )}
+                    {calendarStatusLine()}
                     {calendarSourceFailed() &&
                       !srcFallbackDone.includes("calendar") && (
                         <div className="mt-2">
@@ -2002,19 +2251,10 @@ export function CrewApplet() {
                   />
                   {srcBells.map((b, i) => {
                     const sourceKey = `bell-${i}`;
-                    const snapFailed =
-                      srcSnapshots.bells[i] &&
-                      srcSnapshots.bells[i].status !== "ok";
-                    if (!snapFailed && !bellSourceFailed(i)) return null;
+                    if (!bellSourceFailed(i)) return null;
                     return (
                       <div key={`snap-${i}`} className="space-y-2">
-                        {snapFailed && (
-                          <p className="text-xs text-neon-amber">
-                            {b.label || `Schedule ${i + 1}`}: last pull
-                            failed —{" "}
-                            {srcSnapshots.bells[i]?.error_note ?? "try Refresh."}
-                          </p>
-                        )}
+                        {bellRowStatus(i, b.label)}
                         {!srcFallbackDone.includes(sourceKey) && (
                           <SourceFallbackUpload
                             kind="bell"
@@ -2308,7 +2548,9 @@ export function CrewApplet() {
           )}
         </div>
 
-        {/* Manage — link code + remove */}
+        {/* Manage — link code + remove. Steward only: a linked family member
+            can't mint codes or remove the profile. */}
+        {!member.via_grant && (
         <div className="space-y-2 border-t border-line pt-4">
           <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
             Manage
@@ -2333,7 +2575,8 @@ export function CrewApplet() {
             <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
               <p className="text-sm font-medium text-star">Same-room link code</p>
               <p className="mt-1 text-xs leading-relaxed text-dim">
-                The other person enters this code to link {member.name}&apos;s
+                The other person enters this code in their own Crew panel
+                (“Joining as a family member?”) to link {member.name}&apos;s
                 profile. It works once and expires 15 minutes after it&apos;s created.
               </p>
               {!linkCode ? (
@@ -2441,6 +2684,7 @@ export function CrewApplet() {
             </div>
           )}
         </div>
+        )}
       </div>
     );
   }
@@ -2553,7 +2797,9 @@ export function CrewApplet() {
                       </div>
                     </button>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-dim">{m.relationship}</span>
+                      <span className="text-xs text-dim">
+                        {m.via_grant ? "🔗 linked" : m.relationship}
+                      </span>
                       {attention && reauthFor !== m.id && (
                         <button
                           type="button"
@@ -2679,6 +2925,60 @@ export function CrewApplet() {
         >
           {loadError}
         </p>
+      )}
+
+      {/* Link-code claim — the child's way in. A steward (parent) mints a
+          6-digit code from a crew profile; the family member enters it here
+          to link that profile to their own cockpit. */}
+      {step === 1 && (
+        <div className="rounded-2xl border border-neon-teal/30 bg-neon-teal/[0.06] p-4">
+          <p className="text-sm font-medium text-star">
+            {roster.length === 0
+              ? "Joining as a family member?"
+              : "Have a link code for someone else?"}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-stardust">
+            {roster.length === 0
+              ? "If a parent gave you a 6-digit link code, enter it here and their crew profile — classes, grades, the works — links to your cockpit."
+              : "Enter a 6-digit code someone shared to link their profile here."}
+          </p>
+          <div className="mt-3 flex gap-2">
+            <input
+              value={claimCode}
+              onChange={(e) => setClaimCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void claimLinkCode();
+              }}
+              placeholder="6-digit code"
+              inputMode="numeric"
+              autoComplete="off"
+              aria-label="6-digit link code"
+              disabled={claimBusy}
+              maxLength={6}
+              className="w-32 shrink-0 rounded-xl border border-line bg-panel px-4 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-star placeholder:text-dim placeholder:tracking-normal placeholder:text-sm focus:border-neon-teal/60 focus:outline-none disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={() => void claimLinkCode()}
+              disabled={claimBusy || claimCode.replace(/[^0-9]/g, "").length !== 6}
+              className="flex-1 rounded-xl border border-neon-teal/40 bg-neon-teal/10 px-4 py-2.5 text-sm font-medium text-neon-teal transition-colors hover:bg-neon-teal/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {claimBusy ? "Linking…" : "Link with code"}
+            </button>
+          </div>
+          {claimMessage && (
+            <p
+              role={claimMessage.ok ? "status" : "alert"}
+              className={`mt-2.5 rounded-xl border px-4 py-2.5 text-sm ${
+                claimMessage.ok
+                  ? "border-neon-teal/30 bg-neon-teal/5 text-neon-teal"
+                  : "border-neon-amber/30 bg-neon-amber/5 text-neon-amber"
+              }`}
+            >
+              {claimMessage.text}
+            </p>
+          )}
+        </div>
       )}
 
       {roster.length > 0 && step === 1 && (

@@ -4,7 +4,10 @@ import { getPilotId, unauthorized } from "@/lib/crew/auth";
 
 /**
  * GET /api/crew/members — roster of the pilot's crew members.
- * RLS (`crew_members_pilot_all`) scopes to the signed-in pilot.
+ * Includes members linked TO the pilot via a live access grant
+ * (e.g. a child who claimed a steward's link code), marked
+ * `via_grant: true`. Grant-scoped rows come from the my_granted_crew
+ * definer RPC because crew_members RLS is steward-only.
  */
 export async function GET() {
   const pilotId = await getPilotId();
@@ -32,10 +35,29 @@ export async function GET() {
     );
   }
 
+  // Members linked to this pilot through someone else's live grant.
+  let granted: {
+    id: string;
+    name: string;
+    birthdate: string | null;
+    relationship: string | null;
+    created_at: string;
+  }[] = [];
+  try {
+    const { data: grantedJson, error: grantedError } = await supabase.rpc("my_granted_crew");
+    if (!grantedError && Array.isArray(grantedJson)) {
+      granted = grantedJson.filter(
+        (g) => !(data ?? []).some((m) => m.id === g.id),
+      );
+    }
+  } catch {
+    // A missing function (migration not run yet) must not blank the roster.
+  }
+
   // Attach school sync status for each member (drives the "needs attention"
   // indicator and the re-auth form in the Crew applet).
   const memberIds = (data ?? []).map((m) => m.id);
-  let statusByMember: Record<string, { sync_status: string; last_synced_at: string | null }> = {};
+  const statusByMember: Record<string, { sync_status: string; last_synced_at: string | null }> = {};
   if (memberIds.length > 0) {
     const { data: links } = await supabase
       .from("crew_school_links")
@@ -51,8 +73,20 @@ export async function GET() {
 
   const members = (data ?? []).map((m) => ({
     ...m,
+    via_grant: false,
     school_sync: statusByMember[m.id] ?? { sync_status: "idle", last_synced_at: null },
   }));
+
+  // Granted members: the steward's sync status is not visible to grantees
+  // under RLS — show "linked" so the UI never lies about a school login
+  // the grantee cannot manage.
+  for (const g of granted) {
+    members.push({
+      ...g,
+      via_grant: true,
+      school_sync: { sync_status: "linked", last_synced_at: null },
+    });
+  }
 
   return NextResponse.json({ members });
 }
