@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
 import { useHasLinkedChildren } from "@/lib/use-crew-roster";
 import { SchoolGlyph } from "./school-glyph";
+import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 
 function HomeGlyph() {
   return (
@@ -121,18 +122,13 @@ export function ToolbarHologlass() {
         {keyButton({ id: "home", label: "Home", glyph: <HomeGlyph /> })}
         {stations.slice(0, 2).map(keyButton)}
 
-        {/* The Crystal orb — home base, centered. Brightest element. */}
-        <button
-          type="button"
-          id="toolbar-crystal-orb"
-          onClick={() => openApplet("crystal")}
-          data-active={activeId === "crystal"}
-          aria-label="Talk to Crystal — your AI co-pilot"
-          title="Crystal"
+        {/* The Crystal command — orb or robot (flag), home base, centered. */}
+        <CrystalCommandButton
           className="hologlass-orb"
-        >
-          <span className="hologlass-orb-core" aria-hidden="true" />
-        </button>
+          coreClassName="hologlass-orb-core"
+          active={activeId === "crystal"}
+          onOpen={() => openApplet("crystal")}
+        />
 
         {stations.slice(2).map(keyButton)}
       </div>

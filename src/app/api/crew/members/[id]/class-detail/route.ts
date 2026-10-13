@@ -154,10 +154,12 @@ export async function GET(
     notes: a.notes ?? "",
   }));
 
+  // Missing: no score and due in the past. Priority: oldest first.
   const missing = withDue
     .filter((a) => a.score === null && a.due_date !== null && a.due_date < today)
     .sort((a, b) => (a.due_date as Date).getTime() - (b.due_date as Date).getTime());
 
+  // Upcoming: no score and due today or later. Soonest first.
   const upcoming = withDue
     .filter(
       (a) => a.score === null && (a.due_date === null || a.due_date >= today),
@@ -168,6 +170,7 @@ export async function GET(
       return a.due_date.getTime() - b.due_date.getTime();
     });
 
+  // Recent: scored, newest first, top 5.
   const recent = withDue
     .filter((a) => a.score !== null)
     .sort((a, b) => {
@@ -195,5 +198,13 @@ export async function GET(
     upcoming,
     recent,
     synced_at: latest.synced_at,
+    stale:
+      Date.now() - new Date(latest.synced_at).getTime() > 24 * 60 * 60 * 1000,
+    hours_since_sync: Math.max(
+      0,
+      Math.round(
+        (Date.now() - new Date(latest.synced_at).getTime()) / 3600000,
+      ),
+    ),
   });
 }

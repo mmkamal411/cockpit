@@ -210,6 +210,9 @@ export function CrewApplet() {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesSyncedAt, setClassesSyncedAt] = useState<string | null>(null);
   const [classesMessage, setClassesMessage] = useState("");
+  // Grade freshness from the same sync row.
+  const [classesStale, setClassesStale] = useState(false);
+  const [classesHours, setClassesHours] = useState<number | null>(null);
   // Extended school overview from the same sync row: GPA, attendance, messages.
   const [gpa, setGpa] = useState<GpaInfo | null>(null);
   const [attendance, setAttendance] = useState<AttendanceInfo | null>(null);
@@ -557,6 +560,8 @@ export function CrewApplet() {
         setGpa(json.gpa ?? null);
         setAttendance(json.attendance ?? null);
         setMessages(Array.isArray(json.messages) ? json.messages : []);
+        setClassesStale(!!json.stale);
+        setClassesHours(json.hours_since_sync ?? null);
         if (json.message) setClassesMessage(json.message);
       } else {
         setClassesMessage("Couldn't load classes right now.");
@@ -1278,7 +1283,19 @@ export function CrewApplet() {
                   {new Date(classesSyncedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
                 </p>
               )}
-              {classes.map((c) => (
+              {classesStale && classesHours !== null && (
+                <p
+                  role="alert"
+                  className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-2.5 text-sm text-neon-amber"
+                >
+                  These grades are{" "}
+                  {classesHours >= 48
+                    ? `${Math.round(classesHours / 24)} days`
+                    : `${classesHours} hours`}{" "}
+                  old. Sync the school login for the latest numbers.
+                </p>
+              )}
+                            {classes.map((c) => (
                 <button
                   key={c.id}
                   type="button"

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
 import { useHasLinkedChildren } from "@/lib/use-crew-roster";
 import { SchoolGlyph } from "./school-glyph";
+import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 
 /* Glyphs copied verbatim from toolbar-legacy.tsx — the ship's station icons. */
 function HomeGlyph() {
@@ -21,14 +22,6 @@ function TodayGlyph() {
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="8.5" />
       <path d="M12 7.5V12l3 2" />
-    </svg>
-  );
-}
-
-function ChatGlyph() {
-  return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.9A8 8 0 1 1 21 12Z" />
     </svg>
   );
 }
@@ -220,18 +213,13 @@ export function ToolbarDash() {
           <div className="dash-orb-station">
             <div className="dash-bezel" data-active={crystalActive}>
               <div className="dash-bezel-core">
-                <button
-                  type="button"
-                  id="toolbar-crystal-orb"
-                  onClick={() => openApplet("crystal")}
-                  data-active={crystalActive}
-                  aria-label="Talk to Crystal — your AI co-pilot"
-                  aria-current={crystalActive ? "page" : undefined}
-                  title="Crystal"
+                <CrystalCommandButton
                   className="dash-orb"
-                >
-                  <span className="dash-orb-core" aria-hidden="true" />
-                </button>
+                  coreClassName="dash-orb-core"
+                  active={crystalActive}
+                  ariaCurrent={crystalActive ? "page" : undefined}
+                  onOpen={() => openApplet("crystal")}
+                />
               </div>
             </div>
             <span

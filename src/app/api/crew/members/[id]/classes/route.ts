@@ -70,6 +70,27 @@ function mergeMessages(
   return out.slice(0, limit);
 }
 
+interface ClassDetail {
+  class?: string;
+  name?: string;
+  grade?: number | string | null;
+  letter?: string | null;
+  period?: string;
+  teacher?: string | null;
+  assignments?: AssignmentEntry[];
+}
+
+interface AssignmentEntry {
+  title?: string;
+  due?: string | null;
+  score?: number | string | null;
+  status?: string | null;
+  percent?: number | string | null;
+  category?: string | null;
+  max_points?: number | string | null;
+  notes?: string | null;
+}
+
 function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -91,10 +112,11 @@ function letterFor(grade: number | null): string | null {
 /**
  * GET /api/crew/members/[id]/classes
  * Member school overview, derived from the latest full grade sync:
- * - classes with current grades + gap-to-90
+ * - classes with current grades + gap-to-90 + teacher lookup (via class_details)
  * - gpa (weighted/unweighted/cumulative when the sync carries it)
  * - attendance summary ({absences, tardies, ...} when present)
  * - messages: Synergy + Office 365 teacher mail merged, newest first (top 8)
+ * - stale / hours_since_sync freshness flags (>24h since sync = stale)
  * Grant-scoped like the sync endpoints.
  */
 export async function GET(
@@ -134,7 +156,7 @@ export async function GET(
 
   const { data: latest } = await supabase
     .from("crew_grade_syncs")
-    .select("grades, synced_at, gpa, attendance, synergy_mail, office365_emails")
+    .select("grades, class_details, synced_at, gpa, attendance, synergy_mail, office365_emails")
     .eq("crew_member_id", crewMemberId)
     .filter("grades", "neq", "[]")
     .order("synced_at", { ascending: false })
@@ -148,20 +170,40 @@ export async function GET(
       gpa: null,
       attendance: null,
       messages: [],
+      stale: false,
+      hours_since_sync: null,
       message: "No school data yet — connect a school login or tap SYNC NOW.",
     });
   }
+
+  // Teacher lookup from class_details (keyed by class name).
+  const details = Array.isArray(latest.class_details)
+    ? (latest.class_details as ClassDetail[])
+    : [];
+  const teacherByClass = new Map<string, string>();
+  for (const d of details) {
+    const key = (d.class ?? d.name ?? "").trim().toLowerCase();
+    if (key && d.teacher) teacherByClass.set(key, d.teacher);
+  }
+
+  const syncedAtMs = new Date(latest.synced_at).getTime();
+  const hoursSinceSync = Math.max(
+    0,
+    Math.round((Date.now() - syncedAtMs) / 3600000),
+  );
 
   const raw = Array.isArray(latest.grades) ? (latest.grades as GradeEntry[]) : [];
   const classes = raw.map((g, i) => {
     const grade = toNumber(g.grade);
     const gap = grade === null ? null : Math.max(0, 90 - grade);
+    const name = g.class ?? g.name ?? `Class ${i + 1}`;
     return {
       id: `class-${i}`,
-      name: g.class ?? g.name ?? `Class ${i + 1}`,
+      name,
       grade,
       letter: g.letter ?? letterFor(grade),
       gap_to_90: gap,
+      teacher: teacherByClass.get(name.trim().toLowerCase()) ?? null,
     };
   });
 
@@ -177,5 +219,7 @@ export async function GET(
         ? latest.attendance
         : null,
     messages: mergeMessages(latest.synergy_mail, latest.office365_emails, 8),
+    stale: hoursSinceSync > 24,
+    hours_since_sync: hoursSinceSync,
   });
 }

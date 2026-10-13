@@ -18,6 +18,7 @@ import { NudgeCenterApplet } from "./applets/nudge-center-applet";
 import { SchoolStation } from "./applets/school-station";
 import { ClassDetail } from "./applets/class-detail";
 import { StationCategoryOverlay } from "./home-stations";
+import { SchoolOverviewApplet } from "./applets/school-overview-applet";
 
 /**
  * Settings placeholder — the full User Settings module (Profile,
@@ -126,6 +127,12 @@ export const APPLETS: Record<string, AppletDef> = {
     readout: "NUDGE",
     glow: "#fcd34d",
     render: () => <NudgeCenterApplet />,
+  },
+  "school-overview": {
+    name: "School Overview",
+    readout: "SKL",
+    glow: "#67e8f9",
+    render: (params) => <SchoolOverviewApplet params={params} />,
   },
   settings: {
     name: "Settings",

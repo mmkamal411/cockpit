@@ -29,6 +29,8 @@ interface ClassDetailPayload {
   upcoming: Assignment[];
   recent: Assignment[];
   synced_at: string | null;
+  stale?: boolean;
+  hours_since_sync?: number | null;
   message?: string;
 }
 
@@ -101,6 +103,7 @@ export function ClassDetail({
           return;
         }
         setData(json);
+        // Load persisted checkbox state.
         try {
           const cRes = await fetch(
             `/api/crew/members/${memberId}/path-to-90?class=${encodeURIComponent(json.class?.name ?? className)}`,
@@ -204,6 +207,7 @@ export function ClassDetail({
         throw new Error();
       }
     } catch {
+      // Roll back the optimistic toggle.
       setChecks((prev) => ({ ...prev, [actionId]: !next }));
       setChecksError("Couldn't save that checkbox. Try again.");
     } finally {
@@ -486,6 +490,18 @@ export function ClassDetail({
           Synced {new Date(data.synced_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
           {" at "}
           {new Date(data.synced_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+        </p>
+      )}
+      {data.stale && data.hours_since_sync !== null && data.hours_since_sync !== undefined && (
+        <p
+          role="alert"
+          className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-2.5 text-sm text-neon-amber"
+        >
+          These grades are{" "}
+          {data.hours_since_sync >= 48
+            ? `${Math.round(data.hours_since_sync / 24)} days`
+            : `${data.hours_since_sync} hours`}{" "}
+          old. Sync the school login for the latest numbers.
         </p>
       )}
     </div>
