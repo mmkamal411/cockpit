@@ -1,5 +1,5 @@
 -- =============================================================================
--- 008_health.sql
+-- 012_health.sql
 -- Cockpit — health basics module (Phase 2, v1: manual logging only).
 --
 -- PRIVACY: all tables owner-only RLS, forced. No cross-pilot reads anywhere.

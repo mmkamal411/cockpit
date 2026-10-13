@@ -1,5 +1,5 @@
 -- =============================================================================
--- 006_crew_tables.sql
+-- 008_crew_tables.sql
 -- Cockpit — crew module supporting tables + sync worker heartbeat fix.
 --
 -- 1. path_to_90_checks — server-side Path-to-90 checkbox persistence

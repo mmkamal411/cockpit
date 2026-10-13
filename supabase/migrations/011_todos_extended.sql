@@ -1,5 +1,5 @@
 -- =============================================================================
--- 007_todos_extended.sql
+-- 011_todos_extended.sql
 -- Cockpit — extended to-do fields (Team B, Phase 1: To-dos).
 --
 -- Adds to public.todos (idempotent — safe to run more than once):

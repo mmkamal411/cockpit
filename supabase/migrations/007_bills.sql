@@ -1,5 +1,5 @@
 -- =============================================================================
--- 006_bills.sql
+-- 007_bills.sql
 -- Cockpit — Money/Bills module (Phase 2, v1).
 --
 -- Three tables:

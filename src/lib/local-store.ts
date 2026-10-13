@@ -24,13 +24,6 @@ export function writeLocal<T>(key: string, value: T): void {
   }
 }
 
-export interface TodoItem {
-  id: string;
-  text: string;
-  done: boolean;
-  createdAt: number;
-}
-
 export interface GoalItem {
   id: string;
   text: string;

@@ -155,7 +155,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     if (!auth) return NextResponse.json(UNAUTH, { status: 401 });
 
     const { id } = await params;
-    const { data, error } = await auth.supabase
+    const { error } = await auth.supabase
       .from("todos")
       .delete()
       .eq("id", id)
@@ -167,7 +167,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       if (error.code === "PGRST116") return NextResponse.json(GONE, { status: 404 });
       throw error;
     }
-    void data;
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json(

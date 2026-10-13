@@ -1,5 +1,5 @@
 -- =============================================================================
--- 007_shopping.sql
+-- 010_shopping.sql
 -- Cockpit — shopping lists module (Phase 2, v1).
 --
 -- Pilot-owned tables. RLS: owner-only (auth.uid() = pilot_id), forced.

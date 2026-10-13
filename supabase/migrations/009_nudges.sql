@@ -1,5 +1,5 @@
 -- =============================================================================
--- 007_nudges.sql — Phase 1 nudge engine schema.
+-- 009_nudges.sql — Phase 1 nudge engine schema.
 --
 -- Context: migration 001 created public.nudges with an early shape
 -- (kind / title / detail / priority / scheduled_for / delivered_at /
