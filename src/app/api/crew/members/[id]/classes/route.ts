@@ -9,6 +9,67 @@ interface GradeEntry {
   letter?: string | null;
 }
 
+interface SynergyMailEntry {
+  preview?: string;
+  subject?: string;
+  date?: string;
+}
+
+interface Office365MailEntry {
+  preview?: string;
+  sender?: string;
+  subject?: string;
+  date?: string;
+}
+
+interface SchoolMessage {
+  source: "synergy" | "outlook";
+  sender: string | null;
+  subject: string | null;
+  preview: string | null;
+  date: string | null;
+}
+
+/** Merge Synergy + Office 365 teacher mail into one newest-first list. */
+function mergeMessages(
+  synergy: unknown,
+  office365: unknown,
+  limit: number,
+): SchoolMessage[] {
+  const out: SchoolMessage[] = [];
+  if (Array.isArray(synergy)) {
+    for (const m of synergy as SynergyMailEntry[]) {
+      out.push({
+        source: "synergy",
+        sender: null,
+        subject: typeof m.subject === "string" ? m.subject : null,
+        preview: typeof m.preview === "string" ? m.preview : null,
+        date: typeof m.date === "string" ? m.date : null,
+      });
+    }
+  }
+  if (Array.isArray(office365)) {
+    for (const m of office365 as Office365MailEntry[]) {
+      out.push({
+        source: "outlook",
+        sender: typeof m.sender === "string" ? m.sender : null,
+        subject: typeof m.subject === "string" ? m.subject : null,
+        preview: typeof m.preview === "string" ? m.preview : null,
+        date: typeof m.date === "string" ? m.date : null,
+      });
+    }
+  }
+  out.sort((a, b) => {
+    const ta = a.date ? Date.parse(a.date) : NaN;
+    const tb = b.date ? Date.parse(b.date) : NaN;
+    if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
+    if (Number.isNaN(ta)) return 1;
+    if (Number.isNaN(tb)) return -1;
+    return tb - ta;
+  });
+  return out.slice(0, limit);
+}
+
 function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -29,8 +90,12 @@ function letterFor(grade: number | null): string | null {
 
 /**
  * GET /api/crew/members/[id]/classes
- * Class list with current grades + gap-to-90, derived from the latest
- * full grade sync. Grant-scoped like the sync endpoints.
+ * Member school overview, derived from the latest full grade sync:
+ * - classes with current grades + gap-to-90
+ * - gpa (weighted/unweighted/cumulative when the sync carries it)
+ * - attendance summary ({absences, tardies, ...} when present)
+ * - messages: Synergy + Office 365 teacher mail merged, newest first (top 8)
+ * Grant-scoped like the sync endpoints.
  */
 export async function GET(
   _request: Request,
@@ -69,7 +134,7 @@ export async function GET(
 
   const { data: latest } = await supabase
     .from("crew_grade_syncs")
-    .select("grades, synced_at")
+    .select("grades, synced_at, gpa, attendance, synergy_mail, office365_emails")
     .eq("crew_member_id", crewMemberId)
     .filter("grades", "neq", "[]")
     .order("synced_at", { ascending: false })
@@ -80,6 +145,9 @@ export async function GET(
     return NextResponse.json({
       classes: [],
       synced_at: null,
+      gpa: null,
+      attendance: null,
+      messages: [],
       message: "No school data yet — connect a school login or tap SYNC NOW.",
     });
   }
@@ -97,5 +165,17 @@ export async function GET(
     };
   });
 
-  return NextResponse.json({ classes, synced_at: latest.synced_at });
+  return NextResponse.json({
+    classes,
+    synced_at: latest.synced_at,
+    gpa:
+      latest.gpa && typeof latest.gpa === "object" && Object.keys(latest.gpa).length > 0
+        ? latest.gpa
+        : null,
+    attendance:
+      latest.attendance && typeof latest.attendance === "object" && Object.keys(latest.attendance).length > 0
+        ? latest.attendance
+        : null,
+    messages: mergeMessages(latest.synergy_mail, latest.office365_emails, 8),
+  });
 }

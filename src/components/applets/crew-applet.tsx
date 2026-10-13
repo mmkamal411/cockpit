@@ -28,6 +28,50 @@ interface ClassRow {
   gap_to_90: number | null;
 }
 
+interface GpaInfo {
+  weighted_gpa?: number | null;
+  unweighted_gpa?: number | null;
+  cumulative_gpa?: number | null;
+}
+
+interface AttendanceInfo {
+  absences?: number | null;
+  tardies?: number | null;
+}
+
+interface SchoolMessage {
+  source: "synergy" | "outlook";
+  sender: string | null;
+  subject: string | null;
+  preview: string | null;
+  date: string | null;
+}
+
+/** Pick the most meaningful GPA the sync carried, with its label. */
+function pickGpa(gpa: GpaInfo | null): { value: number; label: string } | null {
+  if (!gpa) return null;
+  if (typeof gpa.unweighted_gpa === "number" && Number.isFinite(gpa.unweighted_gpa))
+    return { value: gpa.unweighted_gpa, label: "unweighted" };
+  if (typeof gpa.weighted_gpa === "number" && Number.isFinite(gpa.weighted_gpa))
+    return { value: gpa.weighted_gpa, label: "weighted" };
+  if (typeof gpa.cumulative_gpa === "number" && Number.isFinite(gpa.cumulative_gpa))
+    return { value: gpa.cumulative_gpa, label: "cumulative" };
+  return null;
+}
+
+/** Plain-English attendance summary from the sync's attendance object. */
+function attendanceText(a: AttendanceInfo): string {
+  const abs = typeof a.absences === "number" ? a.absences : null;
+  const tar = typeof a.tardies === "number" ? a.tardies : null;
+  if (abs === null && tar === null)
+    return "Attendance was synced, but no absence or tardy counts were included.";
+  const parts: string[] = [];
+  if (abs !== null) parts.push(`${abs} ${abs === 1 ? "absence" : "absences"}`);
+  if (tar !== null) parts.push(`${tar} ${tar === 1 ? "tardy" : "tardies"}`);
+  if (abs === 0 && tar === 0) return "No absences or tardies — a clean record.";
+  return parts.join(" · ");
+}
+
 /** True when a member's school connection needs the parent's attention. */
 function needsAttention(m: CrewMemberRow): boolean {
   const s = m.school_sync;
@@ -101,6 +145,22 @@ export function CrewApplet() {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesSyncedAt, setClassesSyncedAt] = useState<string | null>(null);
   const [classesMessage, setClassesMessage] = useState("");
+  // Extended school overview from the same sync row: GPA, attendance, messages.
+  const [gpa, setGpa] = useState<GpaInfo | null>(null);
+  const [attendance, setAttendance] = useState<AttendanceInfo | null>(null);
+  const [messages, setMessages] = useState<SchoolMessage[]>([]);
+  // Sync-now status.
+  const [syncNowBusy, setSyncNowBusy] = useState(false);
+  const [syncNowMessage, setSyncNowMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  // Link code (same-room family sharing): one live code at a time.
+  const [linkCodeFor, setLinkCodeFor] = useState<string | null>(null);
+  const [linkCodeBusy, setLinkCodeBusy] = useState(false);
+  const [linkCode, setLinkCode] = useState<{ code: string; expires_at: string } | null>(null);
+  const [linkCodeError, setLinkCodeError] = useState("");
+  // Remove member: two-tap confirm, never one stray tap.
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState("");
   // Class detail drill-down: when set, shows one class's full page.
   const [selectedClassName, setSelectedClassName] = useState<string | null>(null);
 
@@ -324,6 +384,15 @@ export function CrewApplet() {
     setClasses([]);
     setClassesMessage("");
     setClassesSyncedAt(null);
+    setGpa(null);
+    setAttendance(null);
+    setMessages([]);
+    setSyncNowMessage(null);
+    setLinkCodeFor(null);
+    setLinkCode(null);
+    setLinkCodeError("");
+    setConfirmRemove(false);
+    setRemoveError("");
     closeReauth();
     closeConnect();
     loadMemberClasses(memberId);
@@ -334,6 +403,15 @@ export function CrewApplet() {
     setClasses([]);
     setClassesMessage("");
     setClassesSyncedAt(null);
+    setGpa(null);
+    setAttendance(null);
+    setMessages([]);
+    setSyncNowMessage(null);
+    setLinkCodeFor(null);
+    setLinkCode(null);
+    setLinkCodeError("");
+    setConfirmRemove(false);
+    setRemoveError("");
     closeReauth();
     closeConnect();
   }
@@ -346,6 +424,9 @@ export function CrewApplet() {
       if (res.ok) {
         setClasses(json.classes ?? []);
         setClassesSyncedAt(json.synced_at ?? null);
+        setGpa(json.gpa ?? null);
+        setAttendance(json.attendance ?? null);
+        setMessages(Array.isArray(json.messages) ? json.messages : []);
         if (json.message) setClassesMessage(json.message);
       } else {
         setClassesMessage("Couldn't load classes right now.");
@@ -354,6 +435,79 @@ export function CrewApplet() {
       setClassesMessage("Couldn't load classes right now.");
     } finally {
       setClassesLoading(false);
+    }
+  }
+
+  /** SYNC NOW — ask the server for fresh school data, show the honest status. */
+  async function syncNow(memberId: string) {
+    setSyncNowBusy(true);
+    setSyncNowMessage(null);
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}/sync`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setSyncNowMessage({ ok: true, text: json.message ?? "School data is fresh." });
+        await refreshRoster();
+        await loadMemberClasses(memberId);
+      } else {
+        setSyncNowMessage({
+          ok: false,
+          text: json.error ?? "Couldn't check for fresh data right now.",
+        });
+      }
+    } catch {
+      setSyncNowMessage({
+        ok: false,
+        text: "We couldn't reach the server. Check your connection and try again.",
+      });
+    } finally {
+      setSyncNowBusy(false);
+    }
+  }
+
+  /** Mint a same-room link code for this crew member. */
+  async function mintLinkCode(memberId: string) {
+    setLinkCodeBusy(true);
+    setLinkCodeError("");
+    setLinkCode(null);
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}/link-code`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setLinkCode({ code: json.code, expires_at: json.expires_at });
+      } else {
+        setLinkCodeError(json.error ?? "Couldn't create a code right now.");
+      }
+    } catch {
+      setLinkCodeError("We couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setLinkCodeBusy(false);
+    }
+  }
+
+  /** Remove a crew member (two-tap confirm). Cascades to their school data. */
+  async function removeMember(memberId: string) {
+    setRemoving(true);
+    setRemoveError("");
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setRemoveError(json.error ?? "Couldn't remove them right now.");
+        return;
+      }
+      setRoster((prev) => prev.filter((m) => m.id !== memberId));
+      closeMemberDetail();
+    } catch {
+      setRemoveError("We couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setRemoving(false);
     }
   }
 
@@ -438,6 +592,7 @@ export function CrewApplet() {
     }
     const status = syncStatusText(member);
     const attention = needsAttention(member);
+    const gpaPick = pickGpa(gpa);
     const dotColor =
       status.tone === "ok"
         ? "bg-neon-green"
@@ -712,6 +867,37 @@ export function CrewApplet() {
               </button>
             </div>
           )}
+          {/* Sync now */}
+          <div className="mt-3 border-t border-line pt-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-star">Refresh school data</p>
+                <p className="mt-0.5 text-xs text-dim">
+                  Checks for anything new from the school portals.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => syncNow(member.id)}
+                disabled={syncNowBusy}
+                className="shrink-0 rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+              >
+                {syncNowBusy ? "Checking…" : "Sync now"}
+              </button>
+            </div>
+            {syncNowMessage && (
+              <p
+                role={syncNowMessage.ok ? "status" : "alert"}
+                className={`mt-2.5 rounded-xl border px-4 py-2.5 text-sm ${
+                  syncNowMessage.ok
+                    ? "border-neon-green/30 bg-neon-green/5 text-neon-green"
+                    : "border-neon-amber/30 bg-neon-amber/5 text-neon-amber"
+                }`}
+              >
+                {syncNowMessage.text}
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Classes & grades */}
@@ -719,6 +905,14 @@ export function CrewApplet() {
           <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
             Classes
           </p>
+          {!classesLoading && gpaPick && (
+            <div className="flex items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5">
+              <span className="text-sm text-stardust">
+                GPA <span className="text-xs text-dim">· {gpaPick.label}</span>
+              </span>
+              <span className="text-lg font-bold text-star">{gpaPick.value.toFixed(2)}</span>
+            </div>
+          )}
           {classesLoading ? (
             <p className="text-sm text-stardust">Loading classes…</p>
           ) : classes.length > 0 ? (
@@ -764,6 +958,198 @@ export function CrewApplet() {
             <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
               {classesMessage || "No school data yet — connect a school login to see classes and grades."}
             </p>
+          )}
+        </div>
+
+        {/* Attendance */}
+        {!classesLoading && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+              Attendance
+            </p>
+            <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+              <p className="text-sm text-star">
+                {attendance ? attendanceText(attendance) : "No attendance data in the latest sync."}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* School messages — Synergy + Outlook teacher mail, newest first */}
+        {!classesLoading && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+              School messages{messages.length > 0 ? ` · ${messages.length}` : ""}
+            </p>
+            {messages.length === 0 ? (
+              <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                No school messages in the latest sync.
+              </p>
+            ) : (
+              messages.map((m, i) => (
+                <div
+                  key={`msg-${i}-${m.date ?? ""}-${m.subject ?? ""}`}
+                  className="rounded-xl border border-line bg-panel-2/60 px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="min-w-0 truncate text-sm font-medium text-star">
+                      {m.subject || "(no subject)"}
+                    </p>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wider text-dim">
+                      {m.source === "outlook" ? "Outlook" : "Synergy"}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-dim">
+                    {m.sender ?? "School portal"}
+                    {m.date && (
+                      <>
+                        {" · "}
+                        {new Date(m.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </>
+                    )}
+                  </p>
+                  {m.preview && (
+                    <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-stardust">
+                      {m.preview}
+                    </p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Manage — link code + remove */}
+        <div className="space-y-2 border-t border-line pt-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+            Manage
+          </p>
+
+          {linkCodeFor !== member.id ? (
+            <button
+              type="button"
+              onClick={() => {
+                setLinkCodeFor(member.id);
+                setLinkCode(null);
+                setLinkCodeError("");
+              }}
+              className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-left text-sm text-stardust transition-colors hover:border-neon-green/30 hover:text-star"
+            >
+              Share a link code
+              <span className="mt-0.5 block text-xs text-dim">
+                For another parent or family member in the same room.
+              </span>
+            </button>
+          ) : (
+            <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+              <p className="text-sm font-medium text-star">Same-room link code</p>
+              <p className="mt-1 text-xs leading-relaxed text-dim">
+                The other person enters this code to link {member.name}&apos;s
+                profile. It works once and expires 15 minutes after it&apos;s created.
+              </p>
+              {!linkCode ? (
+                <button
+                  type="button"
+                  onClick={() => mintLinkCode(member.id)}
+                  disabled={linkCodeBusy}
+                  className="mt-3 w-full rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+                >
+                  {linkCodeBusy ? "Creating…" : "Create a code"}
+                </button>
+              ) : (
+                <div>
+                  <p className="mt-3 text-center font-mono text-4xl font-bold tracking-[0.35em] text-neon-green">
+                    {linkCode.code}
+                  </p>
+                  <p className="mt-1 text-center text-xs text-dim">
+                    Good until{" "}
+                    {new Date(linkCode.expires_at).toLocaleTimeString(undefined, {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}{" "}
+                    — one use only.
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(linkCode.code).catch(() => {})}
+                      className="flex-1 rounded-xl border border-line bg-panel-2/60 px-4 py-2 text-sm font-medium text-stardust transition-colors hover:text-star"
+                    >
+                      Copy code
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => mintLinkCode(member.id)}
+                      disabled={linkCodeBusy}
+                      className="flex-1 rounded-xl border border-line bg-panel-2/60 px-4 py-2 text-sm font-medium text-stardust transition-colors hover:text-star disabled:opacity-50"
+                    >
+                      {linkCodeBusy ? "Creating…" : "New code"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLinkCodeFor(null);
+                        setLinkCode(null);
+                      }}
+                      className="flex-1 rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+              {linkCodeError && (
+                <p role="alert" className="mt-2.5 text-xs text-neon-amber">
+                  {linkCodeError}
+                </p>
+              )}
+            </div>
+          )}
+
+          {!confirmRemove ? (
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmRemove(true);
+                setRemoveError("");
+              }}
+              className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-left text-sm text-dim transition-colors hover:border-red-400/40 hover:text-red-400"
+            >
+              Remove {member.name} from crew
+            </button>
+          ) : (
+            <div className="rounded-xl border border-red-400/30 bg-red-400/5 px-4 py-3">
+              <p className="text-sm font-medium text-star">
+                Remove {member.name}?
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-dim">
+                This deletes their crew profile and all synced school data.
+                This can&apos;t be undone.
+              </p>
+              {removeError && (
+                <p role="alert" className="mt-2 text-xs text-red-400">
+                  {removeError}
+                </p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmRemove(false)}
+                  disabled={removing}
+                  className="flex-1 rounded-xl border border-line bg-panel-2/60 px-4 py-2 text-sm font-medium text-stardust transition-colors hover:text-star disabled:opacity-50"
+                >
+                  Keep them
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeMember(member.id)}
+                  disabled={removing}
+                  className="flex-1 rounded-xl border border-red-400/40 bg-red-400/10 px-4 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-400/20 disabled:opacity-50"
+                >
+                  {removing ? "Removing…" : "Yes, remove"}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

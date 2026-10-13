@@ -1,19 +1,11 @@
 import { NextResponse } from "next/server";
 import { requirePilot, serverError } from "@/lib/api-auth";
-
-const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab", "steps"] as const;
-type Metric = (typeof METRICS)[number];
-
-/** Sanity bounds per metric (value is in the posted unit). Plain-English rejections. */
-const BOUNDS: Record<Metric, { min: number; max: number; what: string }> = {
-  weight: { min: 50, max: 1500, what: "weight" },
-  sleep: { min: 0, max: 24, what: "sleep hours" },
-  water: { min: 0, max: 50, what: "glasses of water" },
-  exercise: { min: 0, max: 1440, what: "exercise minutes" },
-  blood_glucose: { min: 20, max: 1000, what: "blood sugar reading" },
-  a1c_lab: { min: 3, max: 20, what: "A1C value" },
-  steps: { min: 0, max: 100000, what: "step count" },
-};
+import {
+  HEALTH_DEFAULT_UNIT,
+  HEALTH_METRICS,
+  checkHealthValue,
+  type HealthMetric,
+} from "@/lib/health/log-validation";
 
 /** Allowed context tags for a blood glucose reading. */
 const GLUCOSE_CONTEXTS = ["fasting", "before_meal", "after_meal", "bedtime", "other"] as const;
@@ -33,8 +25,8 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const metric = body.metric as Metric;
-    if (!METRICS.includes(metric)) {
+    const metric = body.metric as HealthMetric;
+    if (!HEALTH_METRICS.includes(metric)) {
       return NextResponse.json(
         { error: "Pick weight, sleep, water, exercise, steps, blood sugar, or lab A1C." },
         { status: 400 },
@@ -44,22 +36,13 @@ export async function POST(req: Request) {
     if (!Number.isFinite(value)) {
       return NextResponse.json({ error: "Enter a number." }, { status: 400 });
     }
-    const bounds = BOUNDS[metric];
-    if (value < bounds.min || value > bounds.max) {
-      return NextResponse.json(
-        { error: `That ${bounds.what} doesn't look right — try again.` },
-        { status: 400 },
-      );
+    const bad = checkHealthValue(metric, value);
+    if (bad) {
+      return NextResponse.json({ error: bad }, { status: 400 });
     }
     const unit = typeof body.unit === "string" && body.unit.trim()
       ? body.unit.trim().slice(0, 12)
-      : metric === "weight" ? "lb"
-      : metric === "sleep" ? "h"
-      : metric === "water" ? "glasses"
-      : metric === "blood_glucose" ? "mg/dL"
-      : metric === "a1c_lab" ? "%"
-      : metric === "steps" ? "steps"
-      : "min";
+      : HEALTH_DEFAULT_UNIT[metric];
     const meta = body.meta && typeof body.meta === "object" ? body.meta : {};
 
     // Blood glucose: validate the context tag.
