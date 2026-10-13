@@ -152,6 +152,21 @@ export function TodayApplet() {
         onRetry={loadBriefing}
       />
 
+      {/* Cloud-sync status: the hook reports the last background-sync
+          failure in plain English; the pilot can retry on the spot. */}
+      {syncError !== null && (
+        <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-center">
+          <p className="text-sm text-star">{syncError}</p>
+          <button
+            type="button"
+            onClick={() => void retrySync()}
+            className="mt-2 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-1.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
+          >
+            Try syncing again
+          </button>
+        </div>
+      )}
+
       {/* Quick-capture to-dos — cloud-synced when signed in, on this device otherwise. */}
       <div>
         <div className="flex gap-2">
