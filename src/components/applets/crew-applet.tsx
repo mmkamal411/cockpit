@@ -32,6 +32,11 @@ interface CrewMemberRow {
   birthdate: string | null;
   relationship: string;
   created_at: string;
+  /** True when this profile is linked to the pilot through someone else's
+   *  live access grant (e.g. a child who claimed a steward's link code).
+   *  Steward-only controls (school logins, remove, share codes) are hidden
+   *  for these — the steward manages them. */
+  via_grant?: boolean;
   school_sync?: {
     sync_status: string;
     last_synced_at: string | null;
@@ -166,6 +171,11 @@ function needsAttention(m: CrewMemberRow): boolean {
 /** Plain-English sync status for the roster. */
 function syncStatusText(m: CrewMemberRow): { text: string; tone: "ok" | "warn" | "idle" } {
   const s = m.school_sync;
+  // Linked profiles: the steward's sync status isn't visible to the grantee
+  // under RLS — say exactly that instead of "Not connected yet" (a lie).
+  if (m.via_grant) {
+    return { text: "Linked to your cockpit", tone: "ok" };
+  }
   if (!s || !s.last_synced_at) {
     return { text: "Not connected yet", tone: "idle" };
   }
@@ -242,6 +252,9 @@ export function CrewApplet() {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesSyncedAt, setClassesSyncedAt] = useState<string | null>(null);
   const [classesMessage, setClassesMessage] = useState("");
+  // True when the last classes load failed (not just "no data yet") — drives
+  // the retry button. A failed load and an empty sync are different stories.
+  const [classesLoadFailed, setClassesLoadFailed] = useState(false);
   // Grade freshness from the same sync row.
   const [classesStale, setClassesStale] = useState(false);
   const [classesHours, setClassesHours] = useState<number | null>(null);
@@ -261,6 +274,11 @@ export function CrewApplet() {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
+  // Link-code claim (the child's half): enter a 6-digit code minted by a
+  // steward to link their crew profile to this pilot.
+  const [claimCode, setClaimCode] = useState("");
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimMessage, setClaimMessage] = useState<{ ok: boolean; text: string } | null>(null);
   // Class detail drill-down: when set, shows one class's full page.
   const [selectedClassName, setSelectedClassName] = useState<string | null>(null);
   // School calendar + bell schedules (member detail view).
@@ -950,6 +968,54 @@ export function CrewApplet() {
     }
   }
 
+  /**
+   * Claim a 6-digit same-room link code minted by a steward. On success the
+   * member lands on this pilot's roster (via_grant) and opens in the detail
+   * view — the child is no longer stranded with an empty crew.
+   */
+  async function claimLinkCode() {
+    const digits = claimCode.replace(/[^0-9]/g, "");
+    if (digits.length !== 6) {
+      setClaimMessage({
+        ok: false,
+        text: "Enter the 6-digit code — just the numbers.",
+      });
+      return;
+    }
+    setClaimBusy(true);
+    setClaimMessage(null);
+    try {
+      const res = await fetch("/api/crew/link-codes/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: digits }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setClaimMessage({
+          ok: false,
+          text: json.error ?? "That code didn't work. Try again.",
+        });
+        return;
+      }
+      const member = json.member as { id: string } | null;
+      setClaimCode("");
+      setClaimMessage({
+        ok: true,
+        text: "Linked. Opening their school life…",
+      });
+      await refreshRoster();
+      if (member?.id) openMemberDetail(member.id);
+    } catch {
+      setClaimMessage({
+        ok: false,
+        text: "We couldn't reach the server. Check your connection and try again.",
+      });
+    } finally {
+      setClaimBusy(false);
+    }
+  }
+
   /** Test + save the ParentVUE (parent portal) login. */
   async function submitParentLogin(memberId: string) {
     if (!parentUsername.trim() || !parentPassword) {
@@ -1032,6 +1098,7 @@ export function CrewApplet() {
     setSelectedClassName(null);
     setClasses([]);
     setClassesMessage("");
+    setClassesLoadFailed(false);
     setClassesSyncedAt(null);
     setGpa(null);
     setAttendance(null);
@@ -1051,6 +1118,7 @@ export function CrewApplet() {
     setSelectedMemberId(null);
     setClasses([]);
     setClassesMessage("");
+    setClassesLoadFailed(false);
     setClassesSyncedAt(null);
     setGpa(null);
     setAttendance(null);
@@ -1067,6 +1135,7 @@ export function CrewApplet() {
 
   async function loadMemberClasses(memberId: string) {
     setClassesLoading(true);
+    setClassesLoadFailed(false);
     try {
       const res = await fetch(`/api/crew/members/${memberId}/classes`);
       const json = await res.json();
@@ -1080,9 +1149,11 @@ export function CrewApplet() {
         setClassesHours(json.hours_since_sync ?? null);
         if (json.message) setClassesMessage(json.message);
       } else {
+        setClassesLoadFailed(true);
         setClassesMessage("Couldn't load classes right now.");
       }
     } catch {
+      setClassesLoadFailed(true);
       setClassesMessage("Couldn't load classes right now.");
     } finally {
       setClassesLoading(false);
@@ -1638,7 +1709,23 @@ export function CrewApplet() {
           >
             ID: {member.id.slice(0, 8)}… tap to copy
           </button>
+          {member.via_grant && (
+            <p className="mt-1.5 inline-block rounded-full border border-neon-teal/40 bg-neon-teal/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-neon-teal">
+              🔗 Linked profile
+            </p>
+          )}
         </div>
+
+        {member.via_grant && (
+          <div className="rounded-xl border border-neon-teal/30 bg-neon-teal/[0.06] px-4 py-3">
+            <p className="text-sm font-medium text-star">Shared with you by a parent</p>
+            <p className="mt-1 text-xs leading-relaxed text-stardust">
+              The school login stays with them — you can see the classes and
+              grades, but only they can update the connection. If the grades
+              look stale, ask them to run a sync.
+            </p>
+          </div>
+        )}
 
         {/* School sync status */}
         <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
@@ -1977,9 +2064,27 @@ export function CrewApplet() {
               ))}
             </div>
           ) : (
-            <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
-              {classesMessage || "No school data yet — connect a school login to see classes and grades."}
-            </p>
+            <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+              <p className="text-sm text-dim">
+                {classesLoadFailed
+                  ? "The classes didn't load. Nothing is lost — try again."
+                  : classesMessage
+                    ? classesMessage
+                    : member.via_grant
+                      ? "No school data yet — it shows up here once the school sync runs."
+                      : "No school data yet — connect a school login to see classes and grades."}
+              </p>
+              {classesLoadFailed && (
+                <button
+                  type="button"
+                  onClick={() => loadMemberClasses(member.id)}
+                  disabled={classesLoading}
+                  className="mt-2 rounded-lg border border-neon-green/40 bg-neon-green/10 px-3 py-1.5 text-xs font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+                >
+                  {classesLoading ? "Loading…" : "Try again"}
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -2048,7 +2153,7 @@ export function CrewApplet() {
             <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
               School calendar &amp; bell schedules
             </p>
-            {!srcLoading && (
+            {!srcLoading && !member.via_grant && (
               <button
                 type="button"
                 onClick={() => (srcEditing ? setSrcEditing(false) : openSourcesEditor())}
@@ -2443,7 +2548,9 @@ export function CrewApplet() {
           )}
         </div>
 
-        {/* Manage — link code + remove */}
+        {/* Manage — link code + remove. Steward only: a linked family member
+            can't mint codes or remove the profile. */}
+        {!member.via_grant && (
         <div className="space-y-2 border-t border-line pt-4">
           <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
             Manage
@@ -2468,7 +2575,8 @@ export function CrewApplet() {
             <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
               <p className="text-sm font-medium text-star">Same-room link code</p>
               <p className="mt-1 text-xs leading-relaxed text-dim">
-                The other person enters this code to link {member.name}&apos;s
+                The other person enters this code in their own Crew panel
+                (“Joining as a family member?”) to link {member.name}&apos;s
                 profile. It works once and expires 15 minutes after it&apos;s created.
               </p>
               {!linkCode ? (
@@ -2576,6 +2684,7 @@ export function CrewApplet() {
             </div>
           )}
         </div>
+        )}
       </div>
     );
   }
@@ -2688,7 +2797,9 @@ export function CrewApplet() {
                       </div>
                     </button>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-dim">{m.relationship}</span>
+                      <span className="text-xs text-dim">
+                        {m.via_grant ? "🔗 linked" : m.relationship}
+                      </span>
                       {attention && reauthFor !== m.id && (
                         <button
                           type="button"
@@ -2814,6 +2925,60 @@ export function CrewApplet() {
         >
           {loadError}
         </p>
+      )}
+
+      {/* Link-code claim — the child's way in. A steward (parent) mints a
+          6-digit code from a crew profile; the family member enters it here
+          to link that profile to their own cockpit. */}
+      {step === 1 && (
+        <div className="rounded-2xl border border-neon-teal/30 bg-neon-teal/[0.06] p-4">
+          <p className="text-sm font-medium text-star">
+            {roster.length === 0
+              ? "Joining as a family member?"
+              : "Have a link code for someone else?"}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-stardust">
+            {roster.length === 0
+              ? "If a parent gave you a 6-digit link code, enter it here and their crew profile — classes, grades, the works — links to your cockpit."
+              : "Enter a 6-digit code someone shared to link their profile here."}
+          </p>
+          <div className="mt-3 flex gap-2">
+            <input
+              value={claimCode}
+              onChange={(e) => setClaimCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void claimLinkCode();
+              }}
+              placeholder="6-digit code"
+              inputMode="numeric"
+              autoComplete="off"
+              aria-label="6-digit link code"
+              disabled={claimBusy}
+              maxLength={6}
+              className="w-32 shrink-0 rounded-xl border border-line bg-panel px-4 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-star placeholder:text-dim placeholder:tracking-normal placeholder:text-sm focus:border-neon-teal/60 focus:outline-none disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={() => void claimLinkCode()}
+              disabled={claimBusy || claimCode.replace(/[^0-9]/g, "").length !== 6}
+              className="flex-1 rounded-xl border border-neon-teal/40 bg-neon-teal/10 px-4 py-2.5 text-sm font-medium text-neon-teal transition-colors hover:bg-neon-teal/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {claimBusy ? "Linking…" : "Link with code"}
+            </button>
+          </div>
+          {claimMessage && (
+            <p
+              role={claimMessage.ok ? "status" : "alert"}
+              className={`mt-2.5 rounded-xl border px-4 py-2.5 text-sm ${
+                claimMessage.ok
+                  ? "border-neon-teal/30 bg-neon-teal/5 text-neon-teal"
+                  : "border-neon-amber/30 bg-neon-amber/5 text-neon-amber"
+              }`}
+            >
+              {claimMessage.text}
+            </p>
+          )}
+        </div>
       )}
 
       {roster.length > 0 && step === 1 && (
