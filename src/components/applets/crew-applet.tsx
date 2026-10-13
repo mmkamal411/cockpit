@@ -18,6 +18,14 @@ interface CrewMemberRow {
   };
 }
 
+interface ClassRow {
+  id: string;
+  name: string;
+  grade: number | null;
+  letter: string | null;
+  gap_to_90: number | null;
+}
+
 /** True when a member's school connection needs the parent's attention. */
 function needsAttention(m: CrewMemberRow): boolean {
   const s = m.school_sync;
@@ -67,12 +75,19 @@ export function CrewApplet() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
+  // Member detail view: when set, shows the member's profile instead of the roster/form.
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   // Re-auth form state (per crew member).
   const [reauthFor, setReauthFor] = useState<string | null>(null);
   const [reauthUsername, setReauthUsername] = useState("");
   const [reauthPassword, setReauthPassword] = useState("");
   const [reauthSaving, setReauthSaving] = useState(false);
   const [reauthMessage, setReauthMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  // Classes/grades for the detail view.
+  const [classes, setClasses] = useState<ClassRow[]>([]);
+  const [classesLoading, setClassesLoading] = useState(false);
+  const [classesSyncedAt, setClassesSyncedAt] = useState<string | null>(null);
+  const [classesMessage, setClassesMessage] = useState("");
 
   // Load the pilot's crew roster on mount.
   useEffect(() => {
@@ -180,6 +195,43 @@ export function CrewApplet() {
     setReauthMessage(null);
   }
 
+  /** Open a member's detail view and load their classes. */
+  function openMemberDetail(memberId: string) {
+    setSelectedMemberId(memberId);
+    setClasses([]);
+    setClassesMessage("");
+    setClassesSyncedAt(null);
+    closeReauth();
+    loadMemberClasses(memberId);
+  }
+
+  function closeMemberDetail() {
+    setSelectedMemberId(null);
+    setClasses([]);
+    setClassesMessage("");
+    setClassesSyncedAt(null);
+    closeReauth();
+  }
+
+  async function loadMemberClasses(memberId: string) {
+    setClassesLoading(true);
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}/classes`);
+      const json = await res.json();
+      if (res.ok) {
+        setClasses(json.classes ?? []);
+        setClassesSyncedAt(json.synced_at ?? null);
+        if (json.message) setClassesMessage(json.message);
+      } else {
+        setClassesMessage("Couldn't load classes right now.");
+      }
+    } catch {
+      setClassesMessage("Couldn't load classes right now.");
+    } finally {
+      setClassesLoading(false);
+    }
+  }
+
   async function submitReauth(memberId: string) {
     if (!reauthUsername.trim() || !reauthPassword) {
       setReauthMessage({
@@ -241,6 +293,190 @@ export function CrewApplet() {
     );
   }
 
+  // Member detail view — opened by tapping a crew member's name in any roster.
+  if (selectedMemberId) {
+    const member = roster.find((m) => m.id === selectedMemberId);
+    if (!member) {
+      // Member vanished from roster (e.g. removed) — back to the list.
+      setSelectedMemberId(null);
+      return null;
+    }
+    const status = syncStatusText(member);
+    const attention = needsAttention(member);
+    const dotColor =
+      status.tone === "ok"
+        ? "bg-neon-green"
+        : status.tone === "warn"
+          ? "bg-neon-amber"
+          : "bg-dim";
+    return (
+      <div className="space-y-5">
+        <div>
+          <button
+            type="button"
+            onClick={closeMemberDetail}
+            className="mb-3 flex items-center gap-1.5 text-sm text-stardust transition-colors hover:text-star"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+            Back to crew
+          </button>
+          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-green">
+            Crew · {member.relationship}
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-star">{member.name}</h2>
+          {member.birthdate && (
+            <p className="mt-1 text-sm text-dim">
+              Born {new Date(member.birthdate + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
+            </p>
+          )}
+        </div>
+
+        {/* School sync status */}
+        <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span aria-hidden="true" className={`h-2 w-2 rounded-full ${dotColor}`} />
+              <div>
+                <p className="text-sm font-medium text-star">School sync</p>
+                <p className={`text-xs ${status.tone === "warn" ? "text-neon-amber" : "text-dim"}`}>
+                  {status.text}
+                </p>
+              </div>
+            </div>
+            {attention && reauthFor !== member.id && (
+              <button
+                type="button"
+                onClick={() => openReauth(member.id)}
+                className="rounded-lg border border-neon-amber/40 bg-neon-amber/10 px-3 py-1.5 text-xs font-medium text-neon-amber transition-colors hover:bg-neon-amber/20"
+              >
+                Update login
+              </button>
+            )}
+          </div>
+          {reauthFor === member.id && (
+            <div className="mt-3 border-t border-line pt-3">
+              <p className="text-sm font-medium text-star">
+                Update {member.name}&apos;s school login
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-dim">
+                We&apos;ll test it against the school portal right now.
+                It&apos;s only used for that check — never stored as plain text.
+              </p>
+              <div className="mt-3 space-y-2.5">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-stardust">
+                    School portal username
+                  </span>
+                  <input
+                    value={reauthUsername}
+                    onChange={(e) => setReauthUsername(e.target.value)}
+                    placeholder="Student username or ID"
+                    autoComplete="off"
+                    disabled={reauthSaving}
+                    className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-stardust">
+                    School portal password
+                  </span>
+                  <input
+                    type="password"
+                    value={reauthPassword}
+                    onChange={(e) => setReauthPassword(e.target.value)}
+                    placeholder="Portal password"
+                    autoComplete="new-password"
+                    disabled={reauthSaving}
+                    className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                  />
+                </label>
+              </div>
+              {reauthMessage && (
+                <p
+                  role="alert"
+                  className={`mt-2.5 rounded-xl border px-4 py-2.5 text-sm ${
+                    reauthMessage.ok
+                      ? "border-neon-green/30 bg-neon-green/5 text-neon-green"
+                      : "border-neon-amber/30 bg-neon-amber/5 text-neon-amber"
+                  }`}
+                >
+                  {reauthMessage.text}
+                </p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={closeReauth}
+                  disabled={reauthSaving}
+                  className="rounded-xl border border-line bg-panel-2/60 px-4 py-2 text-sm font-medium text-stardust transition-colors hover:text-star disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitReauth(member.id)}
+                  disabled={reauthSaving}
+                  className="flex-1 rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+                >
+                  {reauthSaving ? "Checking…" : "Check this login"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Classes & grades */}
+        <div className="space-y-2">
+          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+            Classes
+          </p>
+          {classesLoading ? (
+            <p className="text-sm text-stardust">Loading classes…</p>
+          ) : classes.length > 0 ? (
+            <div className="space-y-2">
+              {classesSyncedAt && (
+                <p className="text-xs text-dim">
+                  Synced {new Date(classesSyncedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                  {" at "}
+                  {new Date(classesSyncedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                </p>
+              )}
+              {classes.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5"
+                >
+                  <span className="text-sm text-star">{c.name}</span>
+                  <span className="flex items-center gap-2">
+                    {c.gap_to_90 !== null && c.gap_to_90 > 0 && (
+                      <span className="text-xs text-neon-amber">{c.gap_to_90.toFixed(1)} to 90</span>
+                    )}
+                    <span className={`text-sm font-semibold ${
+                      c.grade === null ? "text-dim"
+                      : c.grade >= 90 ? "text-neon-green"
+                      : c.grade >= 80 ? "text-star"
+                      : c.grade >= 74 ? "text-neon-amber"
+                      : "text-red-400"
+                    }`}>
+                      {c.grade !== null ? `${c.grade.toFixed(1)}` : "—"}
+                      {c.letter && <span className="ml-1 text-xs font-normal text-dim">{c.letter}</span>}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+              {classesMessage || "No school data yet — connect a school login to see classes and grades."}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (added) {
     return (
       <div className="space-y-5 text-center">
@@ -274,20 +510,25 @@ export function CrewApplet() {
               return (
                 <div key={m.id} className="space-y-2">
                   <div className="flex items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5">
-                    <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => openMemberDetail(m.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-opacity hover:opacity-80"
+                      aria-label={`View ${m.name}'s profile`}
+                    >
                       <span
                         aria-hidden="true"
-                        className={`h-2 w-2 rounded-full ${dotColor}`}
+                        className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`}
                       />
-                      <div>
-                        <div className="text-sm text-star">{m.name}</div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-star underline decoration-dotted decoration-dim/50 underline-offset-2">{m.name}</div>
                         <div
-                          className={`text-xs ${status.tone === "warn" ? "text-neon-amber" : "text-dim"}`}
+                          className={`truncate text-xs ${status.tone === "warn" ? "text-neon-amber" : "text-dim"}`}
                         >
                           {status.text}
                         </div>
                       </div>
-                    </div>
+                    </button>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-dim">{m.relationship}</span>
                       {attention && reauthFor !== m.id && (
@@ -420,17 +661,39 @@ export function CrewApplet() {
       {roster.length > 0 && step === 1 && (
         <div className="space-y-2">
           <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
-            Already aboard
+            Already aboard — tap a name to view their profile
           </p>
-          {roster.map((m) => (
-            <div
-              key={m.id}
-              className="flex items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5"
-            >
-              <span className="text-sm text-star">{m.name}</span>
-              <span className="text-xs text-dim">{m.relationship}</span>
-            </div>
-          ))}
+          {roster.map((m) => {
+            const status = syncStatusText(m);
+            const dotColor =
+              status.tone === "ok"
+                ? "bg-neon-green"
+                : status.tone === "warn"
+                  ? "bg-neon-amber"
+                  : "bg-dim";
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => openMemberDetail(m.id)}
+                className="flex w-full items-center justify-between rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-left transition-colors hover:border-neon-green/30"
+                aria-label={`View ${m.name}'s profile`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span aria-hidden="true" className={`h-2 w-2 rounded-full ${dotColor}`} />
+                  <span className="text-sm text-star underline decoration-dotted decoration-dim/50 underline-offset-2">{m.name}</span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className={`text-xs ${status.tone === "warn" ? "text-neon-amber" : "text-dim"}`}>
+                    {status.tone !== "idle" ? status.text : m.relationship}
+                  </span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-dim">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 

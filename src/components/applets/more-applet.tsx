@@ -99,10 +99,17 @@ function MoreAppletLegacy() {
           {crew.length > 0 && (
             <ul className="mt-3 space-y-1.5">
               {crew.map((m) => (
-                <li key={m.id} className="flex items-center gap-2 text-sm text-stardust">
-                  <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-neon-green" />
-                  <span className="text-star">{m.name}</span>
-                  <span className="text-xs text-dim">· aboard</span>
+                <li key={m.id}>
+                  <button
+                    type="button"
+                    onClick={() => openApplet("crew", {}, { replace: true })}
+                    className="flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-sm text-stardust transition-colors hover:bg-panel"
+                    aria-label={`View ${m.name}'s crew profile`}
+                  >
+                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-neon-green" />
+                    <span className="text-star underline decoration-dotted decoration-dim/50 underline-offset-2">{m.name}</span>
+                    <span className="text-xs text-dim">· aboard</span>
+                  </button>
                 </li>
               ))}
             </ul>
