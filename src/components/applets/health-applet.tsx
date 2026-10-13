@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type Metric = "weight" | "sleep" | "water" | "exercise" | "blood_glucose";
+type Metric = "steps" | "weight" | "sleep" | "water" | "exercise" | "blood_glucose";
 
 interface HealthLog {
   id: string;
@@ -26,12 +26,19 @@ interface Goal {
 }
 
 const METRICS: { id: Metric; label: string; icon: string; unit: string; accent: string }[] = [
+  { id: "steps", label: "Steps", icon: "👟", unit: "steps", accent: "text-neon-green" },
   { id: "weight", label: "Weight", icon: "⚖️", unit: "lb", accent: "text-amber-300" },
   { id: "sleep", label: "Sleep", icon: "😴", unit: "h", accent: "text-neon-cyan" },
   { id: "water", label: "Water", icon: "💧", unit: "glasses", accent: "text-cyan-300" },
-  { id: "exercise", label: "Exercise", icon: "🏃", unit: "min", accent: "text-neon-green" },
+  { id: "exercise", label: "Exercise", icon: "🏃", unit: "min", accent: "text-lime-300" },
   { id: "blood_glucose", label: "Blood sugar", icon: "🩸", unit: "mg/dL", accent: "text-red-300" },
 ];
+
+/** Default daily steps goal, used until the pilot sets their own. */
+const DEFAULT_STEPS_GOAL = 10000;
+
+/** Quick-add amounts for the steps log sheet — a tap logs that many steps right away. */
+const STEPS_QUICK_ADD = [500, 1000, 2500, 5000] as const;
 
 /** Context tags for a glucose reading. */
 const GLUCOSE_CONTEXTS = [
@@ -57,6 +64,7 @@ export function HealthApplet() {
   const [latest, setLatest] = useState<Partial<Record<Metric, HealthLog>>>({});
   const [streaks, setStreaks] = useState<Streak[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [stepsToday, setStepsToday] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Metric | null>(null);
@@ -65,15 +73,17 @@ export function HealthApplet() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [logsRes, streaksRes, goalsRes] = await Promise.all([
+      const [logsRes, streaksRes, goalsRes, stepsRes] = await Promise.all([
         fetch("/api/health/logs?limit=200", { cache: "no-store" }),
         fetch("/api/health/streaks", { cache: "no-store" }),
         fetch("/api/health/goals", { cache: "no-store" }),
+        fetch("/api/health/logs?metric=steps&today_only=true", { cache: "no-store" }),
       ]);
       for (const [res, what] of [
         [logsRes, "logs"],
         [streaksRes, "streaks"],
         [goalsRes, "goals"],
+        [stepsRes, "steps"],
       ] as const) {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -90,6 +100,7 @@ export function HealthApplet() {
       setLatest(first);
       setStreaks((await streaksRes.json()).streaks ?? []);
       setGoals((await goalsRes.json()).goals ?? []);
+      setStepsToday((await stepsRes.json()).today_total ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Your health log didn't load. Try again.");
     } finally {
@@ -130,16 +141,66 @@ export function HealthApplet() {
         </div>
       )}
 
-      {/* Metric tiles */}
+      {/* Metric tiles — steps is the hero, full-width with its goal progress */}
       <div className="grid grid-cols-2 gap-3">
         {loading
-          ? [0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-32 animate-pulse rounded-2xl border border-line bg-panel-2/60" />
+          ? METRICS.map((m) => (
+              <div key={m.id} className="h-32 animate-pulse rounded-2xl border border-line bg-panel-2/60" />
             ))
           : METRICS.map((m) => {
               const log = latest[m.id];
               const streak = streakFor(m.id);
-              const goal = goalFor(m.id);
+              if (m.id === "steps") {
+                const stepsGoal = goalFor("steps")?.target_value ?? DEFAULT_STEPS_GOAL;
+                const goalMet = stepsToday > 0 && stepsToday >= stepsGoal;
+                const pct = Math.min(stepsToday / stepsGoal, 1) * 100;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSheet(m.id)}
+                    className="col-span-2 rounded-2xl border border-neon-green/25 bg-panel-2/60 p-4 text-left transition-colors hover:border-neon-green/50"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <span aria-hidden="true" className="text-xl">{m.icon}</span>
+                        <span className="text-xs font-medium uppercase tracking-wider text-dim">{m.label}</span>
+                      </span>
+                      {streak && streak.current_streak >= 2 && (
+                        <span className="text-xs font-medium text-amber-300">
+                          🔥 {streak.current_streak}d
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 flex items-end justify-between gap-2">
+                      <p className="text-4xl font-semibold text-neon-green">
+                        {stepsToday.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-dim">of {stepsGoal.toLocaleString()} steps</p>
+                    </div>
+                    <div
+                      className="mt-2 h-2 overflow-hidden rounded-full bg-panel"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={stepsGoal}
+                      aria-valuenow={Math.round(stepsToday)}
+                      aria-label="Steps goal progress"
+                    >
+                      <div
+                        className="h-full rounded-full bg-neon-green/80 transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-dim">
+                      {goalMet
+                        ? "Goal reached ✓ Tap to log more"
+                        : stepsToday === 0
+                          ? "No steps logged today — tap to add your first walk"
+                          : "Tap to log"}
+                    </p>
+                  </button>
+                );
+              }
               return (
                 <button
                   key={m.id}
@@ -161,7 +222,7 @@ export function HealthApplet() {
                   </p>
                   <p className="mt-1 text-xs text-dim">
                     {log ? "Tap to log" : "Tap to log your first entry"}
-                    {goal ? ` · goal ${goal.target_value} ${goal.unit}` : ""}
+                    {goalFor(m.id) ? ` · goal ${goalFor(m.id)!.target_value} ${goalFor(m.id)!.unit}` : ""}
                   </p>
                 </button>
               );
@@ -232,10 +293,12 @@ function LogSheet({
     metric === "weight" ? "e.g. 172" :
     metric === "sleep" ? "e.g. 7.5" :
     metric === "water" ? "e.g. 6" :
+    metric === "steps" ? "e.g. 2500" :
     metric === "blood_glucose" ? "e.g. 112" : "e.g. 30";
 
-  async function save() {
-    const v = parseFloat(value);
+  async function save(amountOverride?: number) {
+    const raw = amountOverride !== undefined ? String(amountOverride) : value;
+    const v = parseFloat(raw);
     if (!Number.isFinite(v)) {
       setError("Enter a number.");
       return;
@@ -434,7 +497,32 @@ function LogSheet({
               </>
             )}
 
-            {goal && (
+            {metric === "steps" && (
+              <>
+                <div>
+                  <p className="mb-2 text-sm text-stardust">Quick add</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {STEPS_QUICK_ADD.map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => save(amt)}
+                        disabled={saving}
+                        className="rounded-xl border border-neon-green/40 bg-neon-green/10 py-2.5 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        +{amt.toLocaleString()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <StepsGoalEditor
+                  initial={goal?.target_value ?? DEFAULT_STEPS_GOAL}
+                  onSaved={onSaved}
+                />
+              </>
+            )}
+
+            {goal && metric !== "steps" && (
               <p className="text-xs text-dim">
                 Your goal: {goal.target_value} {goal.unit}
               </p>
@@ -461,6 +549,96 @@ function LogSheet({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Steps daily-goal editor — PUT /api/health/goals                      */
+/* ------------------------------------------------------------------ */
+
+function StepsGoalEditor({ initial, onSaved }: { initial: number; onSaved: () => void }) {
+  const [goalText, setGoalText] = useState(String(initial));
+  const [savingGoal, setSavingGoal] = useState(false);
+  const [goalSaved, setGoalSaved] = useState(false);
+  const [goalError, setGoalError] = useState<string | null>(null);
+
+  function nudge(delta: number) {
+    const cur = parseFloat(goalText);
+    const next = Math.max(500, Math.round((Number.isFinite(cur) ? cur : initial) + delta));
+    setGoalText(String(next));
+    setGoalSaved(false);
+  }
+
+  async function saveGoal() {
+    const t = parseFloat(goalText);
+    if (!Number.isFinite(t) || t <= 0) {
+      setGoalError("Enter a goal number.");
+      return;
+    }
+    setSavingGoal(true);
+    setGoalError(null);
+    try {
+      const res = await fetch("/api/health/goals", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ metric: "steps", target_value: t, unit: "steps" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof body?.error === "string" ? body.error : "Couldn't save that.");
+      }
+      setGoalSaved(true);
+      onSaved();
+      setTimeout(() => setGoalSaved(false), 2000);
+    } catch (err) {
+      setGoalError(err instanceof Error ? err.message : "Couldn't save that.");
+    } finally {
+      setSavingGoal(false);
+    }
+  }
+
+  return (
+    <div>
+      <p className="mb-2 text-sm text-stardust">Daily goal</p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => nudge(-500)}
+          aria-label="Lower goal by 500"
+          className="rounded-xl border border-line px-4 text-lg text-dim transition-colors hover:text-star"
+        >
+          −
+        </button>
+        <input
+          value={goalText}
+          onChange={(e) => {
+            setGoalText(e.target.value);
+            setGoalSaved(false);
+          }}
+          inputMode="numeric"
+          aria-label="Daily steps goal"
+          className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-center text-xl text-star focus:border-neon-green/60 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={() => nudge(500)}
+          aria-label="Raise goal by 500"
+          className="rounded-xl border border-line px-4 text-lg text-dim transition-colors hover:text-star"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={saveGoal}
+          disabled={savingGoal || !goalText.trim()}
+          className="rounded-xl border border-neon-green/40 bg-neon-green/10 px-5 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {savingGoal ? "Saving…" : "Save"}
+        </button>
+      </div>
+      {goalSaved && <p className="mt-1.5 text-xs text-neon-green">Goal updated ✓</p>}
+      {goalError && <p className="mt-1.5 text-xs text-red-300">{goalError}</p>}
     </div>
   );
 }
