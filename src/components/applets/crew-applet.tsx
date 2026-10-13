@@ -12,12 +12,12 @@ import {
   ParsedCalendarNote,
   SourceCheck,
   SourceCheckRow,
-  SourceUpload,
+  SourceFallbackUpload,
   Spinner,
-  UploadPick,
   normalizeBellPeriods,
   normalizeCalendarSummary,
   runSourceIntake,
+  uploadSourceFile,
   validateUploadFile,
 } from "./school-source-intake";
 
@@ -201,13 +201,17 @@ export function CrewApplet() {
   const [newBellRows, setNewBellRows] = useState<BellRowInput[]>([
     { label: "Daily", url: "" },
   ]);
-  const [newUploads, setNewUploads] = useState<UploadPick[]>([]);
-  const [newUploadError, setNewUploadError] = useState("");
   const [sourcesNote, setSourcesNote] = useState("");
   // Per-source intake status shown on the confirmation screen after adding.
   const [intakeChecks, setIntakeChecks] = useState<SourceCheck[]>([]);
   const [intakeRunning, setIntakeRunning] = useState(false);
   const [retryingCheckKey, setRetryingCheckKey] = useState<string | null>(null);
+  // URL-first fallback uploads on the confirmation screen (per failed check).
+  const [addedFallbackDone, setAddedFallbackDone] = useState<string[]>([]);
+  const [addedFallbackBusy, setAddedFallbackBusy] = useState(false);
+  const [addedFallbackErrors, setAddedFallbackErrors] = useState<
+    Record<string, string>
+  >({});
   const [roster, setRoster] = useState<CrewMemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -269,11 +273,13 @@ export function CrewApplet() {
   const [srcDistrict, setSrcDistrict] = useState("");
   const [srcCalendarUrl, setSrcCalendarUrl] = useState("");
   const [srcBells, setSrcBells] = useState<BellScheduleEntry[]>([]);
-  const [srcUploads, setSrcUploads] = useState<UploadPick[]>([]);
-  const [srcUploadError, setSrcUploadError] = useState("");
   const [srcSaving, setSrcSaving] = useState(false);
   const [srcRefreshing, setSrcRefreshing] = useState(false);
   const [srcMessage, setSrcMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  // URL-first fallback uploads in the member-detail editor (per failed source).
+  const [srcFallbackDone, setSrcFallbackDone] = useState<string[]>([]);
+  const [srcFallbackBusy, setSrcFallbackBusy] = useState(false);
+  const [srcFallbackError, setSrcFallbackError] = useState("");
   // Per-source intake checks + parsed digital payloads from the content endpoint.
   const [srcChecks, setSrcChecks] = useState<SourceCheck[]>([]);
   const [srcRetryingKey, setSrcRetryingKey] = useState<string | null>(null);
@@ -438,20 +444,11 @@ export function CrewApplet() {
       .forEach((b, i) =>
         items.push({ key: `bell-${i}`, kind: "bell", label: b.label, url: b.url }),
       );
-    newUploads.forEach((pick, i) =>
-      items.push({
-        key: `upload-${i}`,
-        kind: "upload",
-        label: pick.file.name,
-        file: pick.file,
-        uploadKind: pick.kind,
-      }),
-    );
     return items;
   }
 
   /** Build the full intake item list from the member-detail editor fields. */
-  function buildSrcIntakeItems(extraUpload?: SourceCheck): IntakeItem[] {
+  function buildSrcIntakeItems(extraUploads?: SourceCheck[]): IntakeItem[] {
     const items: IntakeItem[] = [];
     const calUrl = srcCalendarUrl.trim();
     if (calUrl)
@@ -467,22 +464,14 @@ export function CrewApplet() {
       .forEach((b, i) =>
         items.push({ key: `bell-${i}`, kind: "bell", label: b.label, url: b.url }),
       );
-    srcUploads.forEach((pick, i) =>
+    for (const extra of extraUploads ?? []) {
+      if (!extra.file) continue;
       items.push({
-        key: `upload-${Date.now()}-${i}`,
+        key: extra.key,
         kind: "upload",
-        label: pick.file.name,
-        file: pick.file,
-        uploadKind: pick.kind,
-      }),
-    );
-    if (extraUpload?.file) {
-      items.push({
-        key: extraUpload.key,
-        kind: "upload",
-        label: extraUpload.label,
-        file: extraUpload.file,
-        uploadKind: extraUpload.uploadKind,
+        label: extra.label,
+        file: extra.file,
+        uploadKind: extra.uploadKind,
       });
     }
     return items;
@@ -556,6 +545,210 @@ export function CrewApplet() {
     }
   }
 
+  /** Did the calendar source fail? (stale snapshot or a fresh check error) */
+  function calendarSourceFailed(): boolean {
+    return Boolean(
+      (srcSnapshots.calendar && srcSnapshots.calendar.status !== "ok") ||
+        srcChecks.some((c) => c.key === "calendar" && c.state === "error"),
+    );
+  }
+
+  /** Did bell row i fail? (stale snapshot or a fresh check error) */
+  function bellSourceFailed(i: number): boolean {
+    return Boolean(
+      (srcSnapshots.bells[i] && srcSnapshots.bells[i].status !== "ok") ||
+        srcChecks.some((c) => c.key === `bell-${i}` && c.state === "error"),
+    );
+  }
+
+  /**
+   * URL-first fallback in the member-detail editor: upload a photo/PDF for a
+   * failed calendar or bell source. Reuses the existing intake plumbing
+   * (the backend needs the full link payload alongside the file) and
+   * collapses the upload UI once every file is saved.
+   */
+  async function uploadSrcFallback(
+    memberId: string,
+    sourceKey: string,
+    fallbackKind: "calendar" | "bell",
+    files: File[],
+  ) {
+    if (srcFallbackBusy) return;
+    const bad = files.map(validateUploadFile).find(Boolean);
+    if (bad) {
+      setSrcFallbackError(bad);
+      return;
+    }
+    if (files.length === 0) return;
+    setSrcFallbackError("");
+    setSrcFallbackBusy(true);
+    const stamp = Date.now();
+    const extras: SourceCheck[] = files.map((file, i) => ({
+      key: `fallback-${sourceKey}-${stamp}-${i}`,
+      kind: "upload",
+      label: file.name,
+      fileName: file.name,
+      file,
+      uploadKind: fallbackKind,
+      fallbackFor: sourceKey,
+      state: "uploading",
+    }));
+    const items = buildSrcIntakeItems(extras);
+    setSrcChecks(checksForItems(items));
+    const outcomes = new Map<string, SourceCheck["state"]>();
+    try {
+      await runSourceIntake({
+        memberId,
+        district: srcDistrict.trim() || null,
+        items,
+        onCheck: (key, patch) => {
+          if (patch.state) outcomes.set(key, patch.state);
+          setSrcChecks((prev) =>
+            prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
+          );
+        },
+        // The intake endpoint isn't deployed yet — fall back to the plain
+        // save so nothing the user typed is lost.
+        legacySave: async (payload) => {
+          const res = await fetch(
+            `/api/crew/members/${memberId}/school-sources`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                district: payload.district,
+                calendar_source_url: payload.calendar_url,
+                bell_schedules: payload.bell_schedules,
+              }),
+            },
+          );
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error ?? "save failed");
+        },
+      });
+      if (extras.every((e) => outcomes.get(e.key) === "saved")) {
+        setSrcFallbackDone((prev) =>
+          prev.includes(sourceKey) ? prev : [...prev, sourceKey],
+        );
+      }
+    } finally {
+      setSrcFallbackBusy(false);
+    }
+  }
+
+  /**
+   * URL-first fallback on the add-child confirmation screen: upload a
+   * photo/PDF for one failed calendar/bell check. Uploads just the files —
+   * never re-runs the whole intake — and collapses the upload UI once every
+   * file is saved.
+   */
+  async function uploadAddedFallback(
+    memberId: string,
+    sourceKey: string,
+    fallbackKind: "calendar" | "bell",
+    files: File[],
+  ) {
+    if (addedFallbackBusy) return;
+    const bad = files.map(validateUploadFile).find(Boolean);
+    if (bad) {
+      setAddedFallbackErrors((prev) => ({ ...prev, [sourceKey]: bad }));
+      return;
+    }
+    if (files.length === 0) return;
+    setAddedFallbackErrors((prev) => {
+      const next = { ...prev };
+      delete next[sourceKey];
+      return next;
+    });
+    setAddedFallbackBusy(true);
+    const stamp = Date.now();
+    const checks: SourceCheck[] = files.map((file, i) => ({
+      key: `fallback-${sourceKey}-${stamp}-${i}`,
+      kind: "upload",
+      label: file.name,
+      fileName: file.name,
+      file,
+      uploadKind: fallbackKind,
+      fallbackFor: sourceKey,
+      state: "uploading",
+    }));
+    setIntakeChecks((prev) => [...prev, ...checks]);
+    const patch = (key: string, p: Partial<SourceCheck>) =>
+      setIntakeChecks((prev) =>
+        prev.map((c) => (c.key === key ? { ...c, ...p } : c)),
+      );
+    let allSaved = true;
+    try {
+      for (let fi = 0; fi < checks.length; fi++) {
+        const check = checks[fi];
+        const file = files[fi];
+        // Mirror runSourceIntake's per-file handling: upload the file alone.
+        patch(check.key, { state: "uploading", message: undefined });
+        try {
+          const { notFound, result } = await uploadSourceFile(
+            memberId,
+            file,
+            check.label,
+            fallbackKind,
+          );
+          if (notFound) {
+            allSaved = false;
+            patch(check.key, {
+              state: "error",
+              message:
+                "Uploads aren't switched on yet — the link fields still work, and you can add this file later.",
+            });
+          } else if (result && result.verified) {
+            patch(check.key, {
+              state: "saved",
+              message: result.message ?? "Uploaded.",
+            });
+          } else {
+            allSaved = false;
+            patch(check.key, {
+              state: "error",
+              message:
+                (result && result.message) ||
+                "We couldn't read that file. A clear photo of the printed page works best.",
+            });
+          }
+        } catch (e) {
+          allSaved = false;
+          patch(check.key, {
+            state: "error",
+            message:
+              e instanceof Error
+                ? e.message
+                : "The upload didn't go through. Try again.",
+          });
+        }
+      }
+      if (allSaved) {
+        setAddedFallbackDone((prev) =>
+          prev.includes(sourceKey) ? prev : [...prev, sourceKey],
+        );
+      }
+    } finally {
+      setAddedFallbackBusy(false);
+    }
+  }
+
+  /** Retry one failed check from the confirmation screen. */
+  async function retryAddedCheck(memberId: string, check: SourceCheck) {
+    if (check.state !== "error" || retryingCheckKey || addedFallbackBusy) return;
+    if (check.kind === "upload" && check.file && check.uploadKind) {
+      // A failed fallback upload retries with just its own file.
+      await uploadAddedFallback(
+        memberId,
+        check.fallbackFor ?? check.key,
+        check.uploadKind,
+        [check.file],
+      );
+      return;
+    }
+    await retryIntakeCheck(memberId, check);
+  }
+
   function resetForm() {
     setAdded(null);
     setStep(1);
@@ -567,11 +760,12 @@ export function CrewApplet() {
     setSync(["Grades", "Assignments"]);
     setNewCalendarUrl("");
     setNewBellRows([{ label: "Daily", url: "" }]);
-    setNewUploads([]);
-    setNewUploadError("");
     setIntakeChecks([]);
     setIntakeRunning(false);
     setRetryingCheckKey(null);
+    setAddedFallbackDone([]);
+    setAddedFallbackBusy(false);
+    setAddedFallbackErrors({});
     setSourcesNote("");
     setError("");
     closeReauth();
@@ -771,13 +965,14 @@ export function CrewApplet() {
     setSrcDistrict("");
     setSrcCalendarUrl("");
     setSrcBells([]);
-    setSrcUploads([]);
-    setSrcUploadError("");
     setSrcSaving(false);
     setSrcRefreshing(false);
     setSrcMessage(null);
     setSrcChecks([]);
     setSrcRetryingKey(null);
+    setSrcFallbackDone([]);
+    setSrcFallbackBusy(false);
+    setSrcFallbackError("");
     setCalParsed(null);
     setCalParseStatus(null);
     setCalParseNote(null);
@@ -925,11 +1120,12 @@ export function CrewApplet() {
       url: b.url,
     }));
     setSrcBells(bells.length > 0 ? bells : [{ label: "Daily", url: "" }]);
-    setSrcUploads([]);
-    setSrcUploadError("");
     setSrcChecks([]);
     setSrcRetryingKey(null);
     setSrcMessage(null);
+    setSrcFallbackDone([]);
+    setSrcFallbackBusy(false);
+    setSrcFallbackError("");
     setSrcEditing(true);
   }
 
@@ -989,7 +1185,6 @@ export function CrewApplet() {
         ok: true,
         text: "Saved — the results are under each link above.",
       });
-      setSrcUploads([]);
       setSrcEditing(false);
       await loadSchoolSources(memberId);
       if (bellsOpen) await ensureBellContent(memberId, 0, true);
@@ -1010,7 +1205,7 @@ export function CrewApplet() {
     // Re-run the FULL payload: the backend replaces bell_schedules wholesale,
     // so a partial retry would wipe the other saved links.
     const items = buildSrcIntakeItems(
-      check.kind === "upload" ? check : undefined,
+      check.kind === "upload" ? [check] : undefined,
     );
     setSrcChecks(checksForItems(items));
     try {
@@ -1777,6 +1972,27 @@ export function CrewApplet() {
                           : `Last pull failed — ${srcSnapshots.calendar.error_note ?? "try Refresh."}`}
                       </p>
                     )}
+                    {calendarSourceFailed() &&
+                      !srcFallbackDone.includes("calendar") && (
+                        <div className="mt-2">
+                          <SourceFallbackUpload
+                            kind="calendar"
+                            onUpload={(files) =>
+                              uploadSrcFallback(
+                                member.id,
+                                "calendar",
+                                "calendar",
+                                files,
+                              )
+                            }
+                            disabled={
+                              srcFallbackBusy || srcSaving || srcRefreshing
+                            }
+                            idPrefix="edit-calendar"
+                            error={srcFallbackError}
+                          />
+                        </div>
+                      )}
                   </div>
                   <BellScheduleRows
                     rows={srcBells}
@@ -1784,41 +2000,42 @@ export function CrewApplet() {
                     disabled={srcSaving}
                     idPrefix="edit"
                   />
-                  {srcBells.map(
-                    (b, i) =>
+                  {srcBells.map((b, i) => {
+                    const sourceKey = `bell-${i}`;
+                    const snapFailed =
                       srcSnapshots.bells[i] &&
-                      srcSnapshots.bells[i].status !== "ok" && (
-                        <p key={`snap-${i}`} className="text-xs text-neon-amber">
-                          {b.label || `Schedule ${i + 1}`}: last pull failed —{" "}
-                          {srcSnapshots.bells[i].error_note ?? "try Refresh."}
-                        </p>
-                      ),
-                  )}
-                  <div className="border-t border-line pt-2.5">
-                    <SourceUpload
-                      files={srcUploads}
-                      onAdd={(picked, kind) => {
-                        const bad = picked.map(validateUploadFile).find(Boolean);
-                        if (bad) {
-                          setSrcUploadError(bad);
-                          return;
-                        }
-                        setSrcUploadError("");
-                        setSrcUploads((prev) => [
-                          ...prev,
-                          ...picked.map((file) => ({ file, kind })),
-                        ]);
-                      }}
-                      onRemove={(i) =>
-                        setSrcUploads((prev) =>
-                          prev.filter((_, idx) => idx !== i),
-                        )
-                      }
-                      disabled={srcSaving}
-                      error={srcUploadError}
-                      idPrefix="edit"
-                    />
-                  </div>
+                      srcSnapshots.bells[i].status !== "ok";
+                    if (!snapFailed && !bellSourceFailed(i)) return null;
+                    return (
+                      <div key={`snap-${i}`} className="space-y-2">
+                        {snapFailed && (
+                          <p className="text-xs text-neon-amber">
+                            {b.label || `Schedule ${i + 1}`}: last pull
+                            failed —{" "}
+                            {srcSnapshots.bells[i]?.error_note ?? "try Refresh."}
+                          </p>
+                        )}
+                        {!srcFallbackDone.includes(sourceKey) && (
+                          <SourceFallbackUpload
+                            kind="bell"
+                            onUpload={(files) =>
+                              uploadSrcFallback(
+                                member.id,
+                                sourceKey,
+                                "bell",
+                                files,
+                              )
+                            }
+                            disabled={
+                              srcFallbackBusy || srcSaving || srcRefreshing
+                            }
+                            idPrefix={`edit-${sourceKey}`}
+                            error={srcFallbackError}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                   <div className="flex gap-2 pt-1">
                     <button
                       type="button"
@@ -2262,18 +2479,41 @@ export function CrewApplet() {
                 Checking {intakeChecks.length === 1 ? "the link" : "the links"}…
               </p>
             )}
-            {intakeChecks.map((check) => (
-              <SourceCheckRow
-                key={check.key}
-                check={check}
-                retrying={retryingCheckKey === check.key}
-                onRetry={
-                  check.state === "error"
-                    ? () => retryIntakeCheck(added.id, check)
-                    : undefined
-                }
-              />
-            ))}
+            {intakeChecks.map((check) => {
+              const offerFallback =
+                check.state === "error" &&
+                (check.kind === "calendar" || check.kind === "bell") &&
+                !addedFallbackDone.includes(check.key);
+              return (
+                <div key={check.key} className="space-y-2">
+                  <SourceCheckRow
+                    check={check}
+                    retrying={retryingCheckKey === check.key}
+                    onRetry={
+                      check.state === "error"
+                        ? () => retryAddedCheck(added.id, check)
+                        : undefined
+                    }
+                  />
+                  {offerFallback && (
+                    <SourceFallbackUpload
+                      kind={check.kind === "bell" ? "bell" : "calendar"}
+                      onUpload={(files) =>
+                        uploadAddedFallback(
+                          added.id,
+                          check.key,
+                          check.kind === "bell" ? "bell" : "calendar",
+                          files,
+                        )
+                      }
+                      disabled={addedFallbackBusy || intakeRunning}
+                      idPrefix={`added-${check.key}`}
+                      error={addedFallbackErrors[check.key]}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         {roster.length > 0 && (
@@ -2554,28 +2794,6 @@ export function CrewApplet() {
               <BellScheduleRows
                 rows={newBellRows}
                 onChange={setNewBellRows}
-                idPrefix="new"
-              />
-            </div>
-            <div className="mt-3 border-t border-line pt-3">
-              <SourceUpload
-                files={newUploads}
-                onAdd={(picked, kind) => {
-                  const bad = picked.map(validateUploadFile).find(Boolean);
-                  if (bad) {
-                    setNewUploadError(bad);
-                    return;
-                  }
-                  setNewUploadError("");
-                  setNewUploads((prev) => [
-                    ...prev,
-                    ...picked.map((file) => ({ file, kind })),
-                  ]);
-                }}
-                onRemove={(i) =>
-                  setNewUploads((prev) => prev.filter((_, idx) => idx !== i))
-                }
-                error={newUploadError}
                 idPrefix="new"
               />
             </div>
