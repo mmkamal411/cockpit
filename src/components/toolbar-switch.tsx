@@ -5,6 +5,7 @@ import { ToolbarLegacy } from "./toolbar-legacy";
 import { ToolbarConsole } from "./toolbar-console";
 import { ToolbarDash } from "./toolbar-dash";
 import { ToolbarHologlass } from "./toolbar-hologlass";
+import { ToolbarPanoramic } from "./toolbar-panoramic";
 
 /**
  * ToolbarSwitch — renders the active toolbar variant per TOOLBAR_VARIANT.
@@ -19,6 +20,8 @@ export function ToolbarSwitch() {
       return <ToolbarDash />;
     case "hologlass":
       return <ToolbarHologlass />;
+    case "panoramic":
+      return <ToolbarPanoramic />;
     case "legacy":
     default:
       return <ToolbarLegacy />;
