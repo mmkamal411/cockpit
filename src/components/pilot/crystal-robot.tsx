@@ -19,6 +19,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
  *    property on the button, while the robot's own motion lives on nested
  *    spans (`transform`). The two compose instead of fighting.
  *  - `prefers-reduced-motion` → static robot, no loops, no CSS animation.
+ *  - Mood API (custom events): `crystal:celebrate`, `crystal:notice`,
+ *    `crystal:blush` — see the exported `celebrateCrystal()`,
+ *    `noticeCrystal()`, `blushCrystal()` helpers above.
  */
 
 const ROBOT_ENABLED =
@@ -43,6 +46,19 @@ export function noticeCrystal() {
   }
 }
 
+/**
+ * Blush trigger — call `blushCrystal()` from any module (e.g. after the pilot
+ * compliments Crystal, or a compliment nudge fires) and the robot holds the
+ * "blush" face (happy eyes + smile + pink cheeks) for a few seconds before
+ * returning to its base face. Wired via the `crystal:blush` custom event,
+ * same pattern as celebrateCrystal / noticeCrystal.
+ */
+export function blushCrystal() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("crystal:blush"));
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Personality engine tuning                                           */
 /* ------------------------------------------------------------------ */
@@ -54,7 +70,8 @@ type FaceKind =
   | "surprised"
   | "sleepy"
   | "dizzy"
-  | "joy";
+  | "joy"
+  | "blush";
 
 type ActionKind =
   | "walk"
@@ -97,6 +114,17 @@ function RobotFace({
       fill="none"
       strokeLinecap="round"
     />
+  );
+  // Sparkly happy eyes — shared by "happy" and "blush".
+  const happyEyes = (
+    <g transform={`translate(${px} ${py})`}>
+      <ellipse cx="26" cy="28" rx="3.6" ry="5.2" fill={INK} />
+      <ellipse cx="38" cy="28" rx="3.6" ry="5.2" fill={INK} />
+      <circle cx="27.2" cy="26" r="1.25" fill="#fff" />
+      <circle cx="39.2" cy="26" r="1.25" fill="#fff" />
+      <circle cx="25" cy="29.6" r="0.6" fill="#fff" opacity="0.8" />
+      <circle cx="37" cy="29.6" r="0.6" fill="#fff" opacity="0.8" />
+    </g>
   );
   switch (face) {
     case "blink":
@@ -199,18 +227,20 @@ function RobotFace({
           <path d="M27 34.5 Q32 39.5 37 34.5 Z" fill={INK} />
         </g>
       );
+    case "blush":
+      return (
+        <g>
+          <ellipse cx="20.5" cy="33.2" rx="4" ry="2.8" fill="url(#crystalBlush)" />
+          <ellipse cx="43.5" cy="33.2" rx="4" ry="2.8" fill="url(#crystalBlush)" />
+          {happyEyes}
+          {smile}
+        </g>
+      );
     case "happy":
     default:
       return (
         <g>
-          <g transform={`translate(${px} ${py})`}>
-            <ellipse cx="26" cy="28" rx="3.6" ry="5.2" fill={INK} />
-            <ellipse cx="38" cy="28" rx="3.6" ry="5.2" fill={INK} />
-            <circle cx="27.2" cy="26" r="1.2" fill="#fff" />
-            <circle cx="39.2" cy="26" r="1.2" fill="#fff" />
-            <circle cx="25" cy="29.6" r="0.6" fill="#fff" opacity="0.8" />
-            <circle cx="37" cy="29.6" r="0.6" fill="#fff" opacity="0.8" />
-          </g>
+          {happyEyes}
           {smile}
         </g>
       );
@@ -236,32 +266,56 @@ function RobotBody({
       <svg viewBox="0 0 64 64" aria-hidden="true" className="crystal-robot-svg">
         <defs>
           <linearGradient id="crystalScreen" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#cdeefb" />
-            <stop offset="100%" stopColor="#9fd7ee" />
+            <stop offset="0%" stopColor="#d8f3fd" />
+            <stop offset="100%" stopColor="#a3dbf2" />
           </linearGradient>
           <linearGradient id="crystalShell" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#ffffff" />
-            <stop offset="100%" stopColor="#dceef6" />
+            <stop offset="100%" stopColor="#d8ecf5" />
           </linearGradient>
+          <linearGradient id="crystalCap" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#e2f6fd" />
+            <stop offset="100%" stopColor="#8ccbe6" />
+          </linearGradient>
+          <radialGradient id="crystalGlow">
+            <stop offset="0%" stopColor="#e8fbff" stopOpacity="0.95" />
+            <stop offset="45%" stopColor="#9be2f7" stopOpacity="0.55" />
+            <stop offset="100%" stopColor="#9be2f7" stopOpacity="0" />
+          </radialGradient>
+          <radialGradient id="crystalBlush">
+            <stop offset="0%" stopColor="#ff8fae" stopOpacity="0.85" />
+            <stop offset="100%" stopColor="#ff8fae" stopOpacity="0" />
+          </radialGradient>
+          <radialGradient id="crystalHeart" cx="0.5" cy="0.4" r="0.8">
+            <stop offset="0%" stopColor="#d5f4fe" />
+            <stop offset="100%" stopColor="#54c3e6" />
+          </radialGradient>
         </defs>
 
-        {/* antenna */}
+        {/* antenna — socket, stem, and a glowing tip with a soft halo */}
+        <circle cx="32" cy="10.6" r="2.1" fill="#8ccbe6" />
         <line
           x1="32"
           y1="11"
           x2="32"
           y2="5"
-          stroke="#a9d4e6"
+          stroke="#93c8dc"
           strokeWidth="2.4"
           strokeLinecap="round"
         />
-        <circle cx="32" cy="4" r="2.6" fill="#9be2f7" className="crystal-antenna-tip" />
+        <g className="crystal-antenna-tip">
+          <circle cx="32" cy="4.4" r="5.4" fill="url(#crystalGlow)" />
+          <circle cx="32" cy="4.4" r="2.7" fill="#aee7fa" />
+          <circle cx="31" cy="3.4" r="0.9" fill="#ffffff" opacity="0.95" />
+        </g>
 
         {/* side pods */}
         <circle cx="7.5" cy="30" r="5" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
         <circle cx="56.5" cy="30" r="5" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
         <circle cx="7.5" cy="30" r="2.2" fill="#9be2f7" opacity="0.7" />
         <circle cx="56.5" cy="30" r="2.2" fill="#9be2f7" opacity="0.7" />
+        <circle cx="6.7" cy="29.2" r="0.8" fill="#ffffff" opacity="0.85" />
+        <circle cx="55.7" cy="29.2" r="0.8" fill="#ffffff" opacity="0.85" />
 
         {/* left arm (viewer-left) — the waver, raised in greeting */}
         <g className="crystal-arm-l" style={{ transformOrigin: "19px 47px" }}>
@@ -274,36 +328,45 @@ function RobotBody({
           stroke="#bcdcea" strokeWidth="1" transform="rotate(-18 52 50)" />
 
         {/* feet */}
-        <ellipse cx="24" cy="59.5" rx="6" ry="3.4" fill="#b9dcea" />
-        <ellipse cx="40" cy="59.5" rx="6" ry="3.4" fill="#b9dcea" />
+        <ellipse cx="24" cy="59.5" rx="6.2" ry="3.4" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
+        <ellipse cx="40" cy="59.5" rx="6.2" ry="3.4" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
 
         {/* body */}
         <rect x="20" y="43" width="24" height="15" rx="7.5" fill="url(#crystalShell)"
           stroke="#bcdcea" strokeWidth="1" />
-        {/* belly heart */}
-        <path
-          d="M32 53.2 c-1.8-2.4-5-3.2-5-0.6 c0 1.8 2.6 3.4 5 4.6 c2.4-1.2 5-2.8 5-4.6 c0-2.6-3.2-1.8-5 0.6 z"
-          fill="#7fd8f2"
-          className="crystal-heart"
-        />
+        {/* belly heart — radial gradient + sparkle, gently pulsing */}
+        <g className="crystal-heart">
+          <path
+            d="M32 53.2 c-1.8-2.4-5-3.2-5-0.6 c0 1.8 2.6 3.4 5 4.6 c2.4-1.2 5-2.8 5-4.6 c0-2.6-3.2-1.8-5 0.6 z"
+            fill="url(#crystalHeart)"
+          />
+          <circle cx="30.3" cy="53.4" r="0.9" fill="#ffffff" opacity="0.85" />
+        </g>
 
         {/* head */}
         <rect x="10" y="10" width="44" height="36" rx="15" fill="url(#crystalShell)"
           stroke="#bcdcea" strokeWidth="1" />
-        {/* icy-blue head cap */}
+        {/* icy-blue head cap — gradient + soft top sheen */}
         <path
           d="M10 25 Q10 10 25 10 L39 10 Q54 10 54 25 Z"
-          fill="#a9d8ec"
-          opacity="0.85"
+          fill="url(#crystalCap)"
+        />
+        <path
+          d="M16 14.6 Q32 10.9 48 14.6"
+          stroke="#ffffff"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.55"
         />
         {/* face screen */}
         <rect x="16" y="17" width="32" height="24" rx="10" fill="url(#crystalScreen)"
           stroke="#0e2a3a" strokeOpacity="0.18" strokeWidth="1" />
         {/* screen pixel accents */}
-        <rect x="19" y="20" width="2.4" height="2.4" fill="#7cc4de" opacity="0.8" />
-        <rect x="42.6" y="20" width="2.4" height="2.4" fill="#7cc4de" opacity="0.8" />
-        <rect x="19" y="35.6" width="2.4" height="2.4" fill="#7cc4de" opacity="0.8" />
-        <rect x="42.6" y="35.6" width="2.4" height="2.4" fill="#7cc4de" opacity="0.8" />
+        <rect x="19" y="20" width="2.4" height="2.4" rx="0.8" fill="#7cc4de" opacity="0.8" />
+        <rect x="42.6" y="20" width="2.4" height="2.4" rx="0.8" fill="#7cc4de" opacity="0.8" />
+        <rect x="19" y="35.6" width="2.4" height="2.4" rx="0.8" fill="#7cc4de" opacity="0.8" />
+        <rect x="42.6" y="35.6" width="2.4" height="2.4" rx="0.8" fill="#7cc4de" opacity="0.8" />
 
         <RobotFace face={face} pupil={pupil} />
       </svg>
@@ -508,11 +571,22 @@ function CrystalRobotButton({
         busy.current = false;
       }, 2600);
     };
+    const onBlush = () => {
+      if (busy.current) return;
+      busy.current = true;
+      setBaseFace("blush");
+      later(() => {
+        setBaseFace("happy");
+        busy.current = false;
+      }, 2600);
+    };
     window.addEventListener("crystal:celebrate", onCelebrate);
     window.addEventListener("crystal:notice", onNotice);
+    window.addEventListener("crystal:blush", onBlush);
     return () => {
       window.removeEventListener("crystal:celebrate", onCelebrate);
       window.removeEventListener("crystal:notice", onNotice);
+      window.removeEventListener("crystal:blush", onBlush);
     };
   }, [reduced]);
 
