@@ -451,6 +451,13 @@ export function CrewApplet() {
               Born {new Date(member.birthdate + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
             </p>
           )}
+          <button
+            onClick={() => navigator.clipboard?.writeText(member.id).catch(() => {})}
+            title="Copy crew member ID"
+            className="mt-1 font-mono text-[10px] text-dim/60 hover:text-dim active:text-star"
+          >
+            ID: {member.id.slice(0, 8)}… tap to copy
+          </button>
         </div>
 
         {/* School sync status */}
