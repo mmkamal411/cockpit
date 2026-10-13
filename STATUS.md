@@ -22,7 +22,7 @@
 | Module | % | Status | Blocker |
 |---|---|---|---|
 | Shopping Lists | 90% | 6 API routes, applet, in-store mode — done | Migration 010 + staging verify |
-| Health Basics | 95% | + blood glucose (mg/dL, context tags) & A1C: 016 migration, /api/health/a1c (estimated A1C w/ 14-day gate), glucose trend w/ ADA bands, lab A1C log, disclaimer — done 01:45 EDT | **Run 016_health_glucose.sql** + staging verify |
+| Health Basics | 95% | + blood glucose (mg/dL, context tags) & A1C: /api/health/a1c (estimated A1C w/ 14-day gate), glucose trend w/ ADA bands, lab A1C log, disclaimer — done 01:45 EDT | Migration already applied (ran as 015 in bundle) — no re-run needed. Staging verify pending. |
 | Money/Bills | 85% | 10 API routes, applet, 38/38 tests — done | Migration 007 + staging verify |
 | Crew/School | 70% | **localStorage trap FIXED** — writes to DB now; 9 API routes, link codes, path-to-90 table | Migration 008 + staging verify |
 
