@@ -1,0 +1,77 @@
+# Personalization Stack — Progress Tracker
+
+**STATUS: EVALUATING**
+
+This is the living checklist for the personalization stack build. The build team updates the per-phase checkboxes; the hourly monitor parses the `STATUS:` line above.
+
+Status values: `EVALUATING` → `PHASE_0_IN_PROGRESS` → `PHASE_1_IN_PROGRESS` → `PHASE_2_IN_PROGRESS` → `PHASE_3_IN_PROGRESS` → `PHASE_4_IN_PROGRESS` → `PHASE_5_IN_PROGRESS` → `COMPLETE`.
+
+---
+
+## Phase 0 — Security & integrity fixes (GATING)
+- [ ] A1 (CRITICAL): drop anon policies on `crew_grade_syncs`; revoke anon grant on `rpc_get_latest_crew_grade_sync`; add caller check for `authenticated`
+- [ ] A2 (HIGH): envelope-encrypt Google Calendar refresh tokens (KMS/data key)
+- [ ] A3 (HIGH): `redeem_share_invite` — use `auth.uid()`/JWT email, require email match, revoke anon grant
+- [ ] A4 (MEDIUM): `find_pilot_by_email` — inline into share-creation RPC with ownership check
+- [ ] A5 (MEDIUM): admin `view-as` — require both auth layers
+- [ ] W1 (HIGH): Crystal worker `/chat` + `/quiz` — add shared-secret auth; kill client-direct browser→worker path
+- [ ] C1 (HIGH): fix app↔worker context contract drift; privacy sign-off on field inventory before enabling
+- [ ] Fix `bills/logic.test.ts` + `health/glucose.test.ts` (extensionless imports)
+- [ ] Resolve smoke-test URL mismatch (`cockpit-10c.pages.dev` vs `cockpit.pages.dev`)
+- [ ] Re-audit A1–A5 after fixes; `npm test` green
+
+## Phase 1 — Foundation
+- [ ] Migration 018 applied (signals, aggregates, pilot_preferences, layout_versions, corrections, feature_flags) with RLS + indexes
+- [ ] `POST /api/signals/batch` live; RLS cross-pilot tests pass
+- [ ] First-run onboarding captures name + timezone
+- [ ] `cockpit-scheduler` Cloudflare Worker deployed; `/api/cron/*` secured
+- [ ] "Block the endpoint → app behaves identically" test passes
+
+## Phase 2 — ARRANGE v1
+- [ ] Module registry refactor (ordering no longer hardcoded); `useLayout()` hook
+- [ ] Layout scoring engine (`src/lib/layout/engine.ts`); v1 formula; recompute-on-trigger
+- [ ] `GET /api/layout`, `POST|DELETE /api/layout/override`, `POST /api/layout/recompute`
+- [ ] Dynamic rendering: More applet + Home "Today's stations" deck; 3 tiers; FLIP transitions
+- [ ] Override controls (pin/send-to-lower-deck/why) with undo; local-first persistence
+- [ ] Generalized `<WhyThis>` component; causal `whyLine` for nudges
+- [ ] 11 ranking invariants property-tested; layout p95 < 300ms; 100% explanation coverage
+- [ ] Browser-verified on staging
+
+## Phase 3 — KNOW v2
+- [ ] LLM-summarized preference doc generated, pilot-editable, pilot-deletable
+- [ ] "What does Crystal know about me?" view (provenance, Keep/Forget, kill switches)
+- [ ] 5-layer context pipeline (L0→L4, ≤3,400 tok); real token counting enforced
+- [ ] Per-source timeouts + provenance flags; rolling thread summaries; edge-cache fix
+- [ ] Degraded-mode chaos drills pass; privacy invariant tests green
+
+## Phase 4 — ADAPT
+- [ ] Correction affordances ("This was wrong" 3-choice + undo) live
+- [ ] Feedback update rules (diminishing dismissals, anti-runaway caps, ±15 learned-delta cap)
+- [ ] Bayesian nudge weights (prior = today's scores; zero-history regression test)
+- [ ] Thompson sampling layout bandit (±25% modulation, weekly decay)
+- [ ] Exploration probes (≤1/day, honest framing, doubling backoff)
+- [ ] Dark-launch shadow override <25% for 7 days
+
+## Phase 5 — Hardening & verification
+- [ ] 12 privacy acceptance criteria (AC-1…AC-12) green
+- [ ] Kill-switch drill passes; fail-closed verified
+- [ ] Rollout 10→50→100% complete
+- [ ] Observability live (override rate, latency, explanation coverage, free-tier tripwires)
+- [ ] Browser verification of every UI claim on staging
+
+---
+
+## Per-layer status
+
+| Layer | Status | Notes |
+|---|---|---|
+| KNOW | Evaluation done; blocked on Phase 0 (A1–A4) | v1 = rules+explicit; v2 = LLM preference docs; embeddings deferred |
+| ARRANGE | Evaluation done; unbuilt (zero writers to `cockpit_layouts`) | v1 formula validated; v2 bandit designed; UI can ship before engine |
+| ANTICIPATE | Built (28 tests pass); gaps identified | Needs causal whyLine, impression tracking, learning hooks |
+| ADAPT | Evaluation done; unbuilt | Correction affordances + update rules + Bayesian/bandit designed |
+
+## Founder decisions needed
+See `PERSONALIZATION-BUILD-PLAN.md` §8 (8 open questions: retention policy, cron-trigger budget, canonical smoke-test URL, CI service_role, crew/child signal scope, Crystal BASE 85, aggregation runtime, Phase 0 fix-squad approval).
+
+## Source material
+`personalization-eval/00-security-threat-model.md` … `11-devops-deploy-observability.md` (12 reports, ~4,000 lines).
