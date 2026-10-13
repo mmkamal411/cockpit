@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { requirePilot, serverError } from "@/lib/api-auth";
 
-const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab"];
+const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab", "steps"];
 
 /**
  * GET /api/health/trends?metric=sleep&period=30d
  * Daily points, 7-day rolling average, and delta vs the prior period.
  * For blood_glucose, also returns individual readings (with context tags)
  * so the chart can show each reading against the reference bands.
+ * For steps, each daily point is the SUM of that day's entries (entries
+ * accumulate), not an average.
  * Plain numbers only — no interpretation, no advice.
  */
 export async function GET(req: Request) {
@@ -20,7 +22,7 @@ export async function GET(req: Request) {
     const metric = searchParams.get("metric");
     if (!metric || !METRICS.includes(metric)) {
       return NextResponse.json(
-        { error: "Pick weight, sleep, water, exercise, blood sugar, or lab A1C." },
+        { error: "Pick weight, sleep, water, exercise, steps, blood sugar, or lab A1C." },
         { status: 400 },
       );
     }
@@ -60,8 +62,13 @@ export async function GET(req: Request) {
       const key = d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
       const vals = byDay.get(key);
       if (vals && vals.length > 0) {
-        const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-        daily.push({ date: key, value: Math.round(avg * 100) / 100 });
+        // Steps accumulate through the day (10k across 3 entries = 10k
+        // total), so the daily point is a SUM, not an average. The rolling
+        // average and period average below then describe daily totals.
+        const dayValue = metric === "steps"
+          ? vals.reduce((a, b) => a + b, 0)
+          : vals.reduce((a, b) => a + b, 0) / vals.length;
+        daily.push({ date: key, value: Math.round(dayValue * 100) / 100 });
       } else {
         daily.push({ date: key, value: NaN });
       }
@@ -77,12 +84,17 @@ export async function GET(req: Request) {
       return Math.round((window.reduce((a, b) => a + b.value, 0) / window.length) * 100) / 100;
     });
 
-    // Prior-period average for the delta.
+    // Prior-period average for the delta. For steps the daily points are
+    // sums, so compare against the average of prior daily totals too.
     const priorVals: number[] = [];
     for (const [day, vals] of byDay) {
       const d = new Date(day + "T12:00:00");
       if (d >= priorStart && d < start) {
-        priorVals.push(...vals);
+        if (metric === "steps") {
+          priorVals.push(vals.reduce((a, b) => a + b, 0));
+        } else {
+          priorVals.push(...vals);
+        }
       }
     }
     const priorAvg = priorVals.length > 0
