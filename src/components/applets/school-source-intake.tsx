@@ -47,6 +47,11 @@ export interface SourceCheck {
   file?: File;
   /** For uploads: what kind of page the file holds. */
   uploadKind?: "calendar" | "bell";
+  /**
+   * For fallback uploads: the key of the failed calendar/bell check this
+   * file stands in for. Lets the parent collapse the right upload UI on save.
+   */
+  fallbackFor?: string;
   state: SourceCheckState;
   /** Plain-English detail shown under the status. */
   message?: string;
@@ -78,12 +83,6 @@ export interface IntakeSourceResult {
   eventCount?: number;
   scheduleCount?: number;
   periodCount?: number;
-}
-
-/** A file the user picked, plus what kind of page it is. */
-export interface UploadPick {
-  file: File;
-  kind: "calendar" | "bell";
 }
 
 /** One parsed bell-schedule period. */
@@ -569,60 +568,47 @@ export function BellScheduleRows({
   );
 }
 
-/** Photo/PDF upload as an alternative to pasting URLs. */
-export function SourceUpload({
-  files,
-  onAdd,
-  onRemove,
+/** Conditional fallback upload, revealed under a failed URL source only
+ * (URL-first intake: uploads appear when a link couldn't be read, never
+ * alongside the link fields). Scoped to a single kind — no kind toggle.
+ * Photo/PDF picker + picked-file list with remove; the parent validates via
+ * validateUploadFile and uploads through onUpload. */
+export function SourceFallbackUpload({
+  kind,
+  onUpload,
   disabled,
   idPrefix,
   error,
 }: {
-  /** Files already picked, with what kind of page each one holds. */
-  files: UploadPick[];
-  onAdd: (files: File[], kind: "calendar" | "bell") => void;
-  onRemove: (index: number) => void;
+  /** Which page the upload stands in for — sets the plain-English copy. */
+  kind: "calendar" | "bell";
+  /** Called with the picked files when the user confirms the upload. */
+  onUpload: (files: File[]) => void;
   disabled?: boolean;
   idPrefix: string;
   error?: string;
 }) {
-  const inputId = `${idPrefix}-source-upload`;
-  const [kind, setKind] = useState<"calendar" | "bell">("calendar");
+  const [files, setFiles] = useState<File[]>([]);
+  const inputId = `${idPrefix}-fallback-upload`;
+  function add(picked: File[]) {
+    if (picked.length > 0) setFiles((prev) => [...prev, ...picked]);
+  }
+  function remove(i: number) {
+    setFiles((prev) => prev.filter((_, idx) => idx !== i));
+  }
   return (
-    <div>
-      <p className="text-xs font-medium text-stardust">Or upload instead</p>
-      <p id={`${inputId}-hint`} className="mt-0.5 text-xs text-dim">
-        Snap a photo of the printed bell schedule or calendar — a photo or PDF
-        works.
+    <div className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-3">
+      <p className="text-xs font-medium text-neon-amber">
+        The link didn&apos;t work — upload instead
       </p>
-      <div
-        role="radiogroup"
-        aria-label="What the upload shows"
-        className="mt-2 flex gap-1.5"
+      <p
+        id={`${inputId}-hint`}
+        className="mt-1 text-xs leading-relaxed text-stardust"
       >
-        {(
-          [
-            { value: "calendar", label: "Calendar" },
-            { value: "bell", label: "Bell schedule" },
-          ] as const
-        ).map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            role="radio"
-            aria-checked={kind === opt.value}
-            onClick={() => setKind(opt.value)}
-            disabled={disabled}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
-              kind === opt.value
-                ? "border-neon-green/50 bg-neon-green/10 text-neon-green"
-                : "border-line bg-panel-2/60 text-stardust hover:text-star"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+        {kind === "calendar"
+          ? "This page loads its events with JavaScript, so we couldn't read it. Snap a photo of the printed calendar or upload the PDF instead."
+          : "We couldn't read the bell schedule page. Snap a photo of the printed schedule or upload the PDF instead."}
+      </p>
       <label
         htmlFor={inputId}
         className="mt-2 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm font-medium text-stardust transition-colors hover:text-star focus-within:border-neon-green/60"
@@ -651,8 +637,7 @@ export function SourceUpload({
           aria-describedby={`${inputId}-hint`}
           className="sr-only"
           onChange={(e) => {
-            const picked = Array.from(e.target.files ?? []);
-            if (picked.length > 0) onAdd(picked, kind);
+            add(Array.from(e.target.files ?? []));
             // Reset so the same file can be picked again after removal.
             e.target.value = "";
           }}
@@ -660,22 +645,21 @@ export function SourceUpload({
       </label>
       {files.length > 0 && (
         <ul className="mt-2 space-y-1.5" aria-label="Files to upload">
-          {files.map((pick, i) => (
+          {files.map((file, i) => (
             <li
-              key={`${pick.file.name}-${pick.file.size}-${i}`}
+              key={`${file.name}-${file.size}-${i}`}
               className="flex items-center justify-between gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm"
             >
               <span className="min-w-0 truncate text-stardust">
-                {pick.file.name}
+                {file.name}
                 <span className="ml-2 text-xs text-dim">
-                  {(pick.file.size / 1024).toFixed(0)} KB ·{" "}
-                  {pick.kind === "bell" ? "bell schedule" : "calendar"}
+                  {(file.size / 1024).toFixed(0)} KB
                 </span>
               </span>
               <button
                 type="button"
-                onClick={() => onRemove(i)}
-                aria-label={`Remove ${pick.file.name}`}
+                onClick={() => remove(i)}
+                aria-label={`Remove ${file.name}`}
                 disabled={disabled}
                 className="shrink-0 rounded-lg px-2 py-1 text-xs text-dim transition-colors hover:text-red-400 disabled:opacity-50"
               >
@@ -684,6 +668,16 @@ export function SourceUpload({
             </li>
           ))}
         </ul>
+      )}
+      {files.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onUpload(files)}
+          disabled={disabled}
+          className="mt-2 rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+        >
+          Upload {files.length === 1 ? "file" : `${files.length} files`}
+        </button>
       )}
       {error && (
         <p role="alert" className="mt-2 text-xs text-neon-amber">
