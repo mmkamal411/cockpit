@@ -202,6 +202,28 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
     }
   }
 
+  async function deleteItem(item: ShoppingItem) {
+    if (!canEdit) return;
+    if (!window.confirm(`Remove "${item.name}" from the list?`)) return;
+    // Optimistic: remove immediately, revert on failure.
+    const snapshot = items;
+    setItems((prev) => prev.filter((i) => i.id !== item.id));
+    try {
+      const res = await fetch(`/api/shopping/items/${item.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+      setLists((prev) =>
+        prev.map((l) =>
+          l.id === activeId
+            ? { ...l, unchecked_count: Math.max(0, l.unchecked_count - (item.checked ? 0 : 1)) }
+            : l,
+        ),
+      );
+    } catch {
+      setItems(snapshot);
+      setError("Couldn't remove that item. Try again.");
+    }
+  }
+
   async function sendInvite() {
     const email = shareEmail.trim();
     if (!email || !activeId || shareBusy) return;
@@ -562,6 +584,30 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
                       </span>
                     )}
                   </span>
+                  {canEdit && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Remove ${item.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteItem(item);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.stopPropagation();
+                          deleteItem(item);
+                        }
+                      }}
+                      className="flex shrink-0 items-center justify-center rounded-full p-2 text-dim transition-colors hover:bg-red-500/10 hover:text-red-400"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                      </svg>
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -574,15 +620,29 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
               </summary>
               <ul className="space-y-1 px-2 pb-3">
                 {checked.map((item) => (
-                  <li key={item.id}>
+                  <li key={item.id} className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => toggleCheck(item)}
                       disabled={!canEdit}
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-dim line-through hover:text-stardust disabled:cursor-default disabled:hover:text-dim"
+                      className="flex flex-1 items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-dim line-through hover:text-stardust disabled:cursor-default disabled:hover:text-dim"
                     >
                       {item.name}
                     </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${item.name}`}
+                        onClick={() => deleteItem(item)}
+                        className="flex shrink-0 items-center justify-center rounded-full p-2 text-dim transition-colors hover:bg-red-500/10 hover:text-red-400"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M3 6h18" />
+                          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        </svg>
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
