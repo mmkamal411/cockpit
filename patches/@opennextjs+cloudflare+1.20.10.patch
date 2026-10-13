@@ -1,11 +1,14 @@
-diff --git a/dist/cli/build/patches/plugins/load-manifest.js b/dist/cli/build/patches/plugins/load-manifest.js
---- a/dist/cli/build/patches/plugins/load-manifest.js
-+++ b/dist/cli/build/patches/plugins/load-manifest.js
-@@ -31,7 +31,7 @@
+diff --git a/node_modules/@opennextjs/cloudflare/dist/cli/build/patches/plugins/load-manifest.js b/node_modules/@opennextjs/cloudflare/dist/cli/build/patches/plugins/load-manifest.js
+--- a/node_modules/@opennextjs/cloudflare/dist/cli/build/patches/plugins/load-manifest.js
++++ b/node_modules/@opennextjs/cloudflare/dist/cli/build/patches/plugins/load-manifest.js
+@@ -31,7 +31,10 @@
      const { outputDir } = buildOpts;
      const baseDir = join(outputDir, "server-functions/default", getPackagePath(buildOpts));
      const dotNextDir = join(baseDir, ".next");
 -    const manifests = await glob(join(dotNextDir, "**/{*-manifest,required-server-files,prefetch-hints}.json"), {
++    // Patched for Next 16.4: preview-props.json must be inlined too (NextNodeServer
++    // constructor calls loadManifest("/.next/server/preview-props.json")
++    // unconditionally; without this branch every request 500s on Workers).
 +    const manifests = await glob(join(dotNextDir, "**/{*-manifest,*-props,required-server-files,prefetch-hints}.json"), {
          windowsPathsNoEscape: true,
          nodir: true,
