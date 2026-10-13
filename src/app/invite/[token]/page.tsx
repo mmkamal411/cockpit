@@ -6,9 +6,11 @@ export const dynamic = "force-dynamic";
 
 interface Preview {
   valid: boolean;
+  kind?: "todo" | "shopping";
   reason?: "invalid" | "expired" | "accepted";
   list_name?: string;
   list_icon?: string;
+  list_color?: string;
   owner_name?: string;
   permission?: "view" | "edit";
 }
@@ -52,10 +54,19 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
 
   const tokenHash = await sha256Hex(token);
-  const { data: preview } = await supabase.rpc("get_share_invite_preview", {
+  const { data: shopPreview } = await supabase.rpc("get_share_invite_preview", {
     p_token_hash: tokenHash,
   });
-  const p = (preview ?? { valid: false, reason: "invalid" }) as Preview;
+  const sp = (shopPreview ?? { valid: false, reason: "invalid" }) as Preview;
+  let p = sp;
+  if (!p.valid) {
+    // Not a shopping invite — maybe a to-do list invite.
+    const { data: todoPreview } = await supabase.rpc("get_todo_share_invite_preview", {
+      p_token_hash: tokenHash,
+    });
+    const tp = (todoPreview ?? { valid: false, reason: "invalid" }) as Preview;
+    if (tp.valid) p = tp;
+  }
 
   if (!p.valid) {
     if (p.reason === "expired") {
@@ -83,18 +94,22 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   }
 
   // Valid invite, not signed in yet: the pitch + sign-in that returns here.
+  const kindNoun = p.kind === "todo" ? "to-do list" : "shopping list";
+  const kindIcon = p.kind === "todo" ? "✅" : (p.list_icon ?? "🛒");
   if (!user) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-black px-6">
         <div className="w-full max-w-md rounded-2xl border border-line bg-panel-2/60 p-8 text-center">
-          <p aria-hidden="true" className="text-5xl">{p.list_icon ?? "🛒"}</p>
+          <p aria-hidden="true" className="text-5xl">{kindIcon}</p>
           <h1 className="mt-4 text-xl font-semibold text-star">
-            {p.owner_name} shared a shopping list with you
+            {p.owner_name} shared a {kindNoun} with you
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-stardust">
             <strong className="text-star">&ldquo;{p.list_name}&rdquo;</strong>
             {p.permission === "edit"
-              ? " — you can add and check off items together."
+              ? p.kind === "todo"
+                ? " — you can add tasks, check them off, and assign them together."
+                : " — you can add and check off items together."
               : " — you can follow along as it updates."}
           </p>
           <a
@@ -114,7 +129,8 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   // Valid invite + signed in: redeem the single-use token.
   // Identity comes from the session server-side (auth.uid() + JWT email);
   // only the token hash travels as a parameter.
-  const { data: result } = await supabase.rpc("redeem_share_invite", {
+  const redeemRpc = p.kind === "todo" ? "redeem_todo_share_invite" : "redeem_share_invite";
+  const { data: result } = await supabase.rpc(redeemRpc, {
     p_token_hash: tokenHash,
   });
   const r = (result ?? { ok: false, reason: "invalid" }) as {
@@ -147,15 +163,16 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   return (
     <InviteWelcome
       listId={r.list_id ?? ""}
-      listName={r.list_name ?? p.list_name ?? "Shopping list"}
+      listName={r.list_name ?? p.list_name ?? (p.kind === "todo" ? "To-do list" : "Shopping list")}
       ownerName={p.owner_name ?? "Someone"}
       permission={r.permission ?? p.permission ?? "view"}
       already={r.already ?? false}
+      kind={p.kind === "todo" ? "todo" : "shopping"}
     />
   );
 }
 
 // Re-export guard: Next.js requires a default export; named helper above.
 export async function generateMetadata() {
-  return { title: "Shared shopping list — Cockpit" };
+  return { title: "Shared list — Cockpit" };
 }
