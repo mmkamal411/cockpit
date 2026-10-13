@@ -34,7 +34,7 @@ The security expert found **active vulnerabilities**, not theoretical ones. Fix 
 | W1 | HIGH | Crystal worker `/chat` and `/quiz` endpoints **effectively unauthenticated** (`isAllowedOrigin` only sets CORS headers, never rejects) | Shared-secret check on worker; kill the client-direct browser→worker path (flag-gated today). |
 | C1 | HIGH | **Context contract drift:** app sends new `ChatContextBundle` shape; worker still expects legacy d-dash fields → worker calls the pilot literally "pilot"; weather/agenda/todos/nudges/crew fields **never reach the model**. Fixing this widens data flow to the LLM — needs privacy sign-off (children's names to inference service is the sharpest item). | Align contract; sign off the field inventory before enabling. |
 
-Also in Phase 0: fix the 2 broken test files (`bills/logic.test.ts`, `health/glucose.test.ts` — extensionless imports rejected by Node type-stripping), resolve the smoke-test URL mismatch (`cockpit-10c.pages.dev` vs `cockpit.pages.dev` — one is wrong), add the missing `chat_threads.summary` column design, sign the calendar OAuth `state` (HMAC).
+Also in Phase 0: fix the 2 broken test files (`bills/logic.test.ts`, `health/glucose.test.ts` — extensionless imports rejected by Node type-stripping; fixed 2026-10-13 by adding explicit `.ts` extensions, the repo convention), resolve the smoke-test URL mismatch — **RESOLVED 2026-10-13: `https://cockpit-10c.pages.dev` is canonical (Meheldi confirmed); all references locked to it**, add the missing `chat_threads.summary` column design, sign the calendar OAuth `state` (HMAC).
 
 **Phase 0 done =** A1–A5 + W1 + C1 shipped and re-audited; `npm test` green; smoke test certifies the correct artifact.
 
@@ -138,7 +138,7 @@ clamp [5, 135]
 
 1. **Retention policy:** 7d vs 14d raw signals — cost vs debuggability. Likely decides free vs $25/mo Pro at scale.
 2. **Cloudflare cron triggers:** usage vs the 5/account free cap — okay to consume one for `cockpit-scheduler`?
-3. **Smoke-test URL:** `cockpit-10c.pages.dev` vs `cockpit.pages.dev` — which is canonical?
+3. **Smoke-test URL:** ~~`cockpit-10c.pages.dev` vs `cockpit.pages.dev` — which is canonical?~~ **ANSWERED 2026-10-13: `https://cockpit-10c.pages.dev` is canonical (Meheldi confirmed); locked across DEPLOY.md, deploy scripts, and docs.**
 4. **CI with service_role:** confirm a CI runner may hold the service_role key for RLS tests.
 5. **Crew/child signals:** recommended EXCLUDED from behavioral collection. Confirm.
 6. **Crystal chat BASE 85:** nearly-always-surfaced by design — confirm or adjust.

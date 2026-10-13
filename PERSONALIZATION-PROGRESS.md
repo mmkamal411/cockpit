@@ -18,8 +18,8 @@ Status values: `EVALUATING` → `PHASE_0_IN_PROGRESS` → `PHASE_1_IN_PROGRESS` 
 - [ ] A5 (MEDIUM): admin `view-as` — require both auth layers (not in security-squad scope; left for the full Phase 0 wave)
 - [ ] W1 (HIGH): Crystal worker `/chat` + `/quiz` — add shared-secret auth; kill client-direct browser→worker path
 - [ ] C1 (HIGH): fix app↔worker context contract drift; privacy sign-off on field inventory before enabling
-- [ ] Fix `bills/logic.test.ts` + `health/glucose.test.ts` (extensionless imports)
-- [ ] Resolve smoke-test URL mismatch (`cockpit-10c.pages.dev` vs `cockpit.pages.dev`)
+- [x] Fix `bills/logic.test.ts` + `health/glucose.test.ts` (extensionless imports) — DONE 2026-10-13: explicit `.ts` extensions (repo convention); same-class fix applied to `subscriptions/logic.test.ts` and the `nudges/producers` sources so the whole suite runs under plain Node.
+- [x] Resolve smoke-test URL mismatch (`cockpit-10c.pages.dev` vs `cockpit.pages.dev`) — DONE 2026-10-13: **https://cockpit-10c.pages.dev is canonical** (Meheldi confirmed); locked in DEPLOY.md, `deploy-staging.py`, `smoke-test-staging.py`, `src/lib/nudges/PRODUCERS.md`.
 - [ ] Re-audit A1–A5 after fixes; `npm test` green
 
 ## Phase 1 — Foundation

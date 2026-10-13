@@ -161,7 +161,7 @@ def emit_nudge(pilot_id, title, dedup_key, deadline, body=None):
     if body:
         payload["body"] = body
     req = urllib.request.Request(
-        "https://cockpit.pages.dev/api/nudges/candidates",
+        "https://cockpit-10c.pages.dev/api/nudges/candidates",
         data=json.dumps(payload).encode(),
         headers={
             "Content-Type": "application/json",
@@ -219,12 +219,12 @@ Example scheduler (use curl — Python urllib POSTs get 403 from this stack):
 
 ```bash
 # every 15 minutes — needs SUPABASE_SERVICE_ROLE_KEY in the environment
-curl -s -X POST "https://cockpit.pages.dev/api/nudges/producers/run" \
+curl -s -X POST "https://cockpit-10c.pages.dev/api/nudges/producers/run" \
   -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
-Use the staging URL (`https://pookie-staging.pages.dev`) when testing —
+Use the staging URL (`https://cockpit-10c.pages.dev`) when testing —
 never point a scheduler at staging by accident in production, or pilots get
 double nudges. One scheduler per environment, exactly one.
