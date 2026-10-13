@@ -41,6 +41,20 @@ log = logging.getLogger("telemetry.studentvue_api")
 
 COBB_UNVERIFIED = True  # set False only after a week of green laptop runs
 
+# P0 fix (2026-10-13, data audit): Synergy PXP's canonical method names use
+# the Get*Data pattern. Each entry lists the canonical name FIRST, then
+# legacy aliases. Probing stops at the first method that succeeds, and the
+# winning name is recorded in the pull result (sections.<name>.method) so
+# the next audit can confirm which names Cobb actually serves.
+_METHOD_CANDIDATES = {
+    "student_info": ("GetStudentInfoData", "StudentInfo"),
+    "messages": ("GetPXPContentMessage", "GetPXPMessages", "GetMessages",
+                 "Messages"),
+    "attendance": ("GetStudentAttendanceList", "GetAttendance", "Attendance"),
+    "calendar": ("GetCalendarData", "StudentCalendar"),
+    "class_list": ("GetClassList", "StudentClassList"),
+}
+
 # !!! SSO CONSTRAINT !!!
 # This mobile API client uses NATIVE username/password via HTTP Basic auth.
 # It DOES NOT and CANNOT work with Microsoft SSO credentials (student school
@@ -183,10 +197,35 @@ class StudentVueAPI:
         """GetChildListData (verified). Parent logins list children."""
         return self.call("GetChildListData", {"languageCode": "en"})
 
+    def _call_first(self, section, params):
+        """Probe _METHOD_CANDIDATES[section] in order; return (method, payload).
+
+        Stops at the first method that succeeds and logs the winner, so the
+        laptop run records which name Cobb actually serves. A method miss
+        (unknown method / error envelope) is NOT an auth failure and never
+        triggers credential retry — probing only happens after login proved
+        the credentials good.
+        """
+        candidates = _METHOD_CANDIDATES[section]
+        for candidate in candidates:
+            try:
+                payload = self.call(candidate, params)
+            except StudentVueAPIError as e:
+                self._log.info("%s: method %s unavailable: %s",
+                               section, candidate, str(e)[:120])
+                continue
+            self._log.info("%s: using API method %s", section, candidate)
+            return candidate, payload
+        raise StudentVueAPIError(
+            f"{section}: no working method found "
+            f"(tried {', '.join(candidates)})")
+
     def student_info(self, child_id=0):
-        """StudentInfo (candidate name — verify on laptop)."""
-        return self.call("StudentInfo",
-                         {"childIntID": child_id, "languageCode": "en"})
+        """Student info (canonical: GetStudentInfoData; legacy alias probed)."""
+        _method, payload = self._call_first(
+            "student_info",
+            {"childIntID": child_id, "languageCode": "en"})
+        return payload
 
     def gradebook(self, child_id=0):
         """Gradebook (verified): all reporting periods, per-course marks,
@@ -195,24 +234,36 @@ class StudentVueAPI:
                                        "languageCode": "en"})
 
     def messages(self, child_id=0):
-        """In-portal messages (CANDIDATE method name — verify on laptop)."""
-        for candidate in ("Messages", "GetMessages", "GetPXPMessages"):
-            try:
-                return self.call(candidate, {"childIntID": child_id})
-            except StudentVueAPIError as e:
-                self._log.info("messages method %s unavailable: %s",
-                               candidate, str(e)[:120])
-        raise StudentVueAPIError("no working messages method found")
+        """In-portal messages (canonical: GetPXPContentMessage; aliases probed)."""
+        _method, payload = self._call_first(
+            "messages", {"childIntID": child_id})
+        return payload
 
     def attendance(self, child_id=0):
-        """Attendance (CANDIDATE method name — verify on laptop)."""
-        for candidate in ("Attendance", "GetAttendance"):
-            try:
-                return self.call(candidate, {"childIntID": child_id})
-            except StudentVueAPIError as e:
-                self._log.info("attendance method %s unavailable: %s",
-                               candidate, str(e)[:120])
-        raise StudentVueAPIError("no working attendance method found")
+        """Attendance (canonical: GetStudentAttendanceList; aliases probed)."""
+        _method, payload = self._call_first(
+            "attendance", {"childIntID": child_id})
+        return payload
+
+    def calendar(self, child_id=0):
+        """School calendar (canonical: GetCalendarData; legacy alias probed)."""
+        _method, payload = self._call_first(
+            "calendar", {"childIntID": child_id})
+        return payload
+
+    def class_list(self, child_id=0):
+        """Class schedule (canonical: GetClassList; legacy alias probed)."""
+        _method, payload = self._call_first(
+            "class_list", {"childIntID": child_id})
+        return payload
+
+    def call_with_method(self, section, params):
+        """Probe candidates for `section`; return (winning_method, payload).
+
+        Same as the section methods above but exposes which method name won,
+        so pull_all() can record it for the audit trail.
+        """
+        return self._call_first(section, params)
 
     # -------------------------------------------------------- normalize ---
     @staticmethod

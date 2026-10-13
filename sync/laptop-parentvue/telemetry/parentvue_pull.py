@@ -391,37 +391,66 @@ class ParentVuePull:
                 result["errors"].append({"section": name, "error": str(e)[:300]})
                 result["sections"][name] = None
 
+        def _rest_section(name, section, child_id):
+            """Pull one REST section via candidate probing; record the winner.
+
+            Returns {"raw": <envelope>, "method": <winning method name>} so
+            the audit trail shows which API name Cobb actually served.
+            Auth failures stay fatal (same policy as _call_rest): no point
+            pulling the rest if the session died mid-pull.
+            """
+            def _do():
+                try:
+                    method, payload = self._rest_client().call_with_method(
+                        section, {"childIntID": child_id, "languageCode": "en"})
+                except StudentVueAPIError as e:
+                    if _is_auth_failure(e):
+                        raise ParentVuePullError(
+                            f"ParentVUE auth failed: {e}") from e
+                    raise
+                return {"raw": payload, "method": method}
+            _section(name, _do)
+
+        def _soap_unavailable(name):
+            """Record an explicit skip for REST-only sections in SOAP mode.
+
+            Non-fatal: raises a plain RuntimeError (not ParentVuePullError)
+            so _section degrades the one section instead of aborting the pull.
+            Visible in result["errors"] — never silent.
+            """
+            def _do():
+                raise RuntimeError(
+                    f"{name}: no SOAP equivalent; REST-only section "
+                    f"(transport={self.transport})")
+            _section(name, _do)
+
         try:
+            cid = self._child_id or 0
             if self.transport == "soap":
                 _section("gradebook",
                          lambda: _parse_soap_gradebook(
                              self._soap_client().call(
-                                 "Gradebook", {"ChildIntID": self._child_id or 0})))
+                                 "Gradebook", {"ChildIntID": cid})))
                 _section("attendance",
                          lambda: {"absences": _parse_soap_attendance(
                              self._soap_client().call(
-                                 "Attendance",
-                                 {"ChildIntID": self._child_id or 0}))})
-                _section("messages", lambda: {"messages": []})
+                                 "Attendance", {"ChildIntID": cid})),
+                             "method": "Attendance"})
+                # No SOAP equivalents exist for these — record explicit
+                # skips (visible in errors) instead of silent empty data.
+                _soap_unavailable("messages")
+                _soap_unavailable("calendar")
+                _soap_unavailable("schedule")
+                _soap_unavailable("student_info")
             else:
                 _section("gradebook",
                          lambda: StudentVueAPI.normalize_gradebook(
-                             self._call_rest("gradebook", self._child_id or 0)))
-                _section("attendance",
-                         lambda: {"raw": self._call_rest(
-                             "attendance", self._child_id or 0)})
-                _section("messages",
-                         lambda: {"raw": self._call_rest(
-                             "messages", self._child_id or 0)})
-                _section("calendar",
-                         lambda: {"raw": self._call_rest("call", "StudentCalendar",
-                                                         {"childIntID": self._child_id or 0})})
-                _section("schedule",
-                         lambda: {"raw": self._call_rest("call", "StudentClassList",
-                                                         {"childIntID": self._child_id or 0})})
-                _section("student_info",
-                         lambda: {"raw": self._call_rest(
-                             "student_info", self._child_id or 0)})
+                             self._call_rest("gradebook", cid)))
+                _rest_section("attendance", "attendance", cid)
+                _rest_section("messages", "messages", cid)
+                _rest_section("calendar", "calendar", cid)
+                _rest_section("schedule", "class_list", cid)
+                _rest_section("student_info", "student_info", cid)
         except ParentVuePullError:
             pass
         return result

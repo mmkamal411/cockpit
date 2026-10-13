@@ -294,47 +294,65 @@ def acquire_lock():
         return None
 
 
-def run_sync():
-    # H5: refuse to run concurrently with another instance.
-    _lock = acquire_lock()
-    if _lock is None:
-        log("Another sync is already running — skipping this run.")
-        return 5
-    # School-day guard: skip weekends (Sat=5, Sun=6). The scheduler fires
-    # hourly on weekdays; this is a backstop for misconfigured schedules.
-    # Holidays are not filtered — a no-change pull is harmless.
-    weekday = datetime.now().weekday()
-    if weekday >= 5:
-        log("Weekend — skipping ParentVUE pull (school days only).")
-        return 0
-    cfg = load_config()
-    username, password = get_parentvue_credentials()
-    log(f"Starting ParentVUE backup pull (user={username[:3]}***)")
-    heartbeat(cfg, "syncing")
+def _extract_event_list(envelope):
+    """Best-effort: pull a list of calendar events out of a raw envelope.
 
-    pull = ParentVuePull(
-        username, password,
-        child_name_hint=cfg.get("child_name_hint", ""),
-        timeout=30, max_attempts=3)
-    try:
-        pull.login()
-    except ParentVuePullError as e:
-        heartbeat(cfg, "auth_error")
-        log(f"AUTH FAILED — aborting (no retry): {e}")
-        return 3
+    Shapes are unverified until the first live run with the corrected
+    method names — so this tries common keys and degrades to [].
+    """
+    if not isinstance(envelope, dict):
+        return []
+    for key in ("events", "Events", "calendar", "Calendar", "items", "Items",
+                "calendarEvents", "CalendarEvents"):
+        val = envelope.get(key)
+        if isinstance(val, list):
+            return val
+    # One level deep (envelopes often nest under d/result/Result).
+    for key in ("d", "result", "Result"):
+        nested = envelope.get(key)
+        if isinstance(nested, dict):
+            found = _extract_event_list(nested)
+            if found:
+                return found
+    return []
 
-    result = pull.pull_all()
-    gb = result["sections"].get("gradebook") or {}
+
+def _extract_message_list(section):
+    """Pull a message list out of a messages section (any known shape)."""
+    if isinstance(section, dict):
+        for key in ("messages", "raw"):
+            val = section.get(key)
+            if isinstance(val, list):
+                return val
+            if isinstance(val, dict):
+                # Envelope: look for a list one level in.
+                for k2 in ("messages", "Messages", "items", "Items"):
+                    inner = val.get(k2)
+                    if isinstance(inner, list):
+                        return inner
+        # Unknown shape — preserve it so nothing is silently lost.
+        return section
+    return []
+
+
+def build_payload(cfg, result):
+    """Build the Supabase payload from a pull_all() result.
+
+    Pure function (no I/O) so it can be unit-tested with mock data.
+    Raises RuntimeError on an empty gradebook (C1 gate) — callers must not
+    push the return value when this raises.
+    """
+    sections = result.get("sections") or {}
+    gb = sections.get("gradebook") or {}
     classes = gb.get("classes", [])
 
     # C1: minimum-viable-payload gate. Never push an empty gradebook —
     # it would silently erase good data in Supabase.
     if not classes:
-        heartbeat(cfg, "error")
-        log("ABORT: gradebook pull returned zero classes "
-            f"(transport={result['transport']}, "
-            f"errors={result['errors']}). Not pushing empty data.")
-        return 4
+        raise RuntimeError(
+            "ABORT: gradebook pull returned zero classes "
+            f"(transport={result.get('transport')}, "
+            f"errors={result.get('errors')}). Not pushing empty data.")
 
     grades = []
     class_details = []
@@ -367,26 +385,50 @@ def run_sync():
                 })
     due_next = due_next[:30]
 
-    # Map fetched-but-previously-dropped sections into the payload.
-    # pull_all() fetches these; before this change they were discarded.
-    sections = result.get("sections") or {}
-    attendance_section = sections.get("attendance")
-    messages_section = sections.get("messages")
+    # Previously-fetched-but-discarded sections → payload fields.
     # attendance schema field is jsonb object; pass through whatever we got.
-    attendance_data = attendance_section if isinstance(attendance_section, dict) else {}
+    attendance_section = sections.get("attendance")
+    attendance_data = (attendance_section
+                       if isinstance(attendance_section, dict) else {})
     # synergy_mail schema field is jsonb array; extract a list when possible.
-    synergy_mail_data = []
-    if isinstance(messages_section, dict):
-        for key in ("messages", "raw"):
-            val = messages_section.get(key)
-            if isinstance(val, list):
-                synergy_mail_data = val
-                break
-        else:
-            # Unknown shape — preserve it so nothing is silently lost.
-            synergy_mail_data = messages_section
+    synergy_mail_data = _extract_message_list(sections.get("messages"))
+    if not isinstance(synergy_mail_data, list):
+        synergy_mail_data = []
 
-    payload = {
+    # P0 (2026-10-13): wire calendar / schedule / student_info.
+    # These need migration 022 (calendar_events, class_schedule,
+    # student_info columns on crew_grade_syncs). The RPC ignores unknown
+    # keys, so pushing before 022 is applied is safe — the data simply
+    # starts landing once the migration runs. Each blob carries the
+    # winning API method name for the audit trail.
+    calendar_section = sections.get("calendar") or {}
+    calendar_raw = calendar_section.get("raw") if isinstance(
+        calendar_section, dict) else None
+    calendar_events = {
+        "method": (calendar_section.get("method")
+                   if isinstance(calendar_section, dict) else None),
+        "events": _extract_event_list(calendar_raw),
+    }
+
+    schedule_section = sections.get("schedule") or {}
+    schedule_raw = schedule_section.get("raw") if isinstance(
+        schedule_section, dict) else None
+    class_schedule = {
+        "method": (schedule_section.get("method")
+                   if isinstance(schedule_section, dict) else None),
+        "raw": schedule_raw if isinstance(schedule_raw, dict) else {},
+    }
+
+    student_info_section = sections.get("student_info") or {}
+    student_info_raw = student_info_section.get("raw") if isinstance(
+        student_info_section, dict) else None
+    student_info = {
+        "method": (student_info_section.get("method")
+                   if isinstance(student_info_section, dict) else None),
+        "raw": student_info_raw if isinstance(student_info_raw, dict) else {},
+    }
+
+    return {
         "crew_member_id": cfg["crew_member_id"],
         "device_name": cfg.get("device_name") or
                        f"{platform.node()}-parentvue",
@@ -404,7 +446,53 @@ def run_sync():
         "ctls_upcoming": [],
         "zero_guard_flags": [],
         "pull_method": PULL_METHOD,
+        # New in P0: stored once migration 022 is applied.
+        "calendar_events": calendar_events,
+        "class_schedule": class_schedule,
+        "student_info": student_info,
     }
+
+
+def run_sync():
+    # H5: refuse to run concurrently with another instance.
+    _lock = acquire_lock()
+    if _lock is None:
+        log("Another sync is already running — skipping this run.")
+        return 5
+    # School-day guard: skip weekends (Sat=5, Sun=6). The scheduler fires
+    # hourly on weekdays; this is a backstop for misconfigured schedules.
+    # Holidays are not filtered — a no-change pull is harmless.
+    weekday = datetime.now().weekday()
+    if weekday >= 5:
+        log("Weekend — skipping ParentVUE pull (school days only).")
+        return 0
+    cfg = load_config()
+    username, password = get_parentvue_credentials()
+    log(f"Starting ParentVUE backup pull (user={username[:3]}***)")
+    heartbeat(cfg, "syncing")
+
+    pull = ParentVuePull(
+        username, password,
+        child_name_hint=cfg.get("child_name_hint", ""),
+        timeout=30, max_attempts=3)
+    try:
+        pull.login()
+    except ParentVuePullError as e:
+        heartbeat(cfg, "auth_error")
+        log(f"AUTH FAILED — aborting (no retry): {e}")
+        return 3
+
+    result = pull.pull_all()
+
+    try:
+        payload = build_payload(cfg, result)
+    except RuntimeError as e:
+        heartbeat(cfg, "error")
+        log(str(e))
+        return 4
+
+    classes = payload["grades"]
+    class_details = payload["class_details"]
 
     # H2: Local staging — write payload to disk first, verify it, then push.
     # If the push fails, the staged file survives for manual retry/inspection.
@@ -417,7 +505,7 @@ def run_sync():
         pass
     heartbeat(cfg, "ok")
     log(f"ParentVUE pull ok: {len(classes)} classes, "
-        f"{sum(len(c.get('assignments', [])) for c in classes)} assignments, "
+        f"{sum(len(c.get('assignments', [])) for c in class_details)} assignments, "
         f"transport={result['transport']}, row={new_id}")
     if result["errors"]:
         for e in result["errors"]:
