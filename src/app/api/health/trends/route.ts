@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { requirePilot, serverError } from "@/lib/api-auth";
 
-const METRICS = ["weight", "sleep", "water", "exercise"];
+const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab"];
 
 /**
  * GET /api/health/trends?metric=sleep&period=30d
  * Daily points, 7-day rolling average, and delta vs the prior period.
+ * For blood_glucose, also returns individual readings (with context tags)
+ * so the chart can show each reading against the reference bands.
  * Plain numbers only — no interpretation, no advice.
  */
 export async function GET(req: Request) {
@@ -18,7 +20,7 @@ export async function GET(req: Request) {
     const metric = searchParams.get("metric");
     if (!metric || !METRICS.includes(metric)) {
       return NextResponse.json(
-        { error: "Pick weight, sleep, water, or exercise." },
+        { error: "Pick weight, sleep, water, exercise, blood sugar, or lab A1C." },
         { status: 400 },
       );
     }
@@ -32,7 +34,7 @@ export async function GET(req: Request) {
 
     const { data, error } = await supabase
       .from("health_logs")
-      .select("value, unit, logged_at")
+      .select("value, unit, meta, logged_at")
       .eq("metric", metric)
       .gte("logged_at", priorStart.toISOString())
       .order("logged_at", { ascending: true });
@@ -101,6 +103,20 @@ export async function GET(req: Request) {
       average: avg === null ? null : Math.round(avg * 100) / 100,
       delta_vs_prior: delta,
       unit,
+      // Glucose charts plot every reading (with its context tag) inside
+      // the requested window — daily averages hide the pattern.
+      readings: metric === "blood_glucose"
+        ? (data ?? [])
+            .filter((r) => new Date(r.logged_at) >= start)
+            .map((r) => ({
+              logged_at: r.logged_at,
+              value: Number(r.value),
+              context:
+                r.meta && typeof r.meta === "object" && typeof (r.meta as Record<string, unknown>).context === "string"
+                  ? ((r.meta as Record<string, unknown>).context as string)
+                  : "other",
+            }))
+        : undefined,
     });
   } catch {
     return serverError();

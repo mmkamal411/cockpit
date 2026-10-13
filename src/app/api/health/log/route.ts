@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePilot, serverError } from "@/lib/api-auth";
 
-const METRICS = ["weight", "sleep", "water", "exercise"] as const;
+const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab"] as const;
 type Metric = (typeof METRICS)[number];
 
 /** Sanity bounds per metric (value is in the posted unit). Plain-English rejections. */
@@ -10,12 +10,19 @@ const BOUNDS: Record<Metric, { min: number; max: number; what: string }> = {
   sleep: { min: 0, max: 24, what: "sleep hours" },
   water: { min: 0, max: 50, what: "glasses of water" },
   exercise: { min: 0, max: 1440, what: "exercise minutes" },
+  blood_glucose: { min: 20, max: 1000, what: "blood sugar reading" },
+  a1c_lab: { min: 3, max: 20, what: "A1C value" },
 };
+
+/** Allowed context tags for a blood glucose reading. */
+const GLUCOSE_CONTEXTS = ["fasting", "before_meal", "after_meal", "bedtime", "other"] as const;
 
 /**
  * POST /api/health/log
  * Body: { metric, value, unit, meta?, logged_at? }
  * Weight upserts same-day (latest wins); others append.
+ * blood_glucose meta: { context: fasting|before_meal|after_meal|bedtime|other }
+ * a1c_lab meta: { lab_name? }
  */
 export async function POST(req: Request) {
   const auth = await requirePilot();
@@ -27,7 +34,7 @@ export async function POST(req: Request) {
     const metric = body.metric as Metric;
     if (!METRICS.includes(metric)) {
       return NextResponse.json(
-        { error: "Pick weight, sleep, water, or exercise." },
+        { error: "Pick weight, sleep, water, exercise, blood sugar, or lab A1C." },
         { status: 400 },
       );
     }
@@ -44,8 +51,30 @@ export async function POST(req: Request) {
     }
     const unit = typeof body.unit === "string" && body.unit.trim()
       ? body.unit.trim().slice(0, 12)
-      : metric === "weight" ? "lb" : metric === "sleep" ? "h" : metric === "water" ? "glasses" : "min";
+      : metric === "weight" ? "lb"
+      : metric === "sleep" ? "h"
+      : metric === "water" ? "glasses"
+      : metric === "blood_glucose" ? "mg/dL"
+      : metric === "a1c_lab" ? "%"
+      : "min";
     const meta = body.meta && typeof body.meta === "object" ? body.meta : {};
+
+    // Blood glucose: validate the context tag.
+    if (metric === "blood_glucose") {
+      const ctx = typeof meta.context === "string" ? meta.context : "other";
+      if (!(GLUCOSE_CONTEXTS as readonly string[]).includes(ctx)) {
+        return NextResponse.json(
+          { error: "Pick when this reading was taken: fasting, before a meal, after a meal, bedtime, or other." },
+          { status: 400 },
+        );
+      }
+      meta.context = ctx;
+    }
+    // Lab A1C: optional lab name, kept short.
+    if (metric === "a1c_lab" && typeof meta.lab_name === "string") {
+      meta.lab_name = meta.lab_name.trim().slice(0, 80);
+      if (!meta.lab_name) delete meta.lab_name;
+    }
     const loggedAt = body.logged_at ? new Date(body.logged_at) : new Date();
     if (Number.isNaN(loggedAt.getTime())) {
       return NextResponse.json({ error: "That date doesn't look right." }, { status: 400 });

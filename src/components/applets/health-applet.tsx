@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type Metric = "weight" | "sleep" | "water" | "exercise";
+type Metric = "weight" | "sleep" | "water" | "exercise" | "blood_glucose";
 
 interface HealthLog {
   id: string;
@@ -30,7 +30,27 @@ const METRICS: { id: Metric; label: string; icon: string; unit: string; accent: 
   { id: "sleep", label: "Sleep", icon: "😴", unit: "h", accent: "text-neon-cyan" },
   { id: "water", label: "Water", icon: "💧", unit: "glasses", accent: "text-cyan-300" },
   { id: "exercise", label: "Exercise", icon: "🏃", unit: "min", accent: "text-neon-green" },
+  { id: "blood_glucose", label: "Blood sugar", icon: "🩸", unit: "mg/dL", accent: "text-red-300" },
 ];
+
+/** Context tags for a glucose reading. */
+const GLUCOSE_CONTEXTS = [
+  { id: "fasting", label: "Fasting" },
+  { id: "before_meal", label: "Before meal" },
+  { id: "after_meal", label: "After meal" },
+  { id: "bedtime", label: "Bedtime" },
+  { id: "other", label: "Other" },
+] as const;
+
+/** General reference ranges (ADA). Shown as reference only — never as personal targets. */
+const GLUCOSE_REF = {
+  fastingBand: [80, 130] as const,
+  postMealLine: 180,
+};
+
+/** The medical disclaimer shown on every glucose surface. */
+const GLUCOSE_DISCLAIMER =
+  "This is a tracking tool, not medical advice. Your estimated A1C is a rough calculation from your readings — it is not a substitute for lab tests. Talk to your doctor about your personal targets and treatment.";
 
 /** Health — the Med Bay. Manual logging, gentle trends, celebrating streaks. */
 export function HealthApplet() {
@@ -113,7 +133,7 @@ export function HealthApplet() {
       {/* Metric tiles */}
       <div className="grid grid-cols-2 gap-3">
         {loading
-          ? [0, 1, 2, 3].map((i) => (
+          ? [0, 1, 2, 3, 4].map((i) => (
               <div key={i} className="h-32 animate-pulse rounded-2xl border border-line bg-panel-2/60" />
             ))
           : METRICS.map((m) => {
@@ -165,7 +185,8 @@ export function HealthApplet() {
         />
       )}
 
-      {trend && <TrendView metric={trend} onClose={() => setTrend(null)} />}
+      {trend && trend !== "blood_glucose" && <TrendView metric={trend} onClose={() => setTrend(null)} />}
+      {trend === "blood_glucose" && <GlucoseTrendView onClose={() => setTrend(null)} />}
     </div>
   );
 }
@@ -199,11 +220,19 @@ function LogSheet({
   // Exercise extras
   const [exType, setExType] = useState("walk");
   const [effort, setEffort] = useState(3);
+  // Glucose extras
+  const [context, setContext] = useState<string>("fasting");
+  const [loggedAt, setLoggedAt] = useState(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
 
   const placeholder =
     metric === "weight" ? "e.g. 172" :
     metric === "sleep" ? "e.g. 7.5" :
-    metric === "water" ? "e.g. 6" : "e.g. 30";
+    metric === "water" ? "e.g. 6" :
+    metric === "blood_glucose" ? "e.g. 112" : "e.g. 30";
 
   async function save() {
     const v = parseFloat(value);
@@ -216,11 +245,17 @@ function LogSheet({
     try {
       const meta: Record<string, unknown> =
         metric === "sleep" ? { quality } :
-        metric === "exercise" ? { type: exType, effort } : {};
+        metric === "exercise" ? { type: exType, effort } :
+        metric === "blood_glucose" ? { context } : {};
+      const payload: Record<string, unknown> = { metric, value: v, unit, meta };
+      if (metric === "blood_glucose" && loggedAt) {
+        const dt = new Date(loggedAt);
+        if (!Number.isNaN(dt.getTime())) payload.logged_at = dt.toISOString();
+      }
       const res = await fetch("/api/health/log", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ metric, value: v, unit, meta }),
+        body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -359,6 +394,46 @@ function LogSheet({
               </>
             )}
 
+            {metric === "blood_glucose" && (
+              <>
+                <div>
+                  <p className="mb-2 text-sm text-stardust">When was this taken?</p>
+                  <div className="flex flex-wrap gap-2">
+                    {GLUCOSE_CONTEXTS.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setContext(c.id)}
+                        aria-pressed={context === c.id}
+                        className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+                          context === c.id
+                            ? "border-red-300/60 bg-red-300/10 text-star"
+                            : "border-line text-dim"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm text-stardust" htmlFor="glucose-time">
+                    Time of reading
+                  </label>
+                  <input
+                    id="glucose-time"
+                    type="datetime-local"
+                    value={loggedAt}
+                    onChange={(e) => setLoggedAt(e.target.value)}
+                    className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star focus:border-neon-green/60 focus:outline-none"
+                  />
+                </div>
+                <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-xs leading-relaxed text-dim">
+                  {GLUCOSE_DISCLAIMER}
+                </p>
+              </>
+            )}
+
             {goal && (
               <p className="text-xs text-dim">
                 Your goal: {goal.target_value} {goal.unit}
@@ -391,8 +466,301 @@ function LogSheet({
 }
 
 /* ------------------------------------------------------------------ */
-/* Trend view                                                          */
+/* Glucose trend view — readings chart with ADA reference bands,       */
+/* estimated A1C, lab A1C history, and the medical disclaimer.        */
 /* ------------------------------------------------------------------ */
+
+interface GlucoseReading {
+  logged_at: string;
+  value: number;
+  context: string;
+}
+
+interface A1CData {
+  estimated_a1c: number | null;
+  enough_data: boolean;
+  min_days: number;
+  estimated_from: {
+    avg_glucose_mg_dl: number;
+    days_of_data: number;
+    readings_count: number;
+    window_days: number;
+  } | null;
+  lab_results: { value: number; logged_at: string; lab_name: string | null }[];
+}
+
+function GlucoseTrendView({ onClose }: { onClose: () => void }) {
+  const [readings, setReadings] = useState<GlucoseReading[]>([]);
+  const [a1c, setA1c] = useState<A1CData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showLabForm, setShowLabForm] = useState(false);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const [trendRes, a1cRes] = await Promise.all([
+        fetch("/api/health/trends?metric=blood_glucose&period=30d", { cache: "no-store" }),
+        fetch("/api/health/a1c", { cache: "no-store" }),
+      ]);
+      const trendBody = await trendRes.json().catch(() => ({}));
+      const a1cBody = await a1cRes.json().catch(() => ({}));
+      if (!trendRes.ok) {
+        throw new Error(typeof trendBody?.error === "string" ? trendBody.error : "The trend didn't load.");
+      }
+      if (!a1cRes.ok) {
+        throw new Error(typeof a1cBody?.error === "string" ? a1cBody.error : "The A1C estimate didn't load.");
+      }
+      setReadings(trendBody.readings ?? []);
+      setA1c(a1cBody);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The trend didn't load.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
+
+  // Chart geometry: keep the reference bands in view even with few readings.
+  const values = readings.map((r) => r.value);
+  const lo = Math.min(60, ...(values.length > 0 ? values : [60]));
+  const hi = Math.max(220, ...(values.length > 0 ? values : [220]));
+  const span = Math.max(hi - lo, 1);
+  const yOf = (v: number) => 128 - ((v - lo) / span) * 112;
+  const xOf = (i: number) => 14 + (i / Math.max(readings.length - 1, 1)) * 272;
+  const ctxLabel = (c: string) => GLUCOSE_CONTEXTS.find((g) => g.id === c)?.label ?? "Other";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Blood sugar trend">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-line bg-panel p-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-star">🩸 Blood sugar — 30 days</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-full border border-line p-2 text-dim hover:text-star"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Disclaimer — always visible on this surface */}
+        <p className="mt-3 rounded-xl border border-amber-300/30 bg-amber-300/5 px-4 py-3 text-xs leading-relaxed text-amber-200/90">
+          {GLUCOSE_DISCLAIMER}
+        </p>
+
+        {error ? (
+          <p className="py-6 text-center text-sm text-stardust">{error}</p>
+        ) : loading ? (
+          <div className="mt-4 h-40 animate-pulse rounded-xl bg-panel-2/60" />
+        ) : readings.length === 0 ? (
+          <p className="py-6 text-center text-sm text-stardust">
+            No readings yet — log your blood sugar and the trend will appear here.
+          </p>
+        ) : (
+          <div className="mt-4">
+            <svg viewBox="0 0 300 140" className="w-full" role="img" aria-label="Blood sugar readings with reference bands">
+              {/* Fasting reference band 80–130 */}
+              <rect x="10" y={yOf(GLUCOSE_REF.fastingBand[1])} width="280"
+                height={yOf(GLUCOSE_REF.fastingBand[0]) - yOf(GLUCOSE_REF.fastingBand[1])}
+                fill="#5eead4" opacity="0.08" />
+              {/* Post-meal reference line 180 */}
+              <line x1="10" y1={yOf(GLUCOSE_REF.postMealLine)} x2="290" y2={yOf(GLUCOSE_REF.postMealLine)}
+                stroke="#fcd34d" strokeWidth="1" strokeDasharray="5 4" opacity="0.6" />
+              <polyline
+                points={readings.map((r, i) => `${xOf(i)},${yOf(r.value)}`).join(" ")}
+                fill="none" stroke="#fca5a5" strokeWidth="2" opacity="0.7"
+              />
+              {readings.map((r, i) => (
+                <circle key={`${r.logged_at}-${i}`} cx={xOf(i)} cy={yOf(r.value)} r="3.5" fill="#fca5a5">
+                  <title>{`${r.value} mg/dL — ${ctxLabel(r.context)}, ${fmtDate(r.logged_at)}`}</title>
+                </circle>
+              ))}
+            </svg>
+            <div className="mt-1 space-y-1 text-xs text-dim">
+              <p>
+                <span className="inline-block h-2 w-4 rounded-sm bg-neon-cyan/30 align-middle" />{" "}
+                Typical fasting reference: 80–130 mg/dL
+              </p>
+              <p>
+                <span className="inline-block h-0 w-4 border-t-2 border-dashed border-amber-300/70 align-middle" />{" "}
+                Post-meal reference: under 180 mg/dL
+              </p>
+              <p className="pt-1">
+                General reference ranges from the American Diabetes Association — not your personal
+                targets. Ask your doctor what&apos;s right for you.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Estimated A1C */}
+        <div className="mt-5 rounded-2xl border border-line bg-panel-2/60 p-4">
+          <p className="text-xs font-medium uppercase tracking-wider text-dim">Estimated A1C</p>
+          {!a1c || loading ? (
+            <div className="mt-2 h-8 animate-pulse rounded bg-panel-2" />
+          ) : a1c.enough_data && a1c.estimated_a1c !== null ? (
+            <div className="mt-1">
+              <p className="text-3xl font-semibold text-star">
+                {a1c.estimated_a1c}<span className="text-lg text-dim">%</span>
+              </p>
+              <p className="mt-1 text-xs text-dim">
+                Estimated from your average of {a1c.estimated_from?.avg_glucose_mg_dl} mg/dL across{" "}
+                {a1c.estimated_from?.days_of_data} days of readings. This is an estimate, not a lab result.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-stardust">
+              Not enough readings yet — log blood sugar on at least {a1c.min_days} different days
+              and your estimated A1C will appear here.
+              {a1c.estimated_from && a1c.estimated_from.days_of_data > 0 && (
+                <> You have {a1c.estimated_from.days_of_data} day{a1c.estimated_from.days_of_data === 1 ? "" : "s"} so far.</>
+              )}
+            </p>
+          )}
+        </div>
+
+        {/* Lab A1C results */}
+        <div className="mt-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wider text-dim">Lab results</p>
+            <button
+              type="button"
+              onClick={() => setShowLabForm((s) => !s)}
+              className="text-sm text-neon-cyan hover:underline"
+            >
+              {showLabForm ? "Cancel" : "+ Log a lab result"}
+            </button>
+          </div>
+          {showLabForm && (
+            <LabA1CForm
+              onSaved={() => {
+                setShowLabForm(false);
+                load();
+              }}
+            />
+          )}
+          <div className="mt-2 space-y-2">
+            {(a1c?.lab_results ?? []).length === 0 && !loading && (
+              <p className="text-xs text-dim">No lab results logged yet.</p>
+            )}
+            {(a1c?.lab_results ?? []).map((l, i) => (
+              <div key={`${l.logged_at}-${i}`} className="flex items-center justify-between rounded-xl border border-neon-cyan/25 bg-neon-cyan/5 px-4 py-2.5">
+                <div>
+                  <span className="mr-2 rounded-md bg-neon-cyan/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
+                    Lab
+                  </span>
+                  <span className="text-lg font-semibold text-star">{l.value}%</span>
+                </div>
+                <p className="text-xs text-dim">
+                  {fmtDate(l.logged_at)}{l.lab_name ? ` · ${l.lab_name}` : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <p className="mt-4 text-xs text-dim">
+          Your health data stays yours — it&apos;s never shared, and support can&apos;t see it.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Lab A1C entry form                                                  */
+/* ------------------------------------------------------------------ */
+
+function LabA1CForm({ onSaved }: { onSaved: () => void }) {
+  const [value, setValue] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [labName, setLabName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    const v = parseFloat(value);
+    if (!Number.isFinite(v)) {
+      setError("Enter your A1C as a number, like 6.5.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/health/log", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          metric: "a1c_lab",
+          value: v,
+          unit: "%",
+          logged_at: new Date(date + "T12:00:00").toISOString(),
+          meta: labName.trim() ? { lab_name: labName.trim() } : {},
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof body?.error === "string" ? body.error : "Couldn't save that.");
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save that.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-3 rounded-2xl border border-line bg-panel-2/40 p-4">
+      <div className="flex gap-2">
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          inputMode="decimal"
+          placeholder="e.g. 6.5"
+          aria-label="Lab A1C value"
+          className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-xl text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
+        />
+        <span className="flex items-center px-2 text-sm text-dim">%</span>
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          aria-label="Lab test date"
+          className="flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star focus:border-neon-green/60 focus:outline-none"
+        />
+        <input
+          value={labName}
+          onChange={(e) => setLabName(e.target.value)}
+          placeholder="Lab name (optional)"
+          aria-label="Lab name"
+          className="flex-1 rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
+        />
+      </div>
+      {error && <p className="text-sm text-red-300">{error}</p>}
+      <button
+        type="button"
+        onClick={save}
+        disabled={saving || !value.trim()}
+        className="w-full rounded-xl border border-neon-green/40 bg-neon-green/10 py-2.5 text-sm font-semibold text-neon-green transition-colors hover:bg-neon-green/20 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {saving ? "Saving…" : "Save lab result"}
+      </button>
+    </div>
+  );
+}
 
 function TrendView({ metric, onClose }: { metric: Metric; onClose: () => void }) {
   const def = METRICS.find((m) => m.id === metric)!;

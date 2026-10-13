@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePilot, serverError } from "@/lib/api-auth";
 
-const METRICS = ["weight", "sleep", "water", "exercise"];
+const METRICS = ["weight", "sleep", "water", "exercise", "blood_glucose", "a1c_lab"];
 
 /**
  * GET /api/health/logs?metric=weight&from=2026-09-13&to=2026-10-13&limit=100
