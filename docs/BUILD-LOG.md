@@ -135,3 +135,6 @@ Running full `deploy/deploy-staging.py` on `feature/phase1-module-finish` @ c2b0
 - Batch 5: health-steps code SHIPPED via the same sweep (canonical: a4b145f, 56218e6, a151783, 23d6a55 on feature/health-steps-progress). **INERT until Meheldi runs 025_calendar_sync_status.sql + 026_health_steps.sql.** 6d143746 tracking.
 - Batch 6: module finishes (weather 50ca619, todos/today/calendar polish) SHIPPED.
 Suggested next small deploy (parent to confirm): cherry-pick `3b4b8a9` + `33a5ee4` onto a deploy branch → build → upload → smoke → browser verify. No further deploys launched from this task pending parent sequencing.
+
+## 2026-10-13 ~12:48 EDT — DEPLOY IN PROGRESS (subagent 7dcd8cb3)
+Deploying `feature/phase1-module-finish` @ 7ab58a6 (all modules at 100% + Money/Bills subscriptions). Running `python3 deploy/deploy-staging.py`. **All teams: do NOT commit, push, checkout, or `rm -rf .next` on this tree until the all-clear entry lands.**
