@@ -62,25 +62,19 @@ function greetingMessage(): ChatMessage {
   };
 }
 
-/** Tappable mode pill — shows which persona answered, flips the mode. */
-function ModePill({
-  persona,
-  onFlip,
-}: {
-  persona: Persona;
-  onFlip: () => void;
-}) {
+/**
+ * Static persona badge — shows which persona answered. NOT a toggle:
+ * persona changes come from keyword triggers only (see detectPersona).
+ */
+function PersonaBadge({ persona }: { persona: Persona }) {
   const isCrystal = persona === "crystal";
   return (
-    <button
-      type="button"
-      onClick={onFlip}
-      title={isCrystal ? "Switch to Fireball (direct mode)" : "Switch to Crystal (warm mode)"}
-      aria-label={`${PERSONA_LABEL[persona]} mode — tap to switch to ${isCrystal ? "Fireball" : "Crystal"}`}
-      className={`mb-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest transition-colors ${
+    <span
+      aria-hidden
+      className={`mb-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${
         isCrystal
-          ? "border-neon-teal/40 bg-neon-teal/10 text-neon-teal hover:bg-neon-teal/20"
-          : "border-neon-amber/40 bg-neon-amber/10 text-neon-amber hover:bg-neon-amber/20"
+          ? "border-neon-teal/40 bg-neon-teal/10 text-neon-teal"
+          : "border-neon-amber/40 bg-neon-amber/10 text-neon-amber"
       }`}
     >
       <span
@@ -90,7 +84,7 @@ function ModePill({
         }`}
       />
       {PERSONA_LABEL[persona]}
-    </button>
+    </span>
   );
 }
 
@@ -134,25 +128,6 @@ export function CrystalApplet() {
       cancelled = true;
     };
   }, []);
-
-  /** Flip the mode with a one-line confirmation (spec §7). */
-  function flipMode(next?: Persona) {
-    const target: Persona = next ?? (mode === "crystal" ? "fireball" : "crystal");
-    if (target === mode) return;
-    setMode(target);
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", note: true, persona: target, text: flipConfirmation(target) },
-    ]);
-    if (SERVER_MODE) {
-      // Best-effort: the pill flip already happened locally.
-      fetch("/api/chat/mode", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: target }),
-      }).catch(() => {});
-    }
-  }
 
   async function send(text: string) {
     const clean = text.trim();
@@ -425,9 +400,6 @@ export function CrystalApplet() {
           >
             {drawerOpen ? "Close conversations" : "Conversations"}
           </button>
-          <span className="ml-auto">
-            <ModePill persona={mode} onFlip={() => flipMode()} />
-          </span>
         </div>
       )}
 
@@ -520,7 +492,7 @@ export function CrystalApplet() {
                   }`}
                 >
                   {m.role === "assistant" && m.persona && (
-                    <ModePill persona={m.persona} onFlip={() => flipMode()} />
+                    <PersonaBadge persona={m.persona} />
                   )}
                   <div>{m.text}</div>
                 </div>

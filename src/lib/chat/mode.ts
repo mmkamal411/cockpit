@@ -44,7 +44,7 @@ export function stripDirective(text: string, persona: Persona): string {
   return clean ? clean : text;
 }
 
-/** One-line confirmation for a mode flip (keyword or pill tap). */
+/** One-line confirmation for a mode flip (keyword trigger). */
 export function flipConfirmation(persona: Persona): string {
   return persona === "fireball"
     ? "Switched to Fireball — direct, numbers-first, no softening."
