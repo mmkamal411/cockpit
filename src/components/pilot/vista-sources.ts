@@ -33,9 +33,11 @@ export function planetaryVista(hour: number): VistaSource {
 // ---------------------------------------------------------------------------
 // Background rotation — the pilot is always moving through space.
 //
-// The shell background auto-rotates through these vistas so the journey
-// never feels static. Order matters: vista-planets-1.mp4 is the original
-// staging background and stays first.
+// Each page load picks ONE video at random from the list below; that video
+// then loops seamlessly until the next login/refresh. No timed switching.
+//
+// Order matters: vista-planets-1.mp4 is the original staging background and
+// stays first. vista-warp-nebula-2.mp4 was removed per Meheldi (2026-10-13).
 //
 // Videos not yet generated (vista-long-30s, vista-warp-deep-3,
 // vista-ref-blue-3) are intentionally absent — add them here when ready.
@@ -44,27 +46,17 @@ export function planetaryVista(hour: number): VistaSource {
 export const ROTATION_VIDEOS: string[] = [
   "/videos/vista-planets-1.mp4", // original staging background — keep first
   "/videos/vista-warp-procedural.mp4", // mathematically seamless starfield warp
-  "/videos/vista-warp-nebula-2.mp4", // warp + subtle nebula wisps
   "/videos/vista-nebula-blue-1.mp4", // arctic blue nebula flight
   "/videos/vista-nebula-blue-2.mp4", // dense star clusters, blue veils
   "/videos/vista-ref-blue-1.mp4", // deep blue, teal wisps (Meheldi's reference)
   "/videos/vista-ref-blue-2.mp4", // denser starfield variation
 ];
 
-/** Rotation slot length in milliseconds. */
-export const ROTATION_INTERVAL_MS = 5 * 60 * 1000;
-
 /**
- * Which rotation video should be showing right now. Deterministic from the
- * clock so it never drifts and resumes correctly after sleep.
+ * Pick one rotation video at random. Call once per page load and keep the
+ * result for the session — the video only changes on the next login/refresh.
  */
-export function rotationVideo(nowMs: number = Date.now()): string {
-  const slot = Math.floor(nowMs / ROTATION_INTERVAL_MS);
-  return ROTATION_VIDEOS[slot % ROTATION_VIDEOS.length];
-}
-
-/** The video that comes after `src` in the rotation (for preloading). */
-export function nextRotationVideo(src: string): string {
-  const i = ROTATION_VIDEOS.indexOf(src);
-  return ROTATION_VIDEOS[(i + 1) % ROTATION_VIDEOS.length];
+export function pickRotationVideo(): string {
+  const i = Math.floor(Math.random() * ROTATION_VIDEOS.length);
+  return ROTATION_VIDEOS[i];
 }

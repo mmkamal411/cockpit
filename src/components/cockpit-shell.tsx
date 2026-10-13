@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { planetaryVista, rotationVideo, nextRotationVideo, ROTATION_INTERVAL_MS } from "@/components/pilot/vista-sources";
+import { planetaryVista, pickRotationVideo } from "@/components/pilot/vista-sources";
 import { SoothingOrb } from "@/components/pilot/soothing-orb";
 import { ToolbarSwitch } from "@/components/toolbar-switch";
 import { AppletHost } from "@/components/applet-host";
@@ -20,73 +20,27 @@ import { AppletHost } from "@/components/applet-host";
  * never on the public landing or login pages.
  */
 
-function backgroundFor(pathname: string): string | null {
+function backgroundFor(pathname: string, sessionVideo: string | null): string | null {
   if (pathname === "/" || pathname === "/home") return null;
-  // Login + everything else: the rotating cosmic journey. The current slot
-  // is picked from the clock so rotation never drifts.
-  return rotationVideo();
+  // Login + everything else: the session's picked vista. Chosen once per
+  // page load; it loops until the next login/refresh.
+  return sessionVideo;
 }
 
-/**
- * Crossfading background video. When `src` changes (rotation tick), the new
- * video fades in over the old one — no black flash, no hard cut. The old
- * layer is unmounted after the fade completes.
- */
+/** Seamless-loop background video for the session's picked vista. */
 function BackgroundVideo({ src }: { src: string | null }) {
-  const [base, setBase] = useState<string | null>(src);
-  const [top, setTop] = useState<string | null>(null);
-  const [topVisible, setTopVisible] = useState(false);
-  const timers = useRef<number[]>([]);
-
-  useEffect(() => {
-    if (!src || src === base) return;
-    // Start the incoming layer invisible, then fade it in.
-    setTop(src);
-    setTopVisible(false);
-    const raf = requestAnimationFrame(() =>
-      requestAnimationFrame(() => setTopVisible(true)),
-    );
-    const done = window.setTimeout(() => {
-      setBase(src);
-      setTop(null);
-      setTopVisible(false);
-    }, 1700);
-    timers.current.push(done);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearTimeout(done);
-    };
-  }, [src, base]);
-
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
-
-  if (!base && !top) return null;
+  if (!src) return null;
   return (
     <div aria-hidden="true" className="fixed inset-0 -z-10 overflow-hidden bg-abyss">
-      {base && (
-        <video
-          key={base}
-          className="absolute inset-0 h-full w-full object-cover"
-          src={base}
-          muted
-          loop
-          playsInline
-          autoPlay
-        />
-      )}
-      {top && (
-        <video
-          key={top}
-          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-1500 ease-in-out ${
-            topVisible ? "opacity-100" : "opacity-0"
-          }`}
-          src={top}
-          muted
-          loop
-          playsInline
-          autoPlay
-        />
-      )}
+      <video
+        key={src}
+        className="h-full w-full object-cover"
+        src={src}
+        muted
+        loop
+        playsInline
+        autoPlay
+      />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgb(4_7_10/0.45)_0%,rgb(4_7_10/0.15)_50%,rgb(4_7_10/0.6)_100%)]" />
     </div>
   );
@@ -139,24 +93,15 @@ const TRANSIT_CSS = `
 export function CockpitShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const inShip = pathname === "/home" || pathname.startsWith("/home/");
-  // Re-check the rotation slot every 30s so the background rolls over
-  // on schedule. Reduced-motion users get the calm original, no rotation.
-  const [tick, setTick] = useState(0);
-  const [reducedMotion, setReducedMotion] = useState(false);
+  // Pick the session's background video once per page load (client only, so
+  // SSR and hydration agree). It loops until the next login/refresh.
+  // Reduced-motion users get the calm original with no surprises.
+  const [sessionVideo, setSessionVideo] = useState<string | null>(null);
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReducedMotion(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
-    mq.addEventListener("change", onChange);
-    const id = window.setInterval(() => setTick((t) => t + 1), 30_000);
-    return () => {
-      mq.removeEventListener("change", onChange);
-      window.clearInterval(id);
-    };
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setSessionVideo(reduced ? "/videos/vista-planets-1.mp4" : pickRotationVideo());
   }, []);
-  void tick;
-  const bg = reducedMotion ? "/videos/vista-planets-1.mp4" : backgroundFor(pathname);
-  const nextBg = bg ? nextRotationVideo(bg) : null;
+  const bg = backgroundFor(pathname, sessionVideo);
 
   // Precompute the home vista poster for the daypart after mount (client
   // only — reading the clock during prerender is forbidden) so the opening
@@ -170,7 +115,6 @@ export function CockpitShell({ children }: { children: ReactNode }) {
     <>
       <BackgroundVideo src={bg} />
       {homePoster && !inShip && <link rel="preload" as="image" href={homePoster} />}
-      {nextBg && !reducedMotion && <link rel="preload" as="video" href={nextBg} />}
       <TransitVeil />
       <div className="relative z-0 min-h-dvh">{children}</div>
       {inShip && (
