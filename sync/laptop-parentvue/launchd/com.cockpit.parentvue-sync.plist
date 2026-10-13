@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.cockpit.parentvue-sync — ParentVUE backup grade pull on the MacBook.
+  Runs hourly on school days (Mon-Fri, 6 AM - 10 PM ET).
+
+  Install (on the MacBook):
+    1. Copy this whole parentvue/ directory to ~/parentvue-sync/
+    2. cp com.cockpit.parentvue-sync.plist ~/Library/LaunchAgents/
+    3. Edit the plist: replace /Users/REPLACE_ME with the real home dir
+    4. Store credentials: security add-generic-password -s "cockpit-parentvue" -a "<username>" -w
+    5. Fill in parentvue-config.json
+    6. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cockpit.parentvue-sync.plist
+
+  launchd note: StartCalendarInterval supports Hour/Minute but not
+  day-of-week filtering directly. We run hourly 6-22 and the script
+  itself skips weekends (Sat/Sun) to respect "school days".
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.cockpit.parentvue-sync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/REPLACE_ME/parentvue-sync/parentvue-laptop-sync.py</string>
+    <string>--sync-now</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/REPLACE_ME/parentvue-sync</string>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>15</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/Users/REPLACE_ME/parentvue-sync/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/REPLACE_ME/parentvue-sync/launchd.log</string>
+</dict>
+</plist>
