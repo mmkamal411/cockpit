@@ -139,7 +139,12 @@ export async function POST(req: Request, { params }: RouteParams) {
     }
 
     // Resolve the pilot now if they already have an account.
-    const { data: pilotId } = await supabase.rpc("find_pilot_by_email", { p_email: rawEmail });
+    // Scoped to this list (which we own) — the function refuses to resolve
+    // emails outside that context.
+    const { data: pilotId } = await supabase.rpc("find_pilot_by_email", {
+      p_email: rawEmail,
+      p_list_id: id,
+    });
 
     const ownerName = displayNameFor(user);
 

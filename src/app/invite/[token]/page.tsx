@@ -112,10 +112,10 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   }
 
   // Valid invite + signed in: redeem the single-use token.
+  // Identity comes from the session server-side (auth.uid() + JWT email);
+  // only the token hash travels as a parameter.
   const { data: result } = await supabase.rpc("redeem_share_invite", {
     p_token_hash: tokenHash,
-    p_pilot_id: user.id,
-    p_email: user.email ?? "",
   });
   const r = (result ?? { ok: false, reason: "invalid" }) as {
     ok: boolean;

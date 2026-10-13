@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { encryptToken } from "@/lib/token-crypto";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -50,8 +51,10 @@ export async function GET(req: Request) {
       return NextResponse.redirect(`${appUrl}/?cal=reconsent`);
     }
 
-    // TODO: encrypt refresh_token with a KMS/data key before storing.
-    const refreshTokenEnc = tokens.refresh_token as string;
+    // Encrypted at rest (AES-256-GCM, key from CALENDAR_TOKEN_KEY).
+    // Fail closed: a missing/misconfigured key errors the connect rather
+    // than storing a plaintext refresh token.
+    const refreshTokenEnc = await encryptToken(tokens.refresh_token as string);
     const supabase = await createClient();
     const meRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
