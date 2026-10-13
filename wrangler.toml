@@ -1,0 +1,9 @@
+# Cloudflare Pages configuration (Git integration).
+# The direct-upload script uses wrangler.jsonc (Workers-style); this file is
+# what the Pages Git integration reads at build time. In particular, the
+# compatibility_flags here are visible to wrangler's bundle validation during
+# `pages deploy` — dashboard Runtime flags alone do NOT cover build-time checks.
+pages_build_output_dir = ".pages-deploy"
+
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
