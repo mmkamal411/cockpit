@@ -13,4 +13,4 @@
  * See docs/TOOLBAR-REDESIGN-REVERT-PLAN.md for the full revert procedure.
  */
 export const TOOLBAR_VARIANT: "legacy" | "console" | "dash" | "hologlass" | "panoramic" =
-  "legacy";
+  "panoramic";
