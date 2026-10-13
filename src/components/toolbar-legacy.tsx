@@ -55,7 +55,7 @@ function MoreGlyph() {
  * Center: the Crystal orb (soothing, glowing, id="toolbar-crystal-orb").
  * Flanks: Home · Today · Crystal · Progress · More. Always a path back home.
  */
-export function Toolbar() {
+export function ToolbarLegacy() {
   const router = useRouter();
 
   function goHome() {

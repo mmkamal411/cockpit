@@ -1,7 +1,7 @@
 "use client";
 
 import { TOOLBAR_VARIANT } from "./toolbar-variant";
-import { Toolbar as ToolbarLegacy } from "./toolbar-legacy";
+import { ToolbarLegacy } from "./toolbar-legacy";
 // Variant components land here as they are built:
 // import { ToolbarConsole } from "./toolbar-console";
 // import { ToolbarDash } from "./toolbar-dash";

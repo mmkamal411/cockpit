@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { planetaryVista } from "@/components/pilot/vista-sources";
 import { SoothingOrb } from "@/components/pilot/soothing-orb";
-import { Toolbar } from "@/components/toolbar";
+import { ToolbarSwitch } from "@/components/toolbar-switch";
 import { AppletHost } from "@/components/applet-host";
 
 /**
@@ -111,7 +111,7 @@ export function CockpitShell({ children }: { children: ReactNode }) {
         <>
           <SoothingOrb />
           <AppletHost />
-          <Toolbar />
+          <ToolbarSwitch />
         </>
       )}
     </>
