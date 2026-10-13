@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { openApplet } from "@/lib/applet-bus";
 import { readLocal, type CrewMember } from "@/lib/local-store";
+import { STATION_DECK_VARIANT } from "@/lib/feature-flags";
+import { StationDeckBays } from "./station-deck-bays";
+import { StationDeckEcam } from "./station-deck-ecam";
+import { StationDeckGrid } from "./station-deck-grid";
 
 const CREW_KEY = "cockpit.crew";
 
@@ -27,6 +31,21 @@ const SEEDLINGS: Seedling[] = [
 
 /** More — every station on the ship, plus the opt-in Crew section. */
 export function MoreApplet() {
+  switch (STATION_DECK_VARIANT) {
+    case "bays":
+      return <StationDeckBays />;
+    case "ecam":
+      return <StationDeckEcam />;
+    case "grid":
+      return <StationDeckGrid />;
+    case "legacy":
+    default:
+      return <MoreAppletLegacy />;
+  }
+}
+
+/** The original More list — preserved untouched as the instant-revert target. */
+function MoreAppletLegacy() {
   const [crew, setCrew] = useState<CrewMember[]>([]);
 
   useEffect(() => {
