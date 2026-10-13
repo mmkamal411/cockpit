@@ -287,6 +287,17 @@ const LINK_ERROR_FALLBACK =
   "We couldn't open that link. Check it in your browser and try again.";
 
 /**
+ * Defensive copy when the backend's per-source message is missing: per kind,
+ * plain-English, and pointing at the upload fallback (the message appears
+ * directly above it).
+ */
+export function intakeErrorFallback(kind: IntakeItem["kind"]): string {
+  return kind === "bell"
+    ? "We couldn't read that bell schedule. Upload a photo or PDF of it instead."
+    : "We couldn't read that calendar page. Upload a photo or PDF of it instead.";
+}
+
+/**
  * Match per-source intake results back to the requested items and push each
  * item's check to saved/error.
  *
@@ -332,7 +343,7 @@ export function applyIntakeResults(
     } else {
       onCheck(item.key, {
         state: "error",
-        message: result.message ?? LINK_ERROR_FALLBACK,
+        message: result.message ?? intakeErrorFallback(item.kind),
       });
     }
   }

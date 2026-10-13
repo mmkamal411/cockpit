@@ -574,10 +574,54 @@ export function CrewApplet() {
     }
   }
 
+  /**
+   * Parse-aware snapshot helpers (R3). The pipeline writes snapshot
+   * `status: "ok"` whenever the page fetched, even when the read failed, so
+   * `status` alone can't say whether we got usable data. `parse_status` is
+   * the honest signal: "ok"/"partial" = readable, anything else set (e.g.
+   * "error") = couldn't read, "pending"/null = the read hasn't been
+   * attempted yet (neutral).
+   */
+  function parseSucceededSnapshot(
+    snap: SchoolSourceSnapshot | null | undefined,
+  ): boolean {
+    const ps = snap?.parse_status;
+    return ps === "ok" || ps === "partial";
+  }
+
+  function snapshotFailed(
+    snap: SchoolSourceSnapshot | null | undefined,
+  ): boolean {
+    if (!snap) return false;
+    const ps = snap.parse_status;
+    if (ps === "ok" || ps === "partial") return false;
+    if (ps && ps !== "pending") return true;
+    // "pending"/null: the read hasn't happened — fail only if the fetch
+    // itself failed.
+    return snap.status === "error";
+  }
+
+  /**
+   * Plain-English note for a failed snapshot: the backend's parse_note when
+   * present (already plain-English), else per-kind fallback copy.
+   */
+  function snapshotFailureNote(
+    snap: SchoolSourceSnapshot | null | undefined,
+    kind: "calendar" | "bell",
+  ): string {
+    return (
+      snap?.parse_note ??
+      snap?.error_note ??
+      (kind === "calendar"
+        ? "We couldn't read the calendar page, so there's nothing saved from it yet."
+        : "We couldn't read that bell schedule, so there's nothing saved from it yet.")
+    );
+  }
+
   /** Did the calendar source fail? (stale snapshot or a fresh check error) */
   function calendarSourceFailed(): boolean {
     return Boolean(
-      (srcSnapshots.calendar && srcSnapshots.calendar.status !== "ok") ||
+      snapshotFailed(srcSnapshots.calendar) ||
         srcChecks.some((c) => c.key === "calendar" && c.state === "error"),
     );
   }
@@ -585,7 +629,7 @@ export function CrewApplet() {
   /** Did bell row i fail? (stale snapshot or a fresh check error) */
   function bellSourceFailed(i: number): boolean {
     return Boolean(
-      (srcSnapshots.bells[i] && srcSnapshots.bells[i].status !== "ok") ||
+      snapshotFailed(srcSnapshots.bells[i]) ||
         srcChecks.some((c) => c.key === `bell-${i}` && c.state === "error"),
     );
   }
@@ -609,14 +653,25 @@ export function CrewApplet() {
     }
     const snap = srcSnapshots.calendar;
     if (!snap) return null;
-    const ok = snap.status === "ok";
-    return (
-      <p className={`mt-1 text-xs ${ok ? "text-dim" : "text-neon-amber"}`}>
-        {ok
-          ? `Last pull ${timeAgo(snap.fetched_at) ?? "recently"} — looks good.`
-          : `Last pull failed — ${snap.error_note ?? "try Refresh."}`}
-      </p>
-    );
+    // A failure and "looks good" can never show for the same source at once:
+    // "looks good" only when the read succeeded; otherwise the honest note.
+    if (snapshotFailed(snap)) {
+      return (
+        <p className="mt-1 text-xs text-neon-amber">
+          Last pull didn&apos;t come through —{" "}
+          {snapshotFailureNote(snap, "calendar")}
+        </p>
+      );
+    }
+    if (parseSucceededSnapshot(snap)) {
+      return (
+        <p className="mt-1 text-xs text-dim">
+          Last pull {timeAgo(snap.fetched_at) ?? "recently"} — looks good.
+        </p>
+      );
+    }
+    // Read not attempted yet and the fetch didn't fail — nothing to report.
+    return null;
   }
 
   /**
@@ -628,11 +683,11 @@ export function CrewApplet() {
     const fresh = srcChecks.find((c) => c.key === `bell-${i}`);
     const freshFailed = fresh?.state === "error";
     const snap = srcSnapshots.bells[i];
-    const snapFailed = !!snap && snap.status !== "ok";
+    const snapFailed = snapshotFailed(snap);
     if (!snapFailed && !freshFailed) return null;
     const message = freshFailed
       ? (fresh?.message ?? "We couldn't read that link. Try again.")
-      : `last pull failed — ${snap?.error_note ?? "try Refresh."}`;
+      : `last pull didn't come through — ${snapshotFailureNote(snap, "bell")}`;
     return (
       <p className="text-xs text-neon-amber">
         {label || `Schedule ${i + 1}`}: {message}
