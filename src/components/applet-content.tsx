@@ -10,6 +10,8 @@ import { CrewApplet } from "./applets/crew-applet";
 import { BillsApplet } from "./applets/bills-applet";
 import { WeatherApplet } from "./applets/weather-applet";
 import { CalendarApplet } from "./applets/calendar-applet";
+import { ShoppingApplet } from "./applets/shopping-applet";
+import { HealthApplet } from "./applets/health-applet";
 
 export interface AppletDef {
   /** Short plain-English name shown in the window chrome. */
@@ -70,6 +72,18 @@ export const APPLETS: Record<string, AppletDef> = {
     readout: "CAL",
     glow: "#f0abfc",
     render: () => <CalendarApplet />,
+  },
+  shopping: {
+    name: "Shopping",
+    readout: "LIST",
+    glow: "#5eead4",
+    render: () => <ShoppingApplet />,
+  },
+  health: {
+    name: "Health",
+    readout: "MED",
+    glow: "#86efac",
+    render: () => <HealthApplet />,
   },
 };
 

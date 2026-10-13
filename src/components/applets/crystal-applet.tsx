@@ -15,65 +15,13 @@ const TUTOR_URL = (
   ""
 ).replace(/\/$/, "");
 
-function greeting(): string {
+interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   /** Which persona answered (assistant messages only). */
   persona?: Persona;
   /** System note (mode flip confirmations) — rendered as a subtle line. */
   note?: boolean;
-}
-
-const SUGGESTIONS = [
-  "What should I focus on today?",
-  "Help me plan my week",
-  "Remind me to drink water",
-];
-
-function greeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 5) return "Night watch";
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
-}
-
-/**
- * Mode keywords (per the Crystal Chat spec §3):
- *  - "fireball" → Fireball (direct, unfiltered)
- *  - "crystal" / "more" / "details" / "explain" / "plan" / "describe" /
- *    "create" → Crystal (or expansion of the last answer)
- * When both appear, the explicit "fireball" wins.
- */
-const FIREBALL_RE = /\bfireball\b/i;
-const CRYSTAL_RE = /\b(?:crystal|more|details|explain|plan|describe|create)\b/i;
-
-/**
- * Detect the persona from keywords in the message.
- * Fireball wins when both appear (explicit direct request).
- * Defaults to "crystal".
- */
-function detectPersona(text: string): Persona {
-  if (FIREBALL_RE.test(text)) return "fireball";
-  if (CRYSTAL_RE.test(text)) return "crystal";
-  return "crystal";
-}
-
-/**
- * Strip a leading directive keyword ("fireball …", "hey crystal, …").
- * Mid-sentence mentions are left alone — they're content, not commands.
- */
-function stripDirective(text: string, persona: Persona): string {
-  const stripped = text.replace(
-    new RegExp(`^(hey[ ,]+)?\\b${persona}\\b[,:\\s]*`, "i"),
-    "",
-  );
-  return stripped.trim() ? stripped.trim() : text;
-}
-
-const PERSONA_LABEL: Record<Persona, string> = {
-  crystal: "Crystal",
-  fireball: "Fireball",
 };
 
 /** Tappable mode pill — shows which persona answered, flips the mode. */
@@ -135,10 +83,7 @@ export function CrystalApplet() {
         role: "assistant",
         note: true,
         persona: target,
-        text:
-          target === "fireball"
-            ? "Switched to Fireball — direct, numbers-first, no softening."
-            : "Switched to Crystal — warm and steady.",
+        text: flipConfirmation(target),
       },
     ]);
   }
@@ -279,15 +224,7 @@ export function CrystalApplet() {
 
 /** One-line confirmation for a keyword-triggered mode flip. */
 function flipNote(persona: Persona): ChatMessage {
-  return {
-    role: "assistant",
-    note: true,
-    persona,
-    text:
-      persona === "fireball"
-        ? "Switched to Fireball — direct, numbers-first, no softening."
-        : "Switched to Crystal — warm and steady.",
-  };
+  return { role: "assistant", note: true, persona, text: flipConfirmation(persona) };
 }
 
 const TYPING_CSS = `

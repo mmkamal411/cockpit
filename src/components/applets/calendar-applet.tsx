@@ -96,7 +96,6 @@ export function CalendarApplet() {
 
   return (
     <div className="space-y-5">
-      {/* View tabs + day nav */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex gap-1 rounded-xl border border-line bg-panel-2 p-1" role="tablist" aria-label="Calendar view">
           {(["agenda", "day", "week"] as View[]).map((v) => (

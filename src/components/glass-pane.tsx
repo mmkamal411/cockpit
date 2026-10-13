@@ -92,15 +92,15 @@ export function GlassPane() {
   });
   const open = todos.filter((t) => !t.done);
 
-  function addTodo() {
-    const text = draft.trim();
-    if (!text) return;
-    setTodos((prev) => [...prev, { id: newId(), text, done: false, createdAt: Date.now() }]);
+  async function addTodo() {
+    const parsed = parseTodo(draft);
+    if (!parsed.text) return;
     setDraft("");
+    await createTodo(parsed.text, parsed.dueAt !== undefined ? { dueAt: parsed.dueAt } : undefined);
   }
 
   function toggleTodo(id: string) {
-    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+    void flipTodo(id);
   }
 
   return (
