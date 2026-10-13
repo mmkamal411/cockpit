@@ -13,6 +13,11 @@ import { getPilot } from "@/lib/admin/pilots";
  * active layout, integration summary). No session is created, nothing is
  * written. Secrets (integration config, vault username refs) are stripped.
  * The view itself is audit-logged.
+ *
+ * A5 (Phase 0): view-as touches live children's grade data, so it requires
+ * BOTH auth layers — (1) a valid pilot session on the ADMIN_EMAILS
+ * allowlist, AND (2) an admin_users DB row via the is_admin RPC. Either
+ * layer denying access fails closed with a plain-English 403.
  */
 export const GET = adminRoute<{ id: string }>(async (adminEmail, _req, ctx) => {
   const { id } = await ctx.params;
@@ -91,7 +96,9 @@ export const GET = adminRoute<{ id: string }>(async (adminEmail, _req, ctx) => {
   }
   const schoolLinks = new Map<string, Record<string, unknown>>();
   for (const row of (schoolLinksResult.data ?? []) as Record<string, unknown>[]) {
+    // Strip the vault username ref before the row reaches the response.
     const { username_ref: _usernameRef, ...safe } = row;
+    void _usernameRef;
     schoolLinks.set(row.crew_member_id as string, safe);
   }
 
@@ -125,4 +132,4 @@ export const GET = adminRoute<{ id: string }>(async (adminEmail, _req, ctx) => {
     layout: layoutResult.data ?? null,
     integrations: integrationsResult.data ?? [],
   });
-});
+}, { bothLayers: true });
