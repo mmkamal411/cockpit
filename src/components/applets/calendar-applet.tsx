@@ -20,6 +20,20 @@ function providerLabel(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
+/** "Last synced 2h ago" / "Never synced" — plain, no jargon. */
+function lastSyncedLabel(iso: string | null): string {
+  if (!iso) return "Never synced";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t) || t <= 0) return "Never synced";
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (mins < 1) return "Synced just now";
+  if (mins < 60) return `Last synced ${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `Last synced ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "Last synced yesterday" : `Last synced ${days} days ago`;
+}
+
 const CONNECT_BUTTON_CLASS =
   "mt-4 inline-block rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-5 py-2.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20";
 
@@ -121,15 +135,18 @@ function CalNotice() {
 }
 /* eslint-enable react-hooks/set-state-in-effect */
 
-/** Connected accounts: provider, account email, disconnect. */
+/** Connected accounts: provider, account email, sync status, disconnect. */
 function ConnectedAccounts({
   connections,
   onChanged,
+  onSynced,
 }: {
   connections: CalendarConnection[];
   onChanged: () => void;
+  onSynced: () => void;
 }) {
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function disconnect(id: string) {
@@ -146,11 +163,42 @@ function ConnectedAccounts({
     }
   }
 
+  async function syncNow() {
+    setSyncing(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/calendar/sync", { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error ?? `sync ${r.status}`);
+      if (d.ok === false) {
+        const first = Array.isArray(d.errors) && d.errors.length > 0 ? String(d.errors[0]) : null;
+        throw new Error(first ?? "The sync didn't finish — try again in a bit.");
+      }
+      onSynced();
+    } catch (e) {
+      setError(
+        e instanceof Error && e.message
+          ? e.message
+          : "Couldn't sync right now — try again in a bit.",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <div className="rounded-2xl border border-line bg-panel-2/60 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">Connected accounts</p>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={syncNow}
+            disabled={syncing}
+            className="rounded-lg border border-neon-cyan/40 bg-neon-cyan/10 px-2.5 py-1 text-xs font-medium text-neon-cyan hover:bg-neon-cyan/20 disabled:opacity-50"
+          >
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
           <a href="/api/calendar/connect" className="rounded-lg border border-line bg-panel-2 px-2.5 py-1 text-xs text-stardust hover:text-star">
             + Google
           </a>
@@ -175,6 +223,7 @@ function ConnectedAccounts({
               {c.provider_account_email && (
                 <p className="truncate text-xs text-dim">{c.provider_account_email}</p>
               )}
+              <p className="mt-0.5 text-xs text-dim">{lastSyncedLabel(c.last_synced_at)}</p>
               {c.last_sync_error && (
                 <p className="mt-0.5 text-xs text-neon-amber">{c.last_sync_error}</p>
               )}
@@ -206,6 +255,7 @@ export function CalendarApplet() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [connections, setConnections] = useState<CalendarConnection[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const dayISO = (() => {
     const d = new Date();
@@ -227,6 +277,12 @@ export function CalendarApplet() {
   useEffect(() => {
     loadConnections();
   }, []);
+
+  /** After a manual sync: refresh the accounts list and re-pull the view. */
+  function handleSynced() {
+    loadConnections();
+    setReloadKey((k) => k + 1);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -258,7 +314,7 @@ export function CalendarApplet() {
       }
     })();
     return () => controller.abort();
-  }, [view, dayISO]);
+  }, [view, dayISO, reloadKey]);
 
   const dayLabel = new Date(dayISO + "T12:00:00").toLocaleDateString(undefined, {
     weekday: "long", month: "long", day: "numeric",
@@ -315,7 +371,7 @@ export function CalendarApplet() {
         agenda ? (
           <div className="space-y-5">
             {connections !== null && connections.length > 0 && (
-              <ConnectedAccounts connections={connections} onChanged={loadConnections} />
+              <ConnectedAccounts connections={connections} onChanged={loadConnections} onSynced={handleSynced} />
             )}
             <div>
               <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-cyan">{dayLabel}</p>
@@ -362,7 +418,7 @@ export function CalendarApplet() {
       ) : (
         <div className="space-y-5">
           {connections !== null && connections.length > 0 && (
-            <ConnectedAccounts connections={connections} onChanged={loadConnections} />
+            <ConnectedAccounts connections={connections} onChanged={loadConnections} onSynced={handleSynced} />
           )}
           <ul className="space-y-2">
             {events.map((e) => <EventRow key={e.id} e={e} />)}
