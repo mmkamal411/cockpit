@@ -83,6 +83,17 @@ export function CrewApplet() {
   const [reauthPassword, setReauthPassword] = useState("");
   const [reauthSaving, setReauthSaving] = useState(false);
   const [reauthMessage, setReauthMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  // First-time connect form state (per crew member) — two separate logins:
+  // ParentVUE (parent portal, server-side pulls) and student (laptop workers).
+  const [connectFor, setConnectFor] = useState<string | null>(null);
+  const [parentUsername, setParentUsername] = useState("");
+  const [parentPassword, setParentPassword] = useState("");
+  const [parentSaving, setParentSaving] = useState(false);
+  const [parentMessage, setParentMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [studentUsername, setStudentUsername] = useState("");
+  const [studentPassword, setStudentPassword] = useState("");
+  const [studentSaving, setStudentSaving] = useState(false);
+  const [studentMessage, setStudentMessage] = useState<{ ok: boolean; text: string } | null>(null);
   // Classes/grades for the detail view.
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [classesLoading, setClassesLoading] = useState(false);
@@ -179,6 +190,7 @@ export function CrewApplet() {
     setSync(["Grades", "Assignments"]);
     setError("");
     closeReauth();
+    closeConnect();
   }
 
   function openReauth(memberId: string) {
@@ -195,6 +207,112 @@ export function CrewApplet() {
     setReauthMessage(null);
   }
 
+  /** Open the first-time connect form (two logins: ParentVUE + student). */
+  function openConnect(memberId: string) {
+    setConnectFor(memberId);
+    setParentUsername("");
+    setParentPassword("");
+    setParentMessage(null);
+    setStudentUsername("");
+    setStudentPassword("");
+    setStudentMessage(null);
+  }
+
+  function closeConnect() {
+    setConnectFor(null);
+    setParentUsername("");
+    setParentPassword("");
+    setParentMessage(null);
+    setStudentUsername("");
+    setStudentPassword("");
+    setStudentMessage(null);
+  }
+
+  /** Refresh the roster after a credential save so status indicators update. */
+  async function refreshRoster() {
+    const rosterRes = await fetch("/api/crew/members");
+    if (rosterRes.ok) {
+      const rosterJson = await rosterRes.json();
+      setRoster(rosterJson.members ?? []);
+    }
+  }
+
+  /** Test + save the ParentVUE (parent portal) login. */
+  async function submitParentLogin(memberId: string) {
+    if (!parentUsername.trim() || !parentPassword) {
+      setParentMessage({
+        ok: false,
+        text: "Enter both the ParentVUE username and password.",
+      });
+      return;
+    }
+    setParentSaving(true);
+    setParentMessage(null);
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}/school-reauth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: parentUsername.trim(),
+          password: parentPassword,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setParentMessage({ ok: false, text: json.error ?? "That didn't work. Try again." });
+        return;
+      }
+      setParentMessage({ ok: true, text: json.message });
+      setParentPassword("");
+      await refreshRoster();
+    } catch {
+      setParentMessage({
+        ok: false,
+        text: "We couldn't reach the server. Check your connection and try again.",
+      });
+    } finally {
+      setParentSaving(false);
+    }
+  }
+
+  /** Test + save the student (StudentVUE / Outlook / CTLS) login. */
+  async function submitStudentLogin(memberId: string) {
+    if (!studentUsername.trim() || !studentPassword) {
+      setStudentMessage({
+        ok: false,
+        text: "Enter both the student's school email and password.",
+      });
+      return;
+    }
+    setStudentSaving(true);
+    setStudentMessage(null);
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}/student-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: studentUsername.trim(),
+          password: studentPassword,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setStudentMessage({ ok: false, text: json.error ?? "That didn't work. Try again." });
+        return;
+      }
+      setStudentMessage({ ok: true, text: json.message });
+      setStudentPassword("");
+      await refreshRoster();
+    } catch {
+      setStudentMessage({
+        ok: false,
+        text: "We couldn't reach the server. Check your connection and try again.",
+      });
+    } finally {
+      setStudentSaving(false);
+    }
+  }
+
   /** Open a member's detail view and load their classes. */
   function openMemberDetail(memberId: string) {
     setSelectedMemberId(memberId);
@@ -202,6 +320,7 @@ export function CrewApplet() {
     setClassesMessage("");
     setClassesSyncedAt(null);
     closeReauth();
+    closeConnect();
     loadMemberClasses(memberId);
   }
 
@@ -211,6 +330,7 @@ export function CrewApplet() {
     setClassesMessage("");
     setClassesSyncedAt(null);
     closeReauth();
+    closeConnect();
   }
 
   async function loadMemberClasses(memberId: string) {
@@ -354,6 +474,15 @@ export function CrewApplet() {
                 Update login
               </button>
             )}
+            {!attention && status.tone === "idle" && connectFor !== member.id && (
+              <button
+                type="button"
+                onClick={() => openConnect(member.id)}
+                className="rounded-lg border border-neon-green/40 bg-neon-green/10 px-3 py-1.5 text-xs font-medium text-neon-green transition-colors hover:bg-neon-green/20"
+              >
+                Connect school login
+              </button>
+            )}
           </div>
           {reauthFor === member.id && (
             <div className="mt-3 border-t border-line pt-3">
@@ -423,6 +552,142 @@ export function CrewApplet() {
                   {reauthSaving ? "Checking…" : "Check this login"}
                 </button>
               </div>
+            </div>
+          )}
+          {connectFor === member.id && (
+            <div className="mt-3 space-y-5 border-t border-line pt-3">
+              <div>
+                <p className="text-sm font-medium text-star">
+                  Connect {member.name}&apos;s school logins
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-dim">
+                  Two separate logins. We&apos;ll test each one right now.
+                  Passwords are only used for that check — never stored as plain text.
+                </p>
+              </div>
+
+              {/* ParentVUE login */}
+              <div className="rounded-xl border border-line bg-panel px-4 py-3">
+                <p className="text-sm font-medium text-star">ParentVUE login</p>
+                <p className="mt-0.5 text-xs text-dim">
+                  Your parent portal account — used for grade pulls.
+                </p>
+                <div className="mt-3 space-y-2.5">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-stardust">
+                      ParentVUE username
+                    </span>
+                    <input
+                      value={parentUsername}
+                      onChange={(e) => setParentUsername(e.target.value)}
+                      placeholder="ParentVUE username"
+                      autoComplete="off"
+                      disabled={parentSaving}
+                      className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-stardust">
+                      ParentVUE password
+                    </span>
+                    <input
+                      type="password"
+                      value={parentPassword}
+                      onChange={(e) => setParentPassword(e.target.value)}
+                      placeholder="ParentVUE password"
+                      autoComplete="new-password"
+                      disabled={parentSaving}
+                      className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                    />
+                  </label>
+                </div>
+                {parentMessage && (
+                  <p
+                    role="alert"
+                    className={`mt-2.5 rounded-xl border px-4 py-2.5 text-sm ${
+                      parentMessage.ok
+                        ? "border-neon-green/30 bg-neon-green/5 text-neon-green"
+                        : "border-neon-amber/30 bg-neon-amber/5 text-neon-amber"
+                    }`}
+                  >
+                    {parentMessage.text}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => submitParentLogin(member.id)}
+                  disabled={parentSaving}
+                  className="mt-3 w-full rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+                >
+                  {parentSaving ? "Checking…" : "Test ParentVUE login"}
+                </button>
+              </div>
+
+              {/* Student login */}
+              <div className="rounded-xl border border-line bg-panel px-4 py-3">
+                <p className="text-sm font-medium text-star">Student login</p>
+                <p className="mt-0.5 text-xs text-dim">
+                  {member.name}&apos;s school Microsoft account — used for StudentVUE,
+                  Outlook, and CTLS Learn by the sync workers.
+                </p>
+                <div className="mt-3 space-y-2.5">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-stardust">
+                      Student school email
+                    </span>
+                    <input
+                      value={studentUsername}
+                      onChange={(e) => setStudentUsername(e.target.value)}
+                      placeholder="student@cobbk12.org"
+                      autoComplete="off"
+                      disabled={studentSaving}
+                      className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-stardust">
+                      Student password
+                    </span>
+                    <input
+                      type="password"
+                      value={studentPassword}
+                      onChange={(e) => setStudentPassword(e.target.value)}
+                      placeholder="Student password"
+                      autoComplete="new-password"
+                      disabled={studentSaving}
+                      className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none disabled:opacity-50"
+                    />
+                  </label>
+                </div>
+                {studentMessage && (
+                  <p
+                    role="alert"
+                    className={`mt-2.5 rounded-xl border px-4 py-2.5 text-sm ${
+                      studentMessage.ok
+                        ? "border-neon-green/30 bg-neon-green/5 text-neon-green"
+                        : "border-neon-amber/30 bg-neon-amber/5 text-neon-amber"
+                    }`}
+                  >
+                    {studentMessage.text}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => submitStudentLogin(member.id)}
+                  disabled={studentSaving}
+                  className="mt-3 w-full rounded-xl border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20 disabled:opacity-50"
+                >
+                  {studentSaving ? "Checking…" : "Test student login"}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeConnect}
+                className="w-full rounded-xl border border-line bg-panel-2/60 px-4 py-2 text-sm font-medium text-stardust transition-colors hover:text-star"
+              >
+                Done
+              </button>
             </div>
           )}
         </div>

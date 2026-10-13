@@ -137,16 +137,18 @@ export async function POST(
     );
   }
 
-  // Replace any existing unprocessed pending row for this crew member.
+  // Replace any existing unprocessed parentvue pending row for this member.
   await supabase
     .from("crew_credential_pending")
     .delete()
     .eq("crew_member_id", crewMemberId)
+    .eq("credential_type", "parentvue")
     .is("processed_at", null);
 
   const { error: pendingError } = await supabase.from("crew_credential_pending").insert({
     crew_member_id: crewMemberId,
     pilot_id: pilotId,
+    credential_type: "parentvue",
     username_enc: usernameEnc,
     password_enc: passwordEnc,
   });
