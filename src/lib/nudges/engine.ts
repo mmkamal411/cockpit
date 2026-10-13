@@ -365,23 +365,30 @@ export async function expireOld(
     .from("nudges")
     .update({ status: "expired" })
     .in("status", ["pending", "delivered", "snoozed"])
-    .lt("expires_at", iso);
-  if (pilot_id) expQ = expQ.eq("pilot_id", pilot_id) as typeof expQ;
-  const expRes = await expQ;
+    .lt("expires_at", iso)
+    .select("id");
+  if (pilot_id) expQ = expQ.eq("pilot_id", pilot_id);
+  const expRes = (await expQ) as unknown as SweepResult;
   if (expRes.error) throw new Error(`expire sweep failed: ${expRes.error.message}`);
-  expired = Array.isArray(expRes.data) ? expRes.data.length : 0;
+  expired = expRes.data?.length ?? 0;
 
   let snzQ = db
     .from("nudges")
     .update({ status: "pending", snoozed_until: null })
     .eq("status", "snoozed")
-    .lt("snoozed_until", iso);
-  if (pilot_id) snzQ = snzQ.eq("pilot_id", pilot_id) as typeof snzQ;
-  const snzRes = await snzQ;
+    .lt("snoozed_until", iso)
+    .select("id");
+  if (pilot_id) snzQ = snzQ.eq("pilot_id", pilot_id);
+  const snzRes = (await snzQ) as unknown as SweepResult;
   if (snzRes.error) throw new Error(`unsnooze sweep failed: ${snzRes.error.message}`);
-  unsnoozed = Array.isArray(snzRes.data) ? snzRes.data.length : 0;
+  unsnoozed = snzRes.data?.length ?? 0;
 
   return { expired, unsnoozed };
+}
+
+interface SweepResult {
+  data: { id: string }[] | null;
+  error: { message: string } | null;
 }
 
 /**

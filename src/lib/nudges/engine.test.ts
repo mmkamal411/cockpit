@@ -20,6 +20,8 @@ import {
   type NudgeCandidate,
   type NudgePreferences,
   type NudgeTier,
+// @ts-expect-error TS5097: explicit .ts extension required for Node's
+// type-stripping test runner (node src/lib/nudges/engine.test.ts).
 } from "./engine.ts";
 
 let failures = 0;
@@ -57,11 +59,13 @@ class MockQuery {
   calls: string[] = [];
   insertedRows: unknown[] | null = null;
   updatedValues: unknown = null;
-  constructor(
-    private responses: MockResponse[],
-    private table: string,
-    private log: MockQuery[],
-  ) {
+  private responses: MockResponse[];
+  private table: string;
+  private log: MockQuery[];
+  constructor(responses: MockResponse[], table: string, log: MockQuery[]) {
+    this.responses = responses;
+    this.table = table;
+    this.log = log;
     log.push(this);
   }
   select(cols: string) { this.calls.push(`select:${cols}`); return this; }
@@ -260,16 +264,13 @@ await test("submitCandidate: inserts with score + quiet-hours schedule", async (
     { prefs: prefs(), timezone: TZ, now },
   );
   eq(out.action, "inserted", "action");
-  if (out.action === "inserted") {
-    eq(out.score, 80, "score");
-    eq(out.scheduledFor, "2026-10-13T11:00:00.000Z", "pushed past quiet hours");
-    const row = log[1].insertedRows?.[0] as Record<string, unknown>;
-    eq(row["dedup_key"], "meeting:evt-1", "dedup_key stored");
-    eq(row["status"], "pending", "status pending");
-    eq(row["kind"], "meeting", "legacy kind synced");
-  } else {
-    throw new Error("expected inserted");
-  }
+  if (out.action !== "inserted") throw new Error("expected inserted");
+  eq(out.score, 96, "score: 80 base × 1.2 (<24h via scheduled_for)");
+  eq(out.scheduledFor, "2026-10-13T11:00:00.000Z", "pushed past quiet hours");
+  const row = log[1].insertedRows?.[0] as Record<string, unknown>;
+  eq(row["dedup_key"], "meeting:evt-1", "dedup_key stored");
+  eq(row["status"], "pending", "status pending");
+  eq(row["kind"], "meeting", "legacy kind synced");
 });
 
 await test("submitCandidate: deduped when a live nudge exists", async () => {

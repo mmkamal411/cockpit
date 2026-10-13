@@ -17,10 +17,10 @@ interface Seedling {
 // Stations still being built — seedlings, not dead ends. Each one says what
 // it will do, so the full ship is visible from the first tap.
 const SEEDLINGS: Seedling[] = [
-  { name: "Health", blurb: "Sleep, movement, and how your body is really doing.", glow: "#86efac" },
+  { name: "Health", blurb: "Sleep, movement, and how your body is really doing.", glow: "#86efac", appletId: "health" },
   { name: "Money", blurb: "Bills, spending, and the quiet leaks in your budget.", glow: "#fcd34d", appletId: "bills" },
   { name: "Mail", blurb: "Every inbox, triaged — the important stuff floats up.", glow: "#67e8f9" },
-  { name: "Shopping", blurb: "Lists that notice when you're running low.", glow: "#5eead4" },
+  { name: "Shopping", blurb: "Lists that notice when you're running low.", glow: "#5eead4", appletId: "shopping" },
   { name: "Travel", blurb: "Flights, stays, and trips that plan themselves.", glow: "#c4b5fd" },
   { name: "Learn", blurb: "Skills and courses, one calm session at a time.", glow: "#67e8f9" },
 ];
