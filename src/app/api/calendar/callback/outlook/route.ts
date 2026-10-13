@@ -1,0 +1,97 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { encryptToken } from "@/lib/token-crypto";
+import { syncPilotCalendars } from "@/lib/calendar/sync";
+
+const TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const GRAPH_ME = "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName";
+
+/**
+ * GET /api/calendar/callback/outlook?code=&state=
+ * Microsoft OAuth callback: exchanges the code, stores the connection.
+ */
+export async function GET(req: Request) {
+  const { searchParams, origin } = new URL(req.url);
+  const code = searchParams.get("code");
+  const stateRaw = searchParams.get("state");
+  const appUrl = origin;
+
+  if (!code || !stateRaw) {
+    return NextResponse.redirect(`${appUrl}/?cal=error`);
+  }
+
+  let pilotId: string | null = null;
+  try {
+    const state = JSON.parse(Buffer.from(stateRaw, "base64url").toString());
+    pilotId = state.p as string;
+  } catch {
+    return NextResponse.redirect(`${appUrl}/?cal=error`);
+  }
+
+  const clientId = process.env.OUTLOOK_CLIENT_ID;
+  const clientSecret = process.env.OUTLOOK_CLIENT_SECRET;
+  const redirectUri = process.env.OUTLOOK_REDIRECT_URI ?? `${origin}/api/calendar/callback/outlook`;
+  if (!clientId || !clientSecret) {
+    return NextResponse.redirect(`${appUrl}/?cal=error`);
+  }
+
+  try {
+    const tokenRes = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+    if (!tokenRes.ok) throw new Error(`token ${tokenRes.status}`);
+    const tokens = await tokenRes.json();
+    if (!tokens.refresh_token) {
+      return NextResponse.redirect(`${appUrl}/?cal=reconsent`);
+    }
+
+    const refreshTokenEnc = await encryptToken(tokens.refresh_token as string);
+    const meRes = await fetch(GRAPH_ME, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const me = meRes.ok ? await meRes.json() : {};
+    const email = (me.mail as string) ?? (me.userPrincipalName as string) ?? null;
+
+    const supabase = await createClient();
+    const { data: conn, error: connErr } = await supabase
+      .from("calendar_connections")
+      .upsert(
+        {
+          pilot_id: pilotId,
+          provider: "outlook",
+          provider_account_email: email,
+          refresh_token_enc: refreshTokenEnc,
+          status: "active",
+          last_synced_at: null,
+        },
+        { onConflict: "pilot_id,provider,provider_account_email" },
+      )
+      .select("id")
+      .single();
+    if (connErr) throw connErr;
+
+    await supabase
+      .from("calendar_connections")
+      .update({ last_synced_at: new Date(0).toISOString() })
+      .eq("id", conn.id);
+
+    // First sync before the user lands back — the agenda shows events immediately.
+    try {
+      await syncPilotCalendars(pilotId);
+    } catch {
+      /* non-fatal */
+    }
+
+    return NextResponse.redirect(`${appUrl}/?cal=connected`);
+  } catch {
+    return NextResponse.redirect(`${appUrl}/?cal=error`);
+  }
+}

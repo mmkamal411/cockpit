@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { encryptToken } from "@/lib/token-crypto";
+import { syncPilotCalendars } from "@/lib/calendar/sync";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -83,6 +84,14 @@ export async function GET(req: Request) {
       .from("calendar_connections")
       .update({ last_synced_at: new Date(0).toISOString() })
       .eq("id", conn.id);
+
+    // First sync before the user lands back — the agenda shows events immediately.
+    // Sync failures don't block the connect; the scheduled sync will retry.
+    try {
+      await syncPilotCalendars(pilotId);
+    } catch {
+      /* non-fatal */
+    }
 
     return NextResponse.redirect(`${appUrl}/?cal=connected`);
   } catch {

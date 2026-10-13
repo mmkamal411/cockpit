@@ -43,6 +43,110 @@ function EventRow({ e }: { e: CalendarEvent }) {
   );
 }
 
+/** Provider picker shown when no calendar is connected. */
+function ConnectCalendars() {
+  const [showIcloud, setShowIcloud] = useState(false);
+  const [appleId, setAppleId] = useState("");
+  const [appPassword, setAppPassword] = useState("");
+  const [icloudBusy, setIcloudBusy] = useState(false);
+  const [icloudError, setIcloudError] = useState<string | null>(null);
+
+  async function connectIcloud(e: React.FormEvent) {
+    e.preventDefault();
+    setIcloudBusy(true);
+    setIcloudError(null);
+    try {
+      const r = await fetch("/api/calendar/icloud", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appleId, appPassword }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? "Couldn't connect iCloud Calendar.");
+      // Kick off the first sync, then reload to show the agenda.
+      await fetch("/api/calendar/sync", { method: "POST" }).catch(() => {});
+      window.location.reload();
+    } catch (err) {
+      setIcloudError(err instanceof Error ? err.message : "Couldn't connect iCloud Calendar.");
+    } finally {
+      setIcloudBusy(false);
+    }
+  }
+
+  const btn =
+    "mt-3 inline-block w-full rounded-xl border px-5 py-2.5 text-sm font-medium transition-colors";
+  return (
+    <div className="rounded-2xl border border-line bg-panel-2/60 p-6 text-center">
+      <p className="text-sm font-medium text-star">Your calendar isn't connected yet.</p>
+      <p className="mt-1 text-sm text-stardust">
+        Connect a calendar and your days will organize themselves here. You can connect more than one.
+      </p>
+      <div className="mx-auto mt-4 max-w-xs space-y-2">
+        <a
+          href="/api/calendar/connect"
+          className={`${btn} border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20`}
+        >
+          Connect Google Calendar
+        </a>
+        <a
+          href="/api/calendar/connect/outlook"
+          className={`${btn} border-neon-purple/40 bg-neon-purple/10 text-neon-purple hover:bg-neon-purple/20`}
+        >
+          Connect Outlook Calendar
+        </a>
+        {!showIcloud ? (
+          <button
+            type="button"
+            onClick={() => setShowIcloud(true)}
+            className={`${btn} border-line bg-panel-2 text-stardust hover:text-star`}
+          >
+            Connect iCloud Calendar
+          </button>
+        ) : (
+          <form onSubmit={connectIcloud} className="rounded-xl border border-line bg-panel p-4 text-left">
+            <label className="block text-xs font-medium text-stardust" htmlFor="icloud-apple-id">
+              Apple ID
+            </label>
+            <input
+              id="icloud-apple-id"
+              type="email"
+              autoComplete="username"
+              value={appleId}
+              onChange={(e) => setAppleId(e.target.value)}
+              placeholder="you@icloud.com"
+              className="mt-1 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-star placeholder:text-dim"
+            />
+            <label className="mt-3 block text-xs font-medium text-stardust" htmlFor="icloud-app-password">
+              App-specific password
+            </label>
+            <input
+              id="icloud-app-password"
+              type="password"
+              autoComplete="off"
+              value={appPassword}
+              onChange={(e) => setAppPassword(e.target.value)}
+              placeholder="xxxx-xxxx-xxxx-xxxx"
+              className="mt-1 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-star placeholder:text-dim"
+            />
+            <p className="mt-2 text-xs text-dim">
+              Generate one at appleid.apple.com → Sign-In and Security → App-Specific Passwords.
+              Never enter your Apple ID password here.
+            </p>
+            {icloudError && <p className="mt-2 text-xs text-amber-300">{icloudError}</p>}
+            <button
+              type="submit"
+              disabled={icloudBusy || !appleId || !appPassword}
+              className="mt-3 w-full rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-5 py-2.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20 disabled:opacity-50"
+            >
+              {icloudBusy ? "Connecting…" : "Connect iCloud Calendar"}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Calendar — AI-organized agenda, day, and week views. */
 export function CalendarApplet() {
   const [view, setView] = useState<View>("agenda");
@@ -126,16 +230,7 @@ export function CalendarApplet() {
       </div>
 
       {connected === false ? (
-        <div className="rounded-2xl border border-line bg-panel-2/60 p-6 text-center">
-          <p className="text-sm font-medium text-star">Your calendar isn't connected yet.</p>
-          <p className="mt-1 text-sm text-stardust">Connect Google Calendar and your days will organize themselves here.</p>
-          <a
-            href="/api/calendar/connect"
-            className="mt-4 inline-block rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-5 py-2.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
-          >
-            Connect Google Calendar
-          </a>
-        </div>
+        <ConnectCalendars />
       ) : failed ? (
         <p className="text-sm text-stardust">Couldn't load your calendar right now — try again in a bit.</p>
       ) : view === "agenda" ? (
