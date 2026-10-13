@@ -2,26 +2,23 @@
 
 import { TOOLBAR_VARIANT } from "./toolbar-variant";
 import { ToolbarLegacy } from "./toolbar-legacy";
-// Variant components land here as they are built:
-// import { ToolbarConsole } from "./toolbar-console";
-// import { ToolbarDash } from "./toolbar-dash";
-// import { ToolbarHologlass } from "./toolbar-hologlass";
+import { ToolbarConsole } from "./toolbar-console";
+import { ToolbarDash } from "./toolbar-dash";
+import { ToolbarHologlass } from "./toolbar-hologlass";
 
 /**
  * ToolbarSwitch — renders the active toolbar variant per TOOLBAR_VARIANT.
  * Flip the flag in toolbar-variant.ts to showcase a different direction.
+ * Revert = set to 'legacy', commit, push. Under 3 minutes.
  */
 export function ToolbarSwitch() {
   switch (TOOLBAR_VARIANT) {
     case "console":
-      // return <ToolbarConsole />;
-      return <ToolbarLegacy />; // TODO: console variant not built yet
+      return <ToolbarConsole />;
     case "dash":
-      // return <ToolbarDash />;
-      return <ToolbarLegacy />; // TODO: dash variant not built yet
+      return <ToolbarDash />;
     case "hologlass":
-      // return <ToolbarHologlass />;
-      return <ToolbarLegacy />; // TODO: hologlass variant not built yet
+      return <ToolbarHologlass />;
     case "legacy":
     default:
       return <ToolbarLegacy />;
