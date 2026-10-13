@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppletParams } from "@/lib/applet-bus";
+import { AutocompleteInput } from "@/components/ui/autocomplete-input";
+import { matchCatalog } from "@/lib/grocery-catalog";
 
 interface ShoppingList {
   id: string;
@@ -58,6 +60,69 @@ const LIST_ICONS = [
 ];
 
 /** Shopping — smart lists with big one-hand check targets. Lists can be shared. */
+
+interface SpeechRecognitionResultLike {
+  transcript: string;
+  isFinal: boolean;
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <path d="M12 19v3" />
+    </svg>
+  );
+}
+
 export function ShoppingApplet({ params }: { params?: AppletParams }) {
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -68,6 +133,29 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
   const [draftQty, setDraftQty] = useState("");
   const [inStore, setInStore] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Voice dictation (Web Speech API; hidden entirely where unsupported).
+  const [listening, setListening] = useState(false);
+  const [micSupported] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      Boolean(
+        (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition ??
+          (window as unknown as { webkitSpeechRecognition?: unknown })
+            .webkitSpeechRecognition,
+      ),
+  );
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  // Undo toast for quick per-item deletes.
+  const [toast, setToast] = useState<{ key: number; message: string } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRestore = useRef<{ item: ShoppingItem; listId: string; index: number } | null>(
+    null,
+  );
+  // Swipe-to-delete gesture tracking (touch rows only).
+  const touchStartX = useRef<number | null>(null);
+  const touchRow = useRef<HTMLElement | null>(null);
+  const swipeFired = useRef(false);
+  const toastKey = useRef(0);
   // Item edit/delete
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -196,18 +284,17 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
   const isSharedList = activeList?.shared === true;
   const canEdit = !isSharedList || activeList?.permission !== "view";
 
-  async function addItem() {
-    const name = draft.trim();
-    if (!name || !activeId || busy || !canEdit) return;
-    const quantity = Math.max(1, parseInt(draftQty.trim(), 10) || 1);
+  async function addItemByName(rawName: string, quantityOverride?: number) {
+    const name = rawName.trim();
+    if (!name || !activeId || !canEdit) return;
+    const parsedQty = parseInt(draftQty.trim(), 10);
+    const quantity = Math.max(1, quantityOverride ?? (Number.isFinite(parsedQty) ? parsedQty : 1));
     setBusy(true);
-    setDraft("");
-    setDraftQty("");
     try {
       const res = await fetch(`/api/shopping/lists/${activeId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, quantity }),
+        body: JSON.stringify({ name, quantity: Number.isFinite(quantity) ? quantity : 1 }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -218,16 +305,231 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
         prev.map((l) => (l.id === activeId ? { ...l, unchecked_count: l.unchecked_count + 1 } : l)),
       );
     } catch (err) {
-      setDraft(name);
-      setDraftQty(draftQty);
       setError(err instanceof Error ? err.message : "Couldn't add that item.");
     } finally {
       setBusy(false);
     }
   }
 
+  async function addItem() {
+    const name = draft.trim();
+    if (!name || !activeId || busy || !canEdit) return;
+    const savedQty = draftQty;
+    setDraft("");
+    setDraftQty("");
+    try {
+      await addItemByName(name, parseInt(savedQty.trim(), 10) || 1);
+    } catch {
+      setDraft(name);
+      setDraftQty(savedQty);
+    }
+  }
+
+  /** Suggestion sources: the pilot's own purchase history first, then the built-in catalog. */
+  const getItemSuggestions = useCallback(async (query: string): Promise<string[]> => {
+    const q = query.trim();
+    if (!q) return [];
+    let mine: string[] = [];
+    try {
+      const res = await fetch(`/api/shopping/suggestions?q=${encodeURIComponent(q)}`, {
+        cache: "no-store",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(body.suggestions)) {
+        mine = body.suggestions.filter((s: unknown): s is string => typeof s === "string");
+      }
+    } catch {
+      // History unavailable — catalog still works.
+    }
+    const seen = new Set(mine.map((m) => m.toLowerCase()));
+    const catalog = matchCatalog(q, 8).filter((c) => !seen.has(c.toLowerCase()));
+    return [...mine, ...catalog].slice(0, 8);
+  }, []);
+
+  /** Voice dictation: "milk, eggs, and bread" → each becomes its own item. */
+  function toggleDictation() {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    if (!activeId || !canEdit) return;
+    const w = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    rec.continuous = false;
+    let finalText = "";
+    rec.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0]?.transcript ?? "";
+        if (event.results[i][0]?.isFinal) finalText += t;
+        else interim += t;
+      }
+      setDraft((finalText + interim).trim());
+    };
+    rec.onerror = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    rec.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+      const text = finalText.trim();
+      if (!text) return;
+      const parts = text
+        .split(/,|\s+and\s+/i)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s.length <= 120)
+        .slice(0, 20);
+      setDraft("");
+      void (async () => {
+        for (const part of parts) {
+          await addItemByName(part, 1);
+        }
+      })();
+    };
+    recognitionRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch {
+      recognitionRef.current = null;
+    }
+  }
+
+  function showUndoToast(message: string) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastKey.current += 1;
+    setToast({ key: toastKey.current, message });
+    toastTimer.current = setTimeout(() => {
+      setToast(null);
+      pendingRestore.current = null;
+    }, 6000);
+  }
+
+  /** One-tap item delete with Undo — never forces deleting the whole list. */
+  async function quickDelete(item: ShoppingItem) {
+    if (!activeId || !canEdit) return;
+    swipeFired.current = true;
+    window.setTimeout(() => {
+      swipeFired.current = false;
+    }, 400);
+    const listId = activeId;
+    const index = Math.max(
+      0,
+      items.findIndex((i) => i.id === item.id),
+    );
+    setItems((prev) => prev.filter((i) => i.id !== item.id));
+    if (!item.checked) {
+      setLists((prev) =>
+        prev.map((l) =>
+          l.id === listId ? { ...l, unchecked_count: Math.max(0, l.unchecked_count - 1) } : l,
+        ),
+      );
+    }
+    setEditingId(null);
+    try {
+      const res = await fetch(`/api/shopping/items/${item.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+      pendingRestore.current = { item, listId, index };
+      const label = item.name.length > 40 ? `${item.name.slice(0, 40)}…` : item.name;
+      showUndoToast(`Deleted "${label}"`);
+    } catch {
+      // Roll back the optimistic removal.
+      setItems((prev) => {
+        const next = [...prev];
+        next.splice(Math.min(index, next.length), 0, item);
+        return next;
+      });
+      if (!item.checked) {
+        setLists((prev) =>
+          prev.map((l) =>
+            l.id === listId ? { ...l, unchecked_count: l.unchecked_count + 1 } : l,
+          ),
+        );
+      }
+      setError("Couldn't delete that item. Try again.");
+    }
+  }
+
+  async function undoQuickDelete() {
+    const p = pendingRestore.current;
+    pendingRestore.current = null;
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(null);
+    if (!p || !canEdit) return;
+    try {
+      const res = await fetch(`/api/shopping/lists/${p.listId}/items`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: p.item.name,
+          quantity: Number.isFinite(p.item.quantity) ? p.item.quantity : undefined,
+          unit: p.item.unit ?? undefined,
+          notes: p.item.notes ?? undefined,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.item) throw new Error("restore failed");
+      const restored = body.item as ShoppingItem;
+      setItems((prev) => {
+        const next = [...prev];
+        next.splice(Math.min(p.index, next.length), 0, restored);
+        return next;
+      });
+      if (!p.item.checked) {
+        setLists((prev) =>
+          prev.map((l) =>
+            l.id === p.listId ? { ...l, unchecked_count: l.unchecked_count + 1 } : l,
+          ),
+        );
+      }
+    } catch {
+      setError("Couldn't bring that item back. Try again.");
+    }
+  }
+
+  /** Swipe-to-delete gesture on item rows (touch only; vertical scroll unaffected). */
+  function handleRowTouchStart(e: React.TouchEvent<HTMLElement>) {
+    touchStartX.current = e.touches[0].clientX;
+    touchRow.current = e.currentTarget;
+  }
+
+  function handleRowTouchMove(e: React.TouchEvent<HTMLElement>) {
+    if (touchStartX.current == null || touchRow.current !== e.currentTarget) return;
+    const dx = e.touches[0].clientX - touchStartX.current;
+    const clamped = Math.max(-88, Math.min(0, dx));
+    e.currentTarget.style.transform = clamped < 0 ? `translateX(${clamped}px)` : "";
+  }
+
+  function handleRowTouchEnd(item: ShoppingItem) {
+    const el = touchRow.current;
+    const startX = touchStartX.current;
+    touchStartX.current = null;
+    touchRow.current = null;
+    if (!el || startX == null) return;
+    const match = /translateX\((-?\d+(?:\.\d+)?)px\)/.exec(el.style.transform);
+    const dx = match ? parseFloat(match[1]) : 0;
+    el.style.transition = "transform 120ms ease-out";
+    el.style.transform = "";
+    window.setTimeout(() => {
+      el.style.transition = "";
+    }, 140);
+    if (dx <= -56) {
+      void quickDelete(item);
+    }
+  }
+
   async function toggleCheck(item: ShoppingItem) {
     if (!canEdit) return;
+    // A swipe-to-delete just fired — don't also flip the checkbox.
+    if (swipeFired.current) return;
     // Optimistic: flip immediately, reconcile with the server.
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, checked: !i.checked } : i)));
     try {
@@ -960,43 +1262,70 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
         </p>
       )}
 
-      {/* Quick add */}
+      {/* Quick add — autocomplete, voice dictation, quantity, add */}
       <div className="flex gap-2">
-        <input
+        <AutocompleteInput
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") addItem();
-          }}
+          onChange={setDraft}
+          getSuggestions={getItemSuggestions}
+          onEnter={() => void addItem()}
           placeholder={
             !activeId ? "Pick a list first…" : !canEdit ? "View-only list…" : "Add an item…"
           }
-          aria-label="Add an item to the current list"
+          ariaLabel="Add an item to the current list"
           disabled={!activeId || !canEdit}
-          className="min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-4 py-3 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none disabled:opacity-50"
+          className="w-full rounded-xl border border-line bg-panel-2 px-4 py-3 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none disabled:opacity-50"
         />
+        {micSupported && (
+          <button
+            type="button"
+            onClick={toggleDictation}
+            disabled={!activeId || !canEdit}
+            aria-label={listening ? "Stop voice dictation" : "Dictate shopping items"}
+            aria-pressed={listening}
+            title={listening ? "Stop listening" : "Dictate items by voice"}
+            className={`relative shrink-0 rounded-xl border px-3 py-3 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              listening
+                ? "border-red-500/60 bg-red-500/15 text-red-400"
+                : "border-line bg-panel-2 text-dim hover:border-neon-cyan/40 hover:text-star"
+            }`}
+          >
+            <MicIcon />
+            {listening && (
+              <span className="absolute -right-1 -top-1 flex h-3 w-3" aria-hidden="true">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+              </span>
+            )}
+          </button>
+        )}
         <input
           type="number"
           min={1}
           value={draftQty}
           onChange={(e) => setDraftQty(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") addItem();
+            if (e.key === "Enter") void addItem();
           }}
           placeholder="Qty"
           aria-label="Quantity (defaults to 1)"
           disabled={!activeId || !canEdit}
-          className="w-20 shrink-0 rounded-xl border border-line bg-panel-2 px-3 py-3 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none disabled:opacity-50"
+          className="w-16 shrink-0 rounded-xl border border-line bg-panel-2 px-3 py-3 text-sm text-star placeholder:text-dim focus:border-neon-cyan/60 focus:outline-none disabled:opacity-50"
         />
         <button
           type="button"
-          onClick={addItem}
+          onClick={() => void addItem()}
           disabled={!draft.trim() || !activeId || busy || !canEdit}
-          className="shrink-0 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-5 py-3 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-3 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Add
         </button>
       </div>
+      {listening && (
+        <p className="text-xs text-dim" role="status">
+          Listening… name items separated by &ldquo;and&rdquo; or commas.
+        </p>
+      )}
 
       {/* Items */}
       {unchecked.length === 0 && checked.length === 0 ? (
@@ -1011,15 +1340,26 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
             {unchecked.map((item) => (
               <li key={item.id}>
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleCheck(item)}
-                    aria-pressed={false}
-                    disabled={!canEdit}
-                    className={`flex min-w-0 flex-1 items-center gap-4 rounded-xl border border-line bg-panel-2/60 text-left transition-colors hover:border-neon-green/40 disabled:cursor-default disabled:hover:border-line ${
-                      inStore ? "px-5 py-5" : "px-4 py-3.5"
-                    }`}
-                  >
+                  <div className="relative min-w-0 flex-1 overflow-hidden rounded-xl">
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 flex items-center justify-end rounded-xl bg-red-500/15 pr-4 text-sm font-medium text-red-400"
+                    >
+                      Delete
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleCheck(item)}
+                      onTouchStart={handleRowTouchStart}
+                      onTouchMove={handleRowTouchMove}
+                      onTouchEnd={() => handleRowTouchEnd(item)}
+                      style={{ touchAction: "pan-y" }}
+                      aria-pressed={false}
+                      disabled={!canEdit}
+                      className={`relative flex w-full min-w-0 items-center gap-4 rounded-xl border border-line bg-panel-2/60 text-left transition-colors hover:border-neon-green/40 disabled:cursor-default disabled:hover:border-line ${
+                        inStore ? "px-5 py-5" : "px-4 py-3.5"
+                      }`}
+                    >
                     <span
                       aria-hidden="true"
                       className={`flex shrink-0 items-center justify-center rounded-full border-2 border-dim/60 text-transparent ${
@@ -1045,7 +1385,19 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
                         <span className="mt-0.5 block truncate text-xs text-dim">{item.notes}</span>
                       )}
                     </span>
-                  </button>
+                    </button>
+                  </div>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => void quickDelete(item)}
+                      aria-label={`Delete ${item.name}`}
+                      title={`Delete ${item.name}`}
+                      className="shrink-0 self-center rounded-xl border border-line bg-panel-2/60 px-3 py-3 text-dim transition-colors hover:border-red-500/40 hover:text-red-400"
+                    >
+                      <TrashIcon />
+                    </button>
+                  )}
                   {canEdit && (
                     <button
                       type="button"
@@ -1078,14 +1430,37 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
                 {checked.map((item) => (
                   <li key={item.id}>
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => toggleCheck(item)}
-                        disabled={!canEdit}
-                        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-dim line-through hover:text-stardust disabled:cursor-default disabled:hover:text-dim"
-                      >
-                        <span className="truncate">{item.name}</span>
-                      </button>
+                      <div className="relative min-w-0 flex-1 overflow-hidden rounded-lg">
+                        <div
+                          aria-hidden="true"
+                          className="absolute inset-0 flex items-center justify-end rounded-lg bg-red-500/15 pr-3 text-xs font-medium text-red-400"
+                        >
+                          Delete
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleCheck(item)}
+                          onTouchStart={handleRowTouchStart}
+                          onTouchMove={handleRowTouchMove}
+                          onTouchEnd={() => handleRowTouchEnd(item)}
+                          style={{ touchAction: "pan-y" }}
+                          disabled={!canEdit}
+                          className="relative flex w-full min-w-0 items-center gap-3 rounded-lg bg-panel-2/40 px-3 py-2 text-left text-sm text-dim line-through hover:text-stardust disabled:cursor-default disabled:hover:text-dim"
+                        >
+                          <span className="truncate">{item.name}</span>
+                        </button>
+                      </div>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => void quickDelete(item)}
+                          aria-label={`Delete ${item.name}`}
+                          title={`Delete ${item.name}`}
+                          className="shrink-0 rounded-lg px-2 py-1 text-dim transition-colors hover:bg-red-500/10 hover:text-red-400"
+                        >
+                          <TrashIcon />
+                        </button>
+                      )}
                       {canEdit && (
                         <button
                           type="button"
@@ -1111,6 +1486,24 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
             </details>
           )}
         </>
+      )}
+
+      {/* Undo toast for quick item deletes */}
+      {toast && (
+        <div
+          key={toast.key}
+          role="status"
+          className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-line bg-panel-2 px-4 py-3 shadow-xl shadow-black/50"
+        >
+          <span className="max-w-56 truncate text-sm text-stardust">{toast.message}</span>
+          <button
+            type="button"
+            onClick={() => void undoQuickDelete()}
+            className="shrink-0 rounded-lg border border-neon-cyan/40 bg-neon-cyan/10 px-3 py-1.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
+          >
+            Undo
+          </button>
+        </div>
       )}
     </div>
   );
