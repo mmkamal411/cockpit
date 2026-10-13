@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
+import { createClient } from "@/lib/supabase/client";
 
 /* Glyphs — same 24px line icons as the other variants. Icon + word label. */
 function HomeGlyph() {
@@ -65,6 +66,131 @@ function fmtDate(d: Date) {
   return `${days[d.getDay()]} ${months[d.getMonth()]} ${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** Same pilot-name logic as the home page: first name → email handle → "Pilot". */
+function pilotNameFor(email: string | undefined, fullName: string | undefined): string {
+  if (fullName && fullName.trim()) return fullName.trim().split(" ")[0];
+  if (email) {
+    const handle = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+    if (handle) return handle.charAt(0).toUpperCase() + handle.slice(1);
+  }
+  return "Pilot";
+}
+
+/** Pilot display name from auth, uppercase for the info bar. Falls back to "PILOT". */
+function usePilotName() {
+  const [name, setName] = useState("PILOT");
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase.auth.getUser();
+        if (!alive) return;
+        const u = data.user;
+        const full =
+          typeof u?.user_metadata?.full_name === "string"
+            ? u.user_metadata.full_name
+            : undefined;
+        setName(pilotNameFor(u?.email, full).toUpperCase());
+      } catch {
+        /* keep the PILOT fallback */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return name;
+}
+
+/* ------------------------------------------------------------------ */
+/* Ambient cockpit gadgets — decorative only, no real data. Slow,      */
+/* soothing motion per the standing rule: calm, never jarring.         */
+/* ------------------------------------------------------------------ */
+
+/** Signal bars: four bars with a staggered soft pulse. */
+function SignalBars() {
+  return (
+    <span className="pano-sigbars" aria-hidden="true">
+      {[0, 1, 2, 3].map((i) => (
+        <span key={i} className="pano-sigbar" style={{ animationDelay: `${i * 0.7}s` }} />
+      ))}
+    </span>
+  );
+}
+
+/** Sys bars: three thin vertical diagnostic bars that drift gently. */
+function SysBars() {
+  return (
+    <span className="pano-sysbars" aria-hidden="true">
+      {[0, 1, 2].map((i) => (
+        <span key={i} className="pano-sysbar" style={{ animationDelay: `${i * 1.1}s` }} />
+      ))}
+    </span>
+  );
+}
+
+/** Power ring: small SVG ring with a slowly rotating arc. */
+function PowerRing() {
+  return (
+    <svg className="pano-power" viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="10" r="8" fill="none" stroke="rgb(34 211 238 / 0.18)" strokeWidth="2" />
+      <circle
+        cx="10"
+        cy="10"
+        r="8"
+        fill="none"
+        stroke="#22d3ee"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeDasharray="14 38"
+        className="pano-power-arc"
+      />
+    </svg>
+  );
+}
+
+/** Waveform: tiny sparkline that drifts horizontally, very slow. */
+function Waveform() {
+  return (
+    <svg className="pano-wave" viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true">
+      <path
+        d="M0 8 L5 8 L8 3 L12 13 L16 6 L20 10 L24 8 L30 8 L33 4 L37 12 L41 7 L45 9 L50 8 L60 8"
+        fill="none"
+        stroke="rgb(94 234 212 / 0.7)"
+        strokeWidth="1.2"
+        className="pano-wave-path"
+      />
+    </svg>
+  );
+}
+
+const TICKER_ITEMS = [
+  "SYS NOMINAL",
+  "ORBIT STABLE",
+  "CRYSTAL SYNC // OK",
+  "PWR DIST // BALANCED",
+  "COMMS // CLEAR",
+  "NAV // ON COURSE",
+];
+
+/** Comm-log ticker: a very slow ambient marquee of cockpit status flavor. */
+function CommTicker() {
+  const items = [...TICKER_ITEMS, ...TICKER_ITEMS];
+  return (
+    <span className="pano-ticker" aria-hidden="true">
+      <span className="pano-ticker-track">
+        {items.map((t, i) => (
+          <span key={i} className="pano-ticker-item">
+            {"// "}
+            {t}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
 /**
  * ToolbarPanoramic — "Panoramic Cockpit" toolbar variant.
  *
@@ -72,11 +198,14 @@ function fmtDate(d: Date) {
  * base, chamfered top corners) so the video vista reads as a window above
  * it. Three layers, top to bottom:
  *
- *   1. Status strip — DATE / VIEW / TIME readouts (time is live).
+ *   1. Status strip — ambient gadgets (sys bars, signal, power ring,
+ *      waveform) framing DATE / VIEW / TIME readouts (time is live).
  *   2. Command row — Home · Today · [Crystal orb in a bezel well] · Progress · More.
  *      The orb is the central command element and opens the Crystal applet.
- *   3. Info bar — COCKPIT // ONLINE · CRYSTAL // STANDING BY|ENGAGED.
+ *   3. Pilot info bar — PILOT // <name> on the left, a slow ambient
+ *      comm ticker in the center, Crystal status on the right.
  *
+ * Everything except the five nav keys and the orb is atmospheric dressing.
  * Behavior (nav targets, applet-bus calls, orb id) is identical to the
  * other variants. Only the chrome changes.
  */
@@ -85,6 +214,7 @@ export function ToolbarPanoramic() {
   const pathname = usePathname();
   const { open, minimized } = useAppletBus();
   const now = useShipClock();
+  const pilotName = usePilotName();
 
   function goHome() {
     closeAllApplets();
@@ -144,22 +274,26 @@ export function ToolbarPanoramic() {
       className="pointer-events-none fixed inset-x-0 bottom-0 z-[80]"
     >
       <div className="pano-dash pointer-events-auto">
-        {/* Cyan edge light along the panel's top edge */}
+        {/* Cyan edge light along the panel's top edge — gentle glow drift */}
         <div className="pano-edge" aria-hidden="true" />
 
-        {/* Status strip: live readouts */}
+        {/* Status strip: ambient gadgets framing the live readouts */}
         <div className="pano-status" aria-hidden="true">
-          <span className="pano-readout">
+          <span className="pano-readout pano-readout-date">
+            <SysBars />
             <span className="pano-readout-label">Date</span>
             <span className="pano-readout-value">{fmtDate(now)}</span>
           </span>
           <span className="pano-readout pano-readout-view">
+            <SignalBars />
             <span className="pano-readout-label">View</span>
             <span className="pano-readout-value">{viewName}</span>
           </span>
-          <span className="pano-readout">
+          <span className="pano-readout pano-readout-time">
             <span className="pano-readout-label">Time</span>
-            <span className="pano-readout-value tabular-nums">{fmtTime(now)}</span>
+            <span className="pano-readout-value pano-time-value tabular-nums">{fmtTime(now)}</span>
+            <Waveform />
+            <PowerRing />
           </span>
         </div>
 
@@ -224,10 +358,13 @@ export function ToolbarPanoramic() {
           ))}
         </div>
 
-        {/* Info bar */}
+        {/* Pilot info bar: PILOT // <name> · ambient ticker · Crystal status */}
         <div className="pano-infobar" aria-hidden="true">
-          <span>Cockpit // Online</span>
-          <span data-state={crystalActive ? "engaged" : "idle"}>
+          <span className="pano-pilot">
+            Pilot&nbsp;//&nbsp;<span className="pano-pilot-name">{pilotName}</span>
+          </span>
+          <CommTicker />
+          <span className="pano-crystal" data-state={crystalActive ? "engaged" : "idle"}>
             Crystal // {crystalActive ? "Engaged" : "Standing by"}
           </span>
         </div>
@@ -248,7 +385,7 @@ const PANORAMIC_CSS = `
     linear-gradient(180deg, rgb(10 18 24 / 0.96) 0%, rgb(4 7 10 / 0.98) 34%, #020304 100%);
   padding: 12px 18px max(8px, env(safe-area-inset-bottom));
 }
-/* Cyan edge light tracing the panel's top edge */
+/* Cyan edge light tracing the panel's top edge — slow glow drift */
 .pano-edge {
   position: absolute; top: 0; left: var(--pano-inset); right: var(--pano-inset); height: 2px;
   background: linear-gradient(90deg,
@@ -259,18 +396,71 @@ const PANORAMIC_CSS = `
     rgb(34 211 238 / 0) 100%);
   box-shadow: 0 0 16px rgb(34 211 238 / 0.45), 0 1px 8px rgb(34 211 238 / 0.3);
   pointer-events: none;
+  animation: pano-edge-drift 8s ease-in-out infinite;
 }
-/* Status strip: three live readouts */
+@keyframes pano-edge-drift {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+/* Status strip: ambient gadgets + live readouts */
 .pano-status {
   display: flex; justify-content: space-between; align-items: center;
   max-width: 720px; margin: 0 auto; padding: 2px 6px 10px;
+  gap: 8px;
 }
 .pano-readout {
-  display: flex; align-items: baseline; gap: 8px;
+  display: flex; align-items: center; gap: 7px;
   font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+  min-width: 0;
 }
 .pano-readout-label { color: rgb(34 211 238 / 0.65); font-weight: 600; font-size: 10px; }
-.pano-readout-value { color: #dbe9ef; font-weight: 600; }
+.pano-readout-value { color: #dbe9ef; font-weight: 600; white-space: nowrap; }
+.pano-time-value { text-shadow: 0 0 10px rgb(34 211 238 / 0.35); animation: pano-readout-glow 6s ease-in-out infinite; }
+@keyframes pano-readout-glow {
+  0%, 100% { text-shadow: 0 0 10px rgb(34 211 238 / 0.35); }
+  50% { text-shadow: 0 0 14px rgb(34 211 238 / 0.55); }
+}
+/* Sys bars: three thin diagnostic bars, gentle drift */
+.pano-sysbars { display: inline-flex; align-items: flex-end; gap: 2.5px; height: 14px; }
+.pano-sysbar {
+  width: 3px; border-radius: 1px;
+  background: linear-gradient(180deg, #5eead4, rgb(94 234 212 / 0.35));
+  transform-origin: bottom;
+  animation: pano-sysbar 3.2s ease-in-out infinite;
+}
+.pano-sysbar:nth-child(1) { height: 14px; }
+.pano-sysbar:nth-child(2) { height: 10px; }
+.pano-sysbar:nth-child(3) { height: 12px; }
+@keyframes pano-sysbar {
+  0%, 100% { transform: scaleY(0.65); opacity: 0.55; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+/* Signal bars: four bars, staggered soft pulse */
+.pano-sigbars { display: inline-flex; align-items: flex-end; gap: 2.5px; height: 14px; }
+.pano-sigbar {
+  width: 3px; border-radius: 1px; background: #22d3ee;
+  box-shadow: 0 0 6px rgb(34 211 238 / 0.5);
+  animation: pano-sigbar 4s ease-in-out infinite;
+}
+.pano-sigbar:nth-child(1) { height: 5px; }
+.pano-sigbar:nth-child(2) { height: 8px; }
+.pano-sigbar:nth-child(3) { height: 11px; }
+.pano-sigbar:nth-child(4) { height: 14px; }
+@keyframes pano-sigbar {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+/* Power ring: small ring with a slowly rotating arc */
+.pano-power { width: 16px; height: 16px; flex-shrink: 0; }
+.pano-power-arc { transform-origin: 10px 10px; animation: pano-power-spin 20s linear infinite; filter: drop-shadow(0 0 3px rgb(34 211 238 / 0.6)); }
+@keyframes pano-power-spin { to { transform: rotate(360deg); } }
+/* Waveform: tiny sparkline drifting very slowly */
+.pano-wave { width: 52px; height: 14px; flex-shrink: 0; }
+.pano-wave-path { animation: pano-wave-drift 7s ease-in-out infinite; }
+@keyframes pano-wave-drift {
+  0%, 100% { transform: translateX(-3px); opacity: 0.6; }
+  50% { transform: translateX(3px); opacity: 1; }
+}
 /* Command row: full-width key bank */
 .pano-command {
   display: flex; align-items: stretch; justify-content: center;
@@ -280,7 +470,7 @@ const PANORAMIC_CSS = `
   flex: 1 1 0; min-width: 0;
   display: flex; flex-direction: column; align-items: center;
 }
-/* Status pip above each key */
+/* Status pip above each key — engaged pips breathe softly */
 .pano-pip {
   width: 6px; height: 6px; margin-bottom: 5px; flex-shrink: 0;
   border-radius: 9999px; background: transparent;
@@ -288,10 +478,16 @@ const PANORAMIC_CSS = `
 .pano-pip[data-state="engaged"] {
   background: #5eead4;
   box-shadow: 0 0 8px rgb(94 234 212 / 0.9);
+  animation: pano-pip-breathe 4s ease-in-out infinite;
 }
 .pano-pip[data-state="attention"] {
   background: #fbbf24;
   box-shadow: 0 0 8px rgb(251 191 36 / 0.9);
+  animation: pano-pip-breathe 3s ease-in-out infinite;
+}
+@keyframes pano-pip-breathe {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
 }
 /* Chamfered command key — beveled like a cockpit switch */
 .pano-key {
@@ -385,31 +581,55 @@ const PANORAMIC_CSS = `
   50% { opacity: 1; }
 }
 .pano-orb-label { margin-top: 5px; }
-/* Info bar: thin strip along the base */
+/* Pilot info bar: thin strip along the base */
 .pano-infobar {
   display: flex; justify-content: space-between; align-items: center;
   max-width: 720px; margin: 8px auto 0; padding: 0 6px;
+  gap: 10px;
   font-size: 9px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase;
   color: rgb(143 166 177 / 0.55);
 }
-.pano-infobar [data-state="engaged"] { color: #5eead4; }
+.pano-pilot { white-space: nowrap; }
+.pano-pilot-name { color: #dbe9ef; }
+.pano-crystal { white-space: nowrap; }
+.pano-crystal[data-state="engaged"] { color: #5eead4; }
+/* Comm ticker: very slow ambient marquee, clipped between pilot and crystal */
+.pano-ticker {
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+}
+.pano-ticker-track {
+  display: inline-flex; gap: 28px; white-space: nowrap;
+  animation: pano-ticker 48s linear infinite;
+}
+.pano-ticker-item { color: rgb(34 211 238 / 0.5); }
+@keyframes pano-ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
 /* Desktop: roomier dash, wider flare */
 @media (min-width: 640px) {
   .pano-dash { --pano-inset: 26px; padding: 14px 28px max(10px, env(safe-area-inset-bottom)); }
   .pano-key { min-height: 68px; }
   .pano-bezel { width: 76px; height: 76px; }
   .pano-orb { width: 60px; height: 60px; }
+  .pano-wave { width: 72px; }
 }
-/* Small phones: compress the status strip, keep the panoramic feel */
+/* Small phones: compress — essentials only (date, time, pilot, crystal, nav) */
 @media (max-width: 380px) {
   .pano-dash { --pano-inset: 10px; padding-left: 12px; padding-right: 12px; }
   .pano-readout-view { display: none; }
+  .pano-sysbars, .pano-wave, .pano-power, .pano-ticker { display: none; }
   .pano-command { gap: 4px; }
   .pano-key-label { font-size: 9px; }
+  .pano-infobar { font-size: 8px; letter-spacing: 0.14em; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pano-key, .pano-key-label { transition: none; }
   .pano-orb, .pano-orb-core { animation: none; }
   .pano-bezel-ring::after { animation: none; }
+  .pano-edge, .pano-time-value, .pano-sysbar, .pano-sigbar,
+  .pano-power-arc, .pano-wave-path, .pano-pip, .pano-ticker-track { animation: none; }
 }
 `;
