@@ -15,6 +15,7 @@ export interface CalendarEvent {
   startAt: number;
   endAt: number;
   allDay?: boolean;
+  location?: string | null;
 }
 
 export interface NudgeItem {

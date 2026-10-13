@@ -21,6 +21,7 @@ interface TodoRow {
   title: string;
   done: boolean;
   created_at: string;
+  completed_at: string | null;
   due_at: string | null;
   priority: Priority | null;
   labels: string[] | null;
@@ -43,6 +44,7 @@ function toItem(row: TodoRow) {
     text: row.title,
     done: row.done,
     createdAt: Date.parse(row.created_at) || Date.now(),
+    completedAt: row.completed_at ? Date.parse(row.completed_at) : null,
     dueAt: row.due_at ? Date.parse(row.due_at) : null,
     priority: row.priority,
     labels: row.labels ?? [],
@@ -60,7 +62,7 @@ async function requirePilot() {
   return { supabase, pilotId: user.id };
 }
 
-const COLUMNS = "id,title,done,created_at,due_at,priority,labels,notes,source";
+const COLUMNS = "id,title,done,created_at,completed_at,due_at,priority,labels,notes,source";
 
 /** Build the DB update object from the partial body. Null = clear the field. */
 function buildUpdate(body: TodoBody):
@@ -81,7 +83,12 @@ function buildUpdate(body: TodoBody):
       update.due_at = Number.isNaN(date.getTime()) ? null : date.toISOString();
     }
   }
-  if (typeof body.done === "boolean") update.done = body.done;
+  if (typeof body.done === "boolean") {
+    update.done = body.done;
+    // Keep a completion timestamp so the Today briefing can fold this todo
+    // into "Handled today" instead of every done todo ever.
+    update.completed_at = body.done ? new Date().toISOString() : null;
+  }
   if (body.priority !== undefined) {
     update.priority =
       body.priority === "low" || body.priority === "medium" || body.priority === "high"
