@@ -79,6 +79,36 @@ export async function GET(
 
   const rows = Array.isArray(snapshots) ? snapshots : [];
   const calendarRow = rows.find((r) => r.kind === "calendar") ?? null;
+
+  // Real calendar rows (parsed district calendar or manually loaded events)
+  // — the Calendar section prefers these over any scraped page HTML. A
+  // missing table (migration not run yet) is not fatal: the section falls
+  // back to its honest empty state.
+  let calendarEvents: Array<{
+    title: string;
+    event_date: string;
+    end_date: string | null;
+    location: string | null;
+  }> = [];
+  try {
+    const { data: eventRows, error: eventsError } = await supabase
+      .from("crew_school_calendar_events")
+      .select("title, event_date, end_date, location")
+      .eq("crew_member_id", ownedId)
+      .order("event_date", { ascending: true })
+      .limit(100);
+    if (!eventsError && Array.isArray(eventRows)) {
+      calendarEvents = eventRows.filter(
+        (e): e is (typeof calendarEvents)[number] =>
+          !!e && typeof e.title === "string" && typeof e.event_date === "string",
+      );
+    } else if (eventsError) {
+      logError("select calendar events", eventsError);
+    }
+  } catch (err) {
+    logError("select calendar events", err);
+  }
+
   return NextResponse.json({
     sources: sources
       ? { ...sources, bell_schedules: bellSchedulesOf(sources.bell_schedules) }
@@ -89,6 +119,7 @@ export async function GET(
         .filter((r) => r.kind === "bell")
         .map((r) => snapshotSummary(r)),
     },
+    calendar_events: calendarEvents,
   });
 }
 

@@ -15,8 +15,8 @@ import {
   SourceFallbackUpload,
   Spinner,
   applyIntakeResults,
-  normalizeBellPeriods,
   normalizeCalendarSummary,
+  pickBellSchedulePeriods,
   runSourceIntake,
   uploadSourceFile,
   validateUploadFile,
@@ -73,6 +73,73 @@ interface SchoolMessage {
 interface BellScheduleEntry {
   label: string;
   url: string;
+}
+
+/** One row from crew_school_calendar_events. */
+interface CalendarEvent {
+  title: string;
+  event_date: string;
+  end_date: string | null;
+  location: string | null;
+}
+
+/** Local YYYY-MM-DD for "upcoming" comparisons. */
+function localYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+/** "Tue, Oct 20" style date for calendar event rows. */
+function formatEventDate(ymd: string): string {
+  const d = new Date(`${ymd}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return ymd;
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/** Upcoming school calendar dates, from the saved calendar rows. */
+function CalendarEventList({ events }: { events: CalendarEvent[] }) {
+  const today = localYmd(new Date());
+  const upcoming = events
+    .filter((e) => e.event_date >= today)
+    .sort((a, b) => (a.event_date < b.event_date ? -1 : 1))
+    .slice(0, 15);
+  if (upcoming.length === 0) {
+    return (
+      <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+        The saved calendar has no upcoming dates.
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-neon-green/20 bg-panel-2/60 px-4 py-3">
+      <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+        Upcoming dates
+      </p>
+      <ul className="mt-2 space-y-2">
+        {upcoming.map((e, i) => (
+          <li key={`${e.event_date}-${i}`} className="flex gap-3 text-sm">
+            <span className="w-32 shrink-0 text-neon-green">
+              {formatEventDate(e.event_date)}
+              {e.end_date && e.end_date !== e.event_date
+                ? ` – ${formatEventDate(e.end_date)}`
+                : ""}
+            </span>
+            <span className="text-stardust">
+              {e.title}
+              {e.location ? (
+                <span className="text-dim"> · {e.location}</span>
+              ) : null}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 interface SchoolSourceSnapshot {
@@ -312,6 +379,9 @@ export function CrewApplet() {
   const [calFetchedAt, setCalFetchedAt] = useState<string | null>(null);
   const [calLoading, setCalLoading] = useState(false);
   const [calError, setCalError] = useState("");
+  // Real calendar rows (crew_school_calendar_events) — preferred over
+  // scraped page HTML whenever present.
+  const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   const [bellsOpen, setBellsOpen] = useState(false);
   const [bellTab, setBellTab] = useState(0);
   const [bellHtml, setBellHtml] = useState<Record<number, string>>({});
@@ -1188,6 +1258,7 @@ export function CrewApplet() {
     setCalFetchedAt(null);
     setCalLoading(false);
     setCalError("");
+    setCalEvents([]);
     setBellsOpen(false);
     setBellTab(0);
     setBellHtml({});
@@ -1235,6 +1306,30 @@ export function CrewApplet() {
           calendar: calendarSnap,
           bells: bellSnaps as BellSourceSnapshot[],
         });
+        const eventRows: unknown = json.calendar_events;
+        setCalEvents(
+          Array.isArray(eventRows)
+            ? eventRows.flatMap((e) => {
+                if (!e || typeof e !== "object") return [];
+                const r = e as Record<string, unknown>;
+                if (
+                  typeof r.title !== "string" ||
+                  typeof r.event_date !== "string"
+                )
+                  return [];
+                return [
+                  {
+                    title: r.title,
+                    event_date: r.event_date,
+                    end_date:
+                      typeof r.end_date === "string" ? r.end_date : null,
+                    location:
+                      typeof r.location === "string" ? r.location : null,
+                  } satisfies CalendarEvent,
+                ];
+              })
+            : [],
+        );
         if (sources?.calendar_source_url) await loadCalendarContent(memberId);
       } else {
         setSrcMessage({
@@ -1678,7 +1773,11 @@ export function CrewApplet() {
         calSummary.eventCount !== null ||
         !!calSummary.summary ||
         !!calParseNote);
-    const activeBellPeriods = normalizeBellPeriods(bellParsed[bellTab]);
+    const activeBellPeriods = pickBellSchedulePeriods(
+      bellParsed[bellTab],
+      srcSources?.bell_schedules[bellTab]?.label ?? "",
+      bellTab,
+    );
     const activeBellParseStatus = bellParseStatus[bellTab] ?? null;
     return (
       <div className="space-y-5">
@@ -2318,76 +2417,93 @@ export function CrewApplet() {
                 </div>
               )}
 
-              {/* Calendar display — always text, never a blank panel */}
-              {srcSources?.calendar_source_url ? (
+              {/* Calendar display — real dates first, never a blank panel */}
+              {srcSources?.calendar_source_url || calEvents.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
                     Calendar
                   </p>
-                  {showCalDigital &&
-                    (sourcesBusy ? (
-                      <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
-                        <Spinner label="Reading the school's page…" />
-                      </div>
-                    ) : calSummary.eventCount !== null || calSummary.summary ? (
-                      <ParsedCalendarNote
-                        eventCount={calSummary.eventCount}
-                        summary={calSummary.summary}
-                      />
-                    ) : calParseStatus === "pending" ? (
-                      <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
-                        Saved — we&apos;ll read the calendar shortly.
-                      </p>
-                    ) : calParseNote ? (
-                      <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
-                        {calParseNote}
-                      </p>
-                    ) : null)}
-                  {calLoading ? (
-                    <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
-                      Pulling the calendar in…
-                    </p>
-                  ) : calError ? (
-                    <div
-                      role="alert"
-                      className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-3"
-                    >
-                      <p className="text-sm text-neon-amber">{calError}</p>
-                      <button
-                        type="button"
-                        onClick={() => refreshSchoolSources(member.id)}
-                        disabled={srcRefreshing}
-                        className="mt-2 rounded-lg border border-neon-amber/40 bg-neon-amber/10 px-3 py-1.5 text-xs font-medium text-neon-amber transition-colors hover:bg-neon-amber/20 disabled:opacity-50"
-                      >
-                        {srcRefreshing ? "Checking…" : "Try again"}
-                      </button>
-                    </div>
-                  ) : calHtml !== null ? (
-                    <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
-                      <div
-                        className="school-source-content applet-scroll max-h-96 overflow-y-auto"
-                        dangerouslySetInnerHTML={{ __html: calHtml }}
-                      />
-                      <p className="mt-2 border-t border-line pt-2 text-xs text-dim">
-                        Source:{" "}
-                        <a
-                          href={calUrl || srcSources.calendar_source_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-neon-green underline transition-opacity hover:opacity-80"
+                  {calEvents.length > 0 ? (
+                    <>
+                      <CalendarEventList events={calEvents} />
+                      {calError && (
+                        <p
+                          role="alert"
+                          className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-2.5 text-xs text-neon-amber"
                         >
-                          {domainOf(calUrl || srcSources.calendar_source_url)} ↗
-                        </a>
-                        {timeAgo(calFetchedAt) && (
-                          <> · pulled {timeAgo(calFetchedAt)}</>
-                        )}
-                      </p>
-                    </div>
+                          {calError} The dates above are from the saved
+                          calendar.
+                        </p>
+                      )}
+                    </>
                   ) : (
-                    <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
-                      The calendar isn&apos;t available right now — try Refresh
-                      from the editor above.
-                    </p>
+                    <>
+                      {showCalDigital &&
+                        (sourcesBusy ? (
+                          <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                            <Spinner label="Reading the school's page…" />
+                          </div>
+                        ) : calSummary.eventCount !== null || calSummary.summary ? (
+                          <ParsedCalendarNote
+                            eventCount={calSummary.eventCount}
+                            summary={calSummary.summary}
+                          />
+                        ) : calParseStatus === "pending" ? (
+                          <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                            Saved — we&apos;ll read the calendar shortly.
+                          </p>
+                        ) : calParseNote ? (
+                          <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                            {calParseNote}
+                          </p>
+                        ) : null)}
+                      {calLoading ? (
+                        <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-stardust">
+                          Pulling the calendar in…
+                        </p>
+                      ) : calError ? (
+                        <div
+                          role="alert"
+                          className="rounded-xl border border-neon-amber/30 bg-neon-amber/5 px-4 py-3"
+                        >
+                          <p className="text-sm text-neon-amber">{calError}</p>
+                          <button
+                            type="button"
+                            onClick={() => refreshSchoolSources(member.id)}
+                            disabled={srcRefreshing}
+                            className="mt-2 rounded-lg border border-neon-amber/40 bg-neon-amber/10 px-3 py-1.5 text-xs font-medium text-neon-amber transition-colors hover:bg-neon-amber/20 disabled:opacity-50"
+                          >
+                            {srcRefreshing ? "Checking…" : "Try again"}
+                          </button>
+                        </div>
+                      ) : calHtml !== null ? (
+                        <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+                          <div
+                            className="school-source-content applet-scroll max-h-96 overflow-y-auto"
+                            dangerouslySetInnerHTML={{ __html: calHtml }}
+                          />
+                          <p className="mt-2 border-t border-line pt-2 text-xs text-dim">
+                            Source:{" "}
+                            <a
+                              href={calUrl || srcSources?.calendar_source_url || ""}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-neon-green underline transition-opacity hover:opacity-80"
+                            >
+                              {domainOf(calUrl || srcSources?.calendar_source_url || "")} ↗
+                            </a>
+                            {timeAgo(calFetchedAt) && (
+                              <> · pulled {timeAgo(calFetchedAt)}</>
+                            )}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="rounded-xl border border-line bg-panel-2/60 px-4 py-3 text-sm text-dim">
+                          The calendar isn&apos;t available right now — try
+                          Refresh from the editor above.
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
               ) : (

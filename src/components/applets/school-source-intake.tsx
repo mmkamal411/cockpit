@@ -252,6 +252,43 @@ export function normalizeBellPeriods(parsed: unknown): BellPeriod[] {
   return out;
 }
 
+/**
+ * Pick one bell schedule's periods out of a `parsed` payload that may hold
+ * several schedules (one page can carry "Daily" and "WEB"). The active tab's
+ * label wins (case-insensitive match); otherwise the tab index; otherwise
+ * everything merged. Defensive: unknown shapes yield [].
+ */
+export function pickBellSchedulePeriods(
+  parsed: unknown,
+  label: string,
+  index: number,
+): BellPeriod[] {
+  if (!parsed || typeof parsed !== "object") return [];
+  const o = parsed as Record<string, unknown>;
+  const schedules: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(o.schedules)
+      ? o.schedules
+      : [parsed];
+  if (schedules.length <= 1) return normalizeBellPeriods(parsed);
+  const want = label.trim().toLowerCase();
+  const match =
+    want.length > 0
+      ? schedules.find((s) => {
+          if (!s || typeof s !== "object") return false;
+          const schedLabel = String(
+            (s as Record<string, unknown>).label ?? "",
+          ).toLowerCase();
+          return (
+            schedLabel.length > 0 &&
+            (schedLabel.includes(want) || want.includes(schedLabel))
+          );
+        })
+      : undefined;
+  const chosen = match ?? schedules[index] ?? schedules[0];
+  return normalizeBellPeriods(chosen);
+}
+
 /** Count the events in a calendar `parsed` payload (DigitalCalendarEvent[]). */
 export function countCalendarEvents(parsed: unknown): number | null {
   if (!parsed) return null;

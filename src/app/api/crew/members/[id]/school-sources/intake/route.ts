@@ -198,6 +198,27 @@ export async function POST(
     );
   }
 
+  // A "calendar" that isn't one (district homepage, link farm) is refused:
+  // restore the previously saved calendar link so the bad page is never
+  // kept as the member's calendar. The snapshot row stays with its
+  // plain-English rejection note (no page chrome is stored), and the
+  // per-source result carries the reason for the pilot.
+  if (results.some((r) => r.kind === "calendar" && r.rejected)) {
+    const previousUrl =
+      existing?.calendar_source_url &&
+      typeof existing.calendar_source_url === "string"
+        ? existing.calendar_source_url
+        : null;
+    const { error: rollbackError } = await supabase
+      .from("crew_school_sources")
+      .update({
+        calendar_source_url: previousUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("crew_member_id", ownedId);
+    if (rollbackError) logError("rollback rejected calendar", rollbackError);
+  }
+
   const { check_status, check_note } = summarizeOutcomes(results);
   const { error: updateError } = await supabase
     .from("crew_school_sources")
