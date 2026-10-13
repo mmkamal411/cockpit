@@ -7,10 +7,21 @@ export const instant = false;
 
 /** Public landing. Signed-in pilots go straight to their bridge. */
 export default async function LandingPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (e) {
+    // Auth check failed (Supabase unreachable, etc.): treat as signed out
+    // and render the public landing rather than 500ing it.
+    console.error(JSON.stringify({
+      route: "/",
+      operation: "getUser",
+      error: e instanceof Error ? e.message : String(e),
+      timestamp: new Date().toISOString(),
+    }));
+  }
   if (user) redirect("/home");
 
   return <LandingHero />;

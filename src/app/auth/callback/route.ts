@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { authFailureCode, safePostAuthNext } from "@/lib/auth/callback-helpers";
+import { supabasePublicConfig } from "@/lib/supabase/config";
 
 /**
  * OAuth / magic-link callback. Supabase redirects here after the pilot
@@ -18,11 +19,10 @@ export async function GET(request: NextRequest) {
   const next = safePostAuthNext(searchParams.get("next"));
 
   if (code) {
-    const pendingCookies: { name: string; value: string; options?: object }[] = [];
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-      {
+    try {
+      const pendingCookies: { name: string; value: string; options?: object }[] = [];
+      const { url, key } = supabasePublicConfig();
+      const supabase = createServerClient(url, key, {
         cookies: {
           getAll() {
             return request.cookies.getAll();
@@ -31,17 +31,40 @@ export async function GET(request: NextRequest) {
             pendingCookies.push(...cookiesToSet);
           },
         },
-      },
-    );
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      const response = NextResponse.redirect(`${origin}${next}`);
-      for (const { name, value, options } of pendingCookies) {
-        response.cookies.set(name, value, options);
+      });
+      const { error, data } = await supabase.auth.exchangeCodeForSession(code);
+      if (!error) {
+        // Ensure the pilot row exists (no DB trigger creates it). Idempotent.
+        try {
+          const uid = data.user?.id;
+          if (uid) {
+            await supabase.from("pilots").upsert(
+              { id: uid },
+              { onConflict: "id", ignoreDuplicates: true },
+            );
+          }
+        } catch {
+          // Non-fatal: the pilot can still use the app; crew features
+          // degrade gracefully until the row exists.
+        }
+        const response = NextResponse.redirect(`${origin}${next}`);
+        for (const { name, value, options } of pendingCookies) {
+          response.cookies.set(name, value, options);
+        }
+        return response;
       }
-      return response;
+      return NextResponse.redirect(`${origin}/login?error=${authFailureCode(error.message)}`);
+    } catch (e) {
+      // Never 500 mid-sign-in: log it, send the pilot back to login with a
+      // plain-English error they can act on.
+      console.error(JSON.stringify({
+        route: "/auth/callback",
+        operation: "exchangeCodeForSession",
+        error: e instanceof Error ? e.message : String(e),
+        timestamp: new Date().toISOString(),
+      }));
+      return NextResponse.redirect(`${origin}/login?error=auth`);
     }
-    return NextResponse.redirect(`${origin}/login?error=${authFailureCode(error.message)}`);
   }
 
   return NextResponse.redirect(`${origin}/login?error=auth`);

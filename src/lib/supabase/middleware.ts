@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { supabasePublicConfig, fetchWithTimeout } from "./config";
 
 export interface SessionRefresh {
   response: NextResponse;
@@ -11,17 +12,10 @@ export interface SessionRefresh {
 export async function updateSession(request: NextRequest): Promise<SessionRefresh> {
   let supabaseResponse = NextResponse.next({ request });
 
-  // Public values (also in client bundle). Hardcoded as fallback because
-  // Cloudflare Pages direct-upload deployments don't inherit project env vars
-  // into the worker runtime's process.env.
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    "https://hwnesewathbnfvoxtbqh.supabase.co";
-  const supabaseKey =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    "sb_publishable_-gpFmkywUHJ9G3Yg2tPueQ_0J4DjqL0";
+  const { url, key } = supabasePublicConfig();
 
-  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+  const supabase = createServerClient(url, key, {
+      global: { fetch: fetchWithTimeout() },
       cookies: {
         getAll() {
           return request.cookies.getAll();

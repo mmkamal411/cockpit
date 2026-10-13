@@ -1,4 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
+import { supabasePublicConfig, fetchWithTimeout } from "./config";
 
 /**
  * Browser Supabase client — SINGLETON.
@@ -11,14 +12,9 @@ let browserClient: ReturnType<typeof createBrowserClient> | undefined;
 
 export function createClient() {
   if (browserClient) return browserClient;
-  // Hardcoded fallback: Cloudflare Pages direct-upload deployments don't
-  // inherit project env vars into the worker runtime's process.env.
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    "https://hwnesewathbnfvoxtbqh.supabase.co";
-  const supabaseKey =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    "sb_publishable_-gpFmkywUHJ9G3Yg2tPueQ_0J4DjqL0";
-  browserClient = createBrowserClient(supabaseUrl, supabaseKey);
+  const { url, key } = supabasePublicConfig();
+  browserClient = createBrowserClient(url, key, {
+    global: { fetch: fetchWithTimeout() },
+  });
   return browserClient;
 }

@@ -7,6 +7,7 @@ import { CrystalApplet } from "./applets/crystal-applet";
 import { ProgressApplet } from "./applets/progress-applet";
 import { MoreApplet } from "./applets/more-applet";
 import { CrewApplet } from "./applets/crew-applet";
+import { WeatherApplet } from "./applets/weather-applet";
 
 export interface AppletDef {
   /** Short plain-English name shown in the window chrome. */
@@ -49,6 +50,12 @@ export const APPLETS: Record<string, AppletDef> = {
     readout: "CREW",
     glow: "#86efac",
     render: () => <CrewApplet />,
+  },
+  weather: {
+    name: "Weather",
+    readout: "WX",
+    glow: "#67e8f9",
+    render: () => <WeatherApplet />,
   },
 };
 

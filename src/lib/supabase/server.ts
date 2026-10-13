@@ -1,18 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { supabasePublicConfig, fetchWithTimeout } from "./config";
 
 /** Server Supabase client (Server Components, Actions, Route Handlers). */
 export async function createClient() {
   const cookieStore = await cookies();
-  // Hardcoded fallback: Cloudflare Pages direct-upload deployments don't
-  // inherit project env vars into the worker runtime's process.env.
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    "https://hwnesewathbnfvoxtbqh.supabase.co";
-  const supabaseKey =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    "sb_publishable_-gpFmkywUHJ9G3Yg2tPueQ_0J4DjqL0";
-  return createServerClient(supabaseUrl, supabaseKey, {
+  const { url, key } = supabasePublicConfig();
+  return createServerClient(url, key, {
+      global: { fetch: fetchWithTimeout() },
       cookies: {
         getAll() {
           return cookieStore.getAll();

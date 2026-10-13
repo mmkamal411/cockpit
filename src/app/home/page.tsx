@@ -21,10 +21,21 @@ function pilotNameFor(email: string | undefined, fullName: string | undefined): 
  * you visit from the toolbar.
  */
 export default async function HomePage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (e) {
+    // Auth check threw (Supabase unreachable, etc.): the error boundary
+    // would 500 without this. Redirect to login — the pilot can retry there.
+    console.error(JSON.stringify({
+      route: "/home",
+      operation: "getUser",
+      error: e instanceof Error ? e.message : String(e),
+      timestamp: new Date().toISOString(),
+    }));
+  }
   if (!user) redirect("/login");
 
   const pilotName = pilotNameFor(

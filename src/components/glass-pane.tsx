@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { newId, readLocal, writeLocal, type TodoItem } from "@/lib/local-store";
+import { openApplet } from "@/lib/applet-bus";
 
 const TODOS_KEY = "cockpit.todos";
 
@@ -110,8 +111,13 @@ export function GlassPane() {
       aria-label="Today at a glance"
       className="glass-pane pointer-events-auto w-full max-w-sm rounded-3xl border border-line bg-panel/55 p-5 shadow-[0_20px_70px_rgb(0_0_0/0.5)] backdrop-blur-xl"
     >
-      {/* Weather */}
-      <div className="flex items-start justify-between gap-3">
+      {/* Weather — tap to open the full applet */}
+      <button
+        type="button"
+        onClick={() => openApplet("weather")}
+        aria-label="Open weather details"
+        className="flex w-full items-start justify-between gap-3 rounded-2xl text-left transition-colors hover:bg-white/[0.03]"
+      >
         <div>
           <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-neon-cyan">Weather</p>
           {weather ? (
@@ -133,7 +139,7 @@ export function GlassPane() {
         <span aria-hidden="true" className="text-3xl">
           {weather ? (weather.code <= 3 ? "🌤️" : weather.code <= 67 ? "🌧️" : weather.code <= 77 ? "🌨️" : "⛈️") : "🛰️"}
         </span>
-      </div>
+      </button>
 
       {/* Week strip */}
       <div className="mt-4" aria-label="This week">
