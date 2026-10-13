@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { planetaryVista } from "./vista-sources";
+import { useEffect, useRef, useState } from "react";
+import { pickRotationVideo } from "./vista-sources";
 
 /**
  * HeroVista — the opening viewport. Fills its positioned parent with the
@@ -11,11 +11,14 @@ import { planetaryVista } from "./vista-sources";
  */
 export function HeroVista({ pilotName }: { pilotName: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Pick once per mount — random video per page load, stable across re-renders.
+  const [src] = useState(() => pickRotationVideo());
+  // Only the planets videos have poster images.
+  const poster = src.includes("vista-planets-")
+    ? src.replace(/\.mp4$/, "-poster.jpg")
+    : undefined;
 
   const now = new Date();
-  const vista = planetaryVista(now.getHours());
-  const src = vista.src;
-  const poster = vista.poster;
 
   useEffect(() => {
     const v = videoRef.current;
