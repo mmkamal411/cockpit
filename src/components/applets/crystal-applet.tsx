@@ -22,7 +22,21 @@ interface ChatMessage {
   persona?: Persona;
   /** System note (mode flip confirmations) — rendered as a subtle line. */
   note?: boolean;
-};
+}
+
+const SUGGESTIONS = [
+  "What should I focus on today?",
+  "Help me plan my week",
+  "Remind me to drink water",
+];
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return "Night watch";
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 /** Tappable mode pill — shows which persona answered, flips the mode. */
 function ModePill({

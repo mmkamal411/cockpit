@@ -6,7 +6,7 @@ import {
   detectPersona,
   stripDirective,
   flipConfirmation,
-} from "./mode.js";
+} from "./mode.ts";
 
 let passed = 0;
 let failed = 0;
