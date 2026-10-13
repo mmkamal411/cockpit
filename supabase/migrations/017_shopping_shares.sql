@@ -19,7 +19,7 @@
 -- it rides on these same tables — no schema change needed, just a realtime
 -- channel on shopping_items.
 --
--- RUN: paste into the Supabase dashboard SQL editor AFTER 014 and press Run.
+-- RUN: paste into the Supabase dashboard SQL editor AFTER 016 and press Run.
 -- Expect "Success. No rows returned."
 -- =============================================================================
 

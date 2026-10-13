@@ -15,13 +15,14 @@ const ERROR_COPY: Record<string, string> = {
   oauth_failed: "Google sign-in didn't complete. Please try again.",
 };
 
-function callbackUrl(): string {
-  return `${window.location.origin}/auth/callback?next=/home`;
-}
-
 function LoginForm() {
   const searchParams = useSearchParams();
   const errorCode = searchParams.get("error");
+  // Post-auth destination: invite links pass ?next=/invite/<token> so the
+  // new pilot lands back on their invite after signing in. Same-origin only.
+  const nextParam = searchParams.get("next");
+  const safeNext =
+    nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/home";
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
@@ -29,6 +30,10 @@ function LoginForm() {
   const [localError, setLocalError] = useState("");
 
   const errorText = localError || (errorCode ? ERROR_COPY[errorCode] ?? ERROR_COPY.auth : "");
+
+  function callbackUrl(): string {
+    return `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`;
+  }
 
   async function sendMagicLink(e: React.FormEvent) {
     e.preventDefault();

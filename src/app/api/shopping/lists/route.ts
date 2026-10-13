@@ -3,21 +3,39 @@ import { requirePilot, serverError } from "@/lib/api-auth";
 
 /**
  * GET /api/shopping/lists
- * The pilot's lists with unchecked item counts. Requires auth.
+ * The pilot's own lists plus lists shared with them (marked shared: true
+ * with the sharer's name and permission). Requires auth.
  */
 export async function GET() {
   const auth = await requirePilot();
   if (auth instanceof NextResponse) return auth;
-  const { supabase } = auth;
+  const { supabase, user } = auth;
 
   try {
     const { data: lists, error } = await supabase
       .from("shopping_lists")
-      .select("id, name, icon, sort_order, archived, created_at")
+      .select("id, name, icon, sort_order, archived, created_at, pilot_id")
       .eq("archived", false)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
     if (error) throw error;
+
+    // Mark lists shared with the caller (RLS already scopes visibility).
+    const listIds = (lists ?? []).map((l) => l.id);
+    const shareInfo = new Map<string, { shared_by: string; permission: "view" | "edit" }>();
+    if (listIds.length > 0) {
+      const { data: shares } = await supabase
+        .from("shopping_list_shares")
+        .select("list_id, owner_display_name, permission")
+        .in("list_id", listIds)
+        .eq("shared_with_pilot_id", user.id);
+      for (const s of shares ?? []) {
+        shareInfo.set(s.list_id, {
+          shared_by: s.owner_display_name || "Someone",
+          permission: s.permission as "view" | "edit",
+        });
+      }
+    }
 
     const { data: items, error: itemsError } = await supabase
       .from("shopping_items")
@@ -31,10 +49,15 @@ export async function GET() {
     }
 
     return NextResponse.json({
-      lists: (lists ?? []).map((l) => ({
-        ...l,
-        unchecked_count: counts.get(l.id) ?? 0,
-      })),
+      lists: (lists ?? []).map((l) => {
+        const shared = shareInfo.get(l.id);
+        return {
+          ...l,
+          unchecked_count: counts.get(l.id) ?? 0,
+          shared: shared !== undefined,
+          ...(shared ? { shared_by: shared.shared_by, permission: shared.permission } : {}),
+        };
+      }),
     });
   } catch {
     return serverError();

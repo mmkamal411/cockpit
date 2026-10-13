@@ -35,13 +35,25 @@ export async function GET(request: NextRequest) {
       const { error, data } = await supabase.auth.exchangeCodeForSession(code);
       if (!error) {
         // Ensure the pilot row exists (no DB trigger creates it). Idempotent.
+        // Also backfills the sign-in email (powers share-by-email lookup) and
+        // claims any list shares addressed to this email (invite redemption).
         try {
           const uid = data.user?.id;
+          const email = data.user?.email?.trim().toLowerCase() || null;
           if (uid) {
-            await supabase.from("pilots").upsert(
-              { id: uid },
-              { onConflict: "id", ignoreDuplicates: true },
-            );
+            const row: { id: string; email?: string | null } = { id: uid };
+            if (email) row.email = email;
+            await supabase.from("pilots").upsert(row, { onConflict: "id" });
+            if (email) {
+              // Claim pending shares: RLS `shares_claim` policy lets the
+              // pilot set shared_with_pilot_id only on rows addressed to
+              // their own sign-in email that nobody has claimed yet.
+              await supabase
+                .from("shopping_list_shares")
+                .update({ shared_with_pilot_id: uid })
+                .is("shared_with_pilot_id", null)
+                .eq("shared_with_email", email);
+            }
           }
         } catch {
           // Non-fatal: the pilot can still use the app; crew features
