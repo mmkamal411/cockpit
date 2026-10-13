@@ -44,9 +44,9 @@ async function testParentVue(username: string, password: string): Promise<Attemp
       headers: {
         Authorization: `Basic ${creds}`,
         "Content-Type": "application/json",
-        "User-Agent": "Cockpit/1.0",
+        Accept: "application/json",
       },
-      body: JSON.stringify({ request: JSON.stringify({ userID: null }) }),
+      body: JSON.stringify({ arguments: { request: JSON.stringify({ userID: null }) } }),
       signal: controller.signal,
     });
     if (res.status === 401) return { ok: false, authFailed: true };
