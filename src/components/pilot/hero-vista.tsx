@@ -80,11 +80,11 @@ const VISTA_CSS = `
 }
 .pilot-vista-caption {
   position: absolute; z-index: 1;
-  left: 24px; right: 24px; bottom: 120px;
+  left: 24px; right: 24px; top: 20px;
   text-shadow: 0 2px 18px rgb(0 0 0 / 0.7);
 }
 @media (min-width: 640px) {
-  .pilot-vista-caption { left: 48px; bottom: 132px; }
+  .pilot-vista-caption { left: 48px; top: auto; bottom: 132px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pilot-vista-video { display: none; }
