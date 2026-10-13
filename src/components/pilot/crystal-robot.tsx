@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 /**
  * CrystalRobot — the Crystal orb reimagined as a tiny, alive companion bot
@@ -100,12 +100,15 @@ const INK = "#0e2a3a";
 function RobotFace({
   face,
   pupil,
+  blushId,
 }: {
   face: FaceKind;
   pupil: { x: number; y: number };
+  blushId: string;
 }) {
   const px = pupil.x;
   const py = pupil.y;
+  const pupilStyle = { transform: `translate(${px}px, ${py}px)` };
   const smile = (
     <path
       d="M28 35.5 Q32 38.5 36 35.5"
@@ -117,7 +120,7 @@ function RobotFace({
   );
   // Sparkly happy eyes — shared by "happy" and "blush".
   const happyEyes = (
-    <g transform={`translate(${px} ${py})`}>
+    <g className="crystal-pupil" style={pupilStyle}>
       <ellipse cx="26" cy="28" rx="3.6" ry="5.2" fill={INK} />
       <ellipse cx="38" cy="28" rx="3.6" ry="5.2" fill={INK} />
       <circle cx="27.2" cy="26" r="1.25" fill="#fff" />
@@ -138,7 +141,7 @@ function RobotFace({
     case "curious":
       return (
         <g>
-          <g transform={`translate(${px} ${py})`}>
+          <g className="crystal-pupil" style={pupilStyle}>
             <ellipse cx="26" cy="28" rx="4.4" ry="6" fill={INK} />
             <ellipse cx="38" cy="28.5" rx="3" ry="4.4" fill={INK} />
             <circle cx="27.4" cy="25.8" r="1.3" fill="#fff" />
@@ -156,7 +159,7 @@ function RobotFace({
     case "surprised":
       return (
         <g>
-          <g transform={`translate(${px} ${py})`}>
+          <g className="crystal-pupil" style={pupilStyle}>
             <circle cx="26" cy="28" r="4.6" fill={INK} />
             <circle cx="38" cy="28" r="4.6" fill={INK} />
             <circle cx="27.4" cy="26.2" r="1.4" fill="#fff" />
@@ -230,8 +233,8 @@ function RobotFace({
     case "blush":
       return (
         <g>
-          <ellipse cx="20.5" cy="33.2" rx="4" ry="2.8" fill="url(#crystalBlush)" />
-          <ellipse cx="43.5" cy="33.2" rx="4" ry="2.8" fill="url(#crystalBlush)" />
+          <ellipse cx="20.5" cy="33.2" rx="4" ry="2.8" fill={`url(#${blushId})`} />
+          <ellipse cx="43.5" cy="33.2" rx="4" ry="2.8" fill={`url(#${blushId})`} />
           {happyEyes}
           {smile}
         </g>
@@ -260,33 +263,44 @@ function RobotBody({
   pupil: { x: number; y: number };
   action: ActionKind;
 }) {
+  // Per-instance gradient ids so multiple robot mounts never collide on
+  // duplicate SVG ids document-wide (audit note, 2026-10-13).
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const ids = {
+    screen: `crystal-screen-${uid}`,
+    shell: `crystal-shell-${uid}`,
+    cap: `crystal-cap-${uid}`,
+    glow: `crystal-glow-${uid}`,
+    heart: `crystal-heart-${uid}`,
+    blush: `crystal-blush-${uid}`,
+  };
   const actionClass = action ? ` crystal-act-${action}` : "";
   return (
     <span className={`crystal-robot-body${actionClass}`}>
       <svg viewBox="0 0 64 64" aria-hidden="true" className="crystal-robot-svg">
         <defs>
-          <linearGradient id="crystalScreen" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={ids.screen} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#d8f3fd" />
             <stop offset="100%" stopColor="#a3dbf2" />
           </linearGradient>
-          <linearGradient id="crystalShell" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={ids.shell} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#ffffff" />
             <stop offset="100%" stopColor="#d8ecf5" />
           </linearGradient>
-          <linearGradient id="crystalCap" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={ids.cap} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#e2f6fd" />
             <stop offset="100%" stopColor="#8ccbe6" />
           </linearGradient>
-          <radialGradient id="crystalGlow">
+          <radialGradient id={ids.glow}>
             <stop offset="0%" stopColor="#e8fbff" stopOpacity="0.95" />
             <stop offset="45%" stopColor="#9be2f7" stopOpacity="0.55" />
             <stop offset="100%" stopColor="#9be2f7" stopOpacity="0" />
           </radialGradient>
-          <radialGradient id="crystalBlush">
+          <radialGradient id={ids.blush}>
             <stop offset="0%" stopColor="#ff8fae" stopOpacity="0.85" />
             <stop offset="100%" stopColor="#ff8fae" stopOpacity="0" />
           </radialGradient>
-          <radialGradient id="crystalHeart" cx="0.5" cy="0.4" r="0.8">
+          <radialGradient id={ids.heart} cx="0.5" cy="0.4" r="0.8">
             <stop offset="0%" stopColor="#d5f4fe" />
             <stop offset="100%" stopColor="#54c3e6" />
           </radialGradient>
@@ -304,14 +318,14 @@ function RobotBody({
           strokeLinecap="round"
         />
         <g className="crystal-antenna-tip">
-          <circle cx="32" cy="4.4" r="5.4" fill="url(#crystalGlow)" />
+          <circle cx="32" cy="4.4" r="5.4" fill={`url(#${ids.glow})`} />
           <circle cx="32" cy="4.4" r="2.7" fill="#aee7fa" />
           <circle cx="31" cy="3.4" r="0.9" fill="#ffffff" opacity="0.95" />
         </g>
 
         {/* side pods */}
-        <circle cx="7.5" cy="30" r="5" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
-        <circle cx="56.5" cy="30" r="5" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
+        <circle cx="7.5" cy="30" r="5" fill={`url(#${ids.shell})`} stroke="#bcdcea" strokeWidth="1" />
+        <circle cx="56.5" cy="30" r="5" fill={`url(#${ids.shell})`} stroke="#bcdcea" strokeWidth="1" />
         <circle cx="7.5" cy="30" r="2.2" fill="#9be2f7" opacity="0.7" />
         <circle cx="56.5" cy="30" r="2.2" fill="#9be2f7" opacity="0.7" />
         <circle cx="6.7" cy="29.2" r="0.8" fill="#ffffff" opacity="0.85" />
@@ -319,37 +333,37 @@ function RobotBody({
 
         {/* left arm (viewer-left) — the waver, raised in greeting */}
         <g className="crystal-arm-l" style={{ transformOrigin: "19px 47px" }}>
-          <rect x="8" y="32" width="7" height="17" rx="3.5" fill="url(#crystalShell)"
+          <rect x="8" y="32" width="7" height="17" rx="3.5" fill={`url(#${ids.shell})`}
             stroke="#bcdcea" strokeWidth="1" transform="rotate(24 11.5 40.5)" />
-          <circle cx="7.2" cy="33.5" r="3.4" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
+          <circle cx="7.2" cy="33.5" r="3.4" fill={`url(#${ids.shell})`} stroke="#bcdcea" strokeWidth="1" />
         </g>
         {/* right arm — resting */}
-        <rect x="49" y="44" width="6.5" height="13" rx="3.25" fill="url(#crystalShell)"
+        <rect x="49" y="44" width="6.5" height="13" rx="3.25" fill={`url(#${ids.shell})`}
           stroke="#bcdcea" strokeWidth="1" transform="rotate(-18 52 50)" />
 
         {/* feet */}
-        <ellipse cx="24" cy="59.5" rx="6.2" ry="3.4" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
-        <ellipse cx="40" cy="59.5" rx="6.2" ry="3.4" fill="url(#crystalShell)" stroke="#bcdcea" strokeWidth="1" />
+        <ellipse cx="24" cy="59.5" rx="6.2" ry="3.4" fill={`url(#${ids.shell})`} stroke="#bcdcea" strokeWidth="1" />
+        <ellipse cx="40" cy="59.5" rx="6.2" ry="3.4" fill={`url(#${ids.shell})`} stroke="#bcdcea" strokeWidth="1" />
 
         {/* body */}
-        <rect x="20" y="43" width="24" height="15" rx="7.5" fill="url(#crystalShell)"
+        <rect x="20" y="43" width="24" height="15" rx="7.5" fill={`url(#${ids.shell})`}
           stroke="#bcdcea" strokeWidth="1" />
         {/* belly heart — radial gradient + sparkle, gently pulsing */}
         <g className="crystal-heart">
           <path
             d="M32 53.2 c-1.8-2.4-5-3.2-5-0.6 c0 1.8 2.6 3.4 5 4.6 c2.4-1.2 5-2.8 5-4.6 c0-2.6-3.2-1.8-5 0.6 z"
-            fill="url(#crystalHeart)"
+            fill={`url(#${ids.heart})`}
           />
           <circle cx="30.3" cy="53.4" r="0.9" fill="#ffffff" opacity="0.85" />
         </g>
 
         {/* head */}
-        <rect x="10" y="10" width="44" height="36" rx="15" fill="url(#crystalShell)"
+        <rect x="10" y="10" width="44" height="36" rx="15" fill={`url(#${ids.shell})`}
           stroke="#bcdcea" strokeWidth="1" />
         {/* icy-blue head cap — gradient + soft top sheen */}
         <path
           d="M10 25 Q10 10 25 10 L39 10 Q54 10 54 25 Z"
-          fill="url(#crystalCap)"
+          fill={`url(#${ids.cap})`}
         />
         <path
           d="M16 14.6 Q32 10.9 48 14.6"
@@ -360,7 +374,7 @@ function RobotBody({
           opacity="0.55"
         />
         {/* face screen */}
-        <rect x="16" y="17" width="32" height="24" rx="10" fill="url(#crystalScreen)"
+        <rect x="16" y="17" width="32" height="24" rx="10" fill={`url(#${ids.screen})`}
           stroke="#0e2a3a" strokeOpacity="0.18" strokeWidth="1" />
         {/* screen pixel accents */}
         <rect x="19" y="20" width="2.4" height="2.4" rx="0.8" fill="#7cc4de" opacity="0.8" />
@@ -368,7 +382,7 @@ function RobotBody({
         <rect x="19" y="35.6" width="2.4" height="2.4" rx="0.8" fill="#7cc4de" opacity="0.8" />
         <rect x="42.6" y="35.6" width="2.4" height="2.4" rx="0.8" fill="#7cc4de" opacity="0.8" />
 
-        <RobotFace face={face} pupil={pupil} />
+        <RobotFace face={face} pupil={pupil} blushId={ids.blush} />
       </svg>
     </span>
   );
@@ -382,11 +396,13 @@ function CrystalRobotButton({
   className,
   active,
   waiting,
+  ariaCurrent,
   onOpen,
 }: {
   className: string;
   active?: boolean;
   waiting?: boolean;
+  ariaCurrent?: "page";
   onOpen: () => void;
 }) {
   const reduced = useMemo(
@@ -398,7 +414,20 @@ function CrystalRobotButton({
   const [face, setFace] = useState<FaceKind>("happy");
   const [action, setAction] = useState<ActionKind>(null);
   const [walkX, setWalkX] = useState(0);
-  const [pupil, setPupil] = useState({ x: 0, y: 0 });
+  const [pupil, setPupilState] = useState({ x: 0, y: 0 });
+  const pupilRef = useRef(pupil);
+  // Guarded pupil writer: rounds to 2 decimals and skips no-op updates so
+  // high-frequency hover tracking doesn't spam re-renders. The actual glide
+  // smoothness comes from the .crystal-pupil CSS transition.
+  const setPupil = (next: { x: number; y: number }) => {
+    const x = Math.round(next.x * 100) / 100;
+    const y = Math.round(next.y * 100) / 100;
+    const prev = pupilRef.current;
+    if (prev.x === x && prev.y === y) return;
+    const clamped = { x, y };
+    pupilRef.current = clamped;
+    setPupilState(clamped);
+  };
 
   const baseFace = useRef<FaceKind>("happy");
   const walkXRef = useRef(0);
@@ -637,6 +666,7 @@ function CrystalRobotButton({
       data-active={active}
       data-waiting={waiting}
       aria-label="Talk to Crystal — your AI co-pilot"
+      aria-current={ariaCurrent}
       title="Crystal"
       className={`${className} crystal-robot-mode`}
     >
@@ -696,6 +726,7 @@ export function CrystalCommandButton({
       className={className}
       active={active}
       waiting={waiting}
+      ariaCurrent={ariaCurrent}
       onOpen={onOpen}
     />
   );
@@ -710,14 +741,28 @@ const CRYSTAL_ROBOT_CSS = `
   border: none !important;
   overflow: visible !important;
   padding: 0;
+  /* Audit fix 4: the 44px track used to sit top-left in 58px slots (~7px
+     off-center). Flex-centering keeps it centered in every slot size. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .crystal-robot-mode:hover { transform: none !important; }
 .crystal-robot-mode:active { transform: none !important; }
+/* Audit fix 1: the console slot centers itself with translate(-50%,-50%) —
+   restore that on hover/active so the neutralizer above can't snap the
+   robot ~29px when the pilot hovers. */
+.console-orb.crystal-robot-mode:hover { transform: translate(-50%, -50%) !important; }
+.console-orb.crystal-robot-mode:active { transform: translate(-50%, -50%) !important; }
+/* Audit fix 2: the neutralizer kills the button's active box-shadow glow, so
+   carry the panoramic "active" signal on the robot SVG instead. */
+.crystal-robot-mode[data-active="true"] .crystal-robot-svg { filter: drop-shadow(0 0 14px rgb(94 234 212 / 0.8)); }
 .crystal-robot-track {
   display: block;
   width: 44px;
   height: 44px;
-  transition: transform 0.45s ease-in-out;
+  /* Walk travel: gentle ease so each step-settle lands softly. */
+  transition: transform 0.45s cubic-bezier(0.4, 0, 0.35, 1);
 }
 .crystal-robot-body {
   display: block;
@@ -732,61 +777,89 @@ const CRYSTAL_ROBOT_CSS = `
   animation: crystal-idle 4.2s ease-in-out infinite;
   filter: drop-shadow(0 0 10px rgb(103 232 249 / 0.35));
 }
+/* Idle float — barely-there bob with a whisper of breath-scale, so the
+   robot feels alive but never restless. */
 @keyframes crystal-idle {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1.6px); }
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(-1.6px) scale(1.004, 0.997); }
 }
-/* antenna + heart glow */
+/* Pupil glide — cursor tracking, look-arounds, and notice reactions ease
+   through this compositor-only transition instead of jumping. */
+.crystal-pupil {
+  transition: transform 0.38s cubic-bezier(0.3, 1.35, 0.5, 1);
+  will-change: transform;
+}
+/* Antenna + heart glow — slow, offset breaths of light. */
 .crystal-antenna-tip { animation: crystal-glow 3s ease-in-out infinite; }
 .crystal-heart { animation: crystal-glow 4.5s ease-in-out infinite; }
 @keyframes crystal-glow {
-  0%, 100% { opacity: 0.6; }
+  0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
 }
-/* waving arm */
+/* Wave — the arm swings with a snappy overshoot while the body does a
+   happy little side-to-side rock. */
 .crystal-arm-l { transform-box: view-box; }
-.crystal-act-wave .crystal-arm-l { animation: crystal-wave 1.6s ease-in-out; }
+.crystal-act-wave { animation: crystal-wave-bob 1.6s ease-in-out; }
+.crystal-act-wave .crystal-arm-l { animation: crystal-wave 1.6s cubic-bezier(0.36, 0, 0.2, 1); }
 @keyframes crystal-wave {
-  0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(-28deg); }
-  50% { transform: rotate(6deg); }
-  75% { transform: rotate(-22deg); }
+  0% { transform: rotate(0deg); }
+  18% { transform: rotate(-34deg); animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); }
+  42% { transform: rotate(5deg); }
+  64% { transform: rotate(-26deg); animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); }
+  84% { transform: rotate(7deg); }
+  100% { transform: rotate(0deg); }
 }
-/* walk waddle (translate handled by the track span) */
+@keyframes crystal-wave-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  32% { transform: translateY(-1.2px) rotate(1.6deg); }
+  64% { transform: translateY(0) rotate(-1.2deg); }
+}
+/* Walk waddle — tilt with a soft squash at each footfall, weighty but cute. */
 .crystal-act-walk { animation: crystal-waddle 0.5s ease-in-out infinite; }
 @keyframes crystal-waddle {
-  0%, 100% { transform: translateY(0) rotate(-2.5deg); }
-  50% { transform: translateY(-2px) rotate(2.5deg); }
+  0%, 100% { transform: translateY(0) rotate(-2.5deg) scale(1, 1); }
+  50% { transform: translateY(-2.4px) rotate(2.5deg) scale(0.985, 1.015); }
 }
-/* jump */
-.crystal-act-jump { animation: crystal-jump 0.65s ease-in-out; }
-.crystal-act-celebrate { animation: crystal-jump 0.55s ease-in-out 3; }
+/* Jump / celebrate — real squash-and-stretch: crouch anticipation, stretch
+   through the rise, a landing squash, then a tiny rebound before settling. */
+.crystal-act-jump { animation: crystal-jump 0.65s cubic-bezier(0.4, 0, 0.2, 1); }
+.crystal-act-celebrate { animation: crystal-jump 0.55s cubic-bezier(0.4, 0, 0.2, 1) 3; }
 @keyframes crystal-jump {
-  0%, 100% { transform: translateY(0) scaleY(1); }
-  35% { transform: translateY(-11px) scaleY(1.04); }
-  70% { transform: translateY(0) scaleY(0.92); }
-  82% { transform: translateY(-2px) scaleY(1); }
+  0% { transform: translateY(0) scale(1, 1); }
+  16% { transform: translateY(2px) scale(1.1, 0.86); animation-timing-function: cubic-bezier(0.3, 0, 0.6, 1); }
+  44% { transform: translateY(-12px) scale(0.94, 1.08); animation-timing-function: cubic-bezier(0.2, 0.6, 0.4, 1); }
+  66% { transform: translateY(0) scale(1.12, 0.84); }
+  80% { transform: translateY(-2.6px) scale(0.97, 1.03); animation-timing-function: cubic-bezier(0.3, 0, 0.4, 1); }
+  92% { transform: translateY(0) scale(1.02, 0.98); }
+  100% { transform: translateY(0) scale(1, 1); }
 }
-/* trip and fall — playful, recovers with a spring */
-.crystal-act-trip { animation: crystal-trip 1.3s ease-in-out; }
+/* Trip and fall — stumble lean as anticipation, an accelerating topple, a
+   beat of dizzy face-plant, then a springy recovery with overshoot. */
+.crystal-act-trip { animation: crystal-trip 1.3s cubic-bezier(0.4, 0, 0.2, 1); }
 @keyframes crystal-trip {
-  0% { transform: rotate(0) translateY(0); }
-  25% { transform: rotate(-70deg) translateY(6px); }
-  45% { transform: rotate(-70deg) translateY(6px); }
-  70% { transform: rotate(8deg) translateY(-2px); }
-  85% { transform: rotate(-4deg) translateY(0); }
-  100% { transform: rotate(0) translateY(0); }
+  0% { transform: rotate(0deg) translateY(0); }
+  16% { transform: rotate(-10deg) translateY(1.5px); animation-timing-function: cubic-bezier(0.55, 0.06, 0.68, 0.19); }
+  38% { transform: rotate(-76deg) translateY(7px); }
+  56% { transform: rotate(-76deg) translateY(7px); animation-timing-function: cubic-bezier(0.34, 1.45, 0.64, 1); }
+  78% { transform: rotate(9deg) translateY(-3px) scale(0.97, 1.05); }
+  90% { transform: rotate(-3deg) translateY(0) scale(1.02, 0.98); animation-timing-function: ease-out; }
+  100% { transform: rotate(0deg) translateY(0) scale(1, 1); }
 }
-/* click spin */
-.crystal-act-spin { animation: crystal-spin 0.65s ease-in-out; }
+/* Click spin — launches fast, decelerates smoothly into home with a
+   subtle mid-spin squash for cartoon energy. */
+.crystal-act-spin { animation: crystal-spin 0.7s cubic-bezier(0.12, 0.55, 0.28, 1); }
 @keyframes crystal-spin {
-  to { transform: rotate(360deg); }
+  0% { transform: rotate(0deg) scale(1, 1); }
+  55% { transform: rotate(235deg) scale(1.05, 0.95); }
+  100% { transform: rotate(360deg) scale(1, 1); }
 }
 @media (prefers-reduced-motion: reduce) {
   .crystal-robot-svg,
   .crystal-antenna-tip,
   .crystal-heart,
-  .crystal-robot-body { animation: none !important; }
+  .crystal-robot-body,
+  .crystal-arm-l { animation: none !important; }
   .crystal-robot-track { transition: none; }
+  .crystal-pupil { transition: none; will-change: auto; }
 }
 `;
