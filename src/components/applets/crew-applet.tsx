@@ -81,6 +81,13 @@ export function CrewApplet() {
     setStep(2);
   }
 
+  function nextFromSchool() {
+    // School login is optional — the desktop sync installer handles
+    // credentials later. Advance to step 3 regardless of field state.
+    setError("");
+    setStep(3);
+  }
+
   async function finish() {
     setSaving(true);
     setError("");
@@ -357,10 +364,18 @@ export function CrewApplet() {
             Back
           </button>
         )}
-        {step < 3 ? (
+        {step === 1 ? (
           <button
             type="button"
             onClick={nextFromBasics}
+            className="flex-1 rounded-xl border border-neon-green/40 bg-neon-green/10 px-5 py-2.5 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20"
+          >
+            Continue
+          </button>
+        ) : step === 2 ? (
+          <button
+            type="button"
+            onClick={nextFromSchool}
             className="flex-1 rounded-xl border border-neon-green/40 bg-neon-green/10 px-5 py-2.5 text-sm font-medium text-neon-green transition-colors hover:bg-neon-green/20"
           >
             Continue
