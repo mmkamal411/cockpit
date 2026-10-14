@@ -347,12 +347,12 @@ await test("whyLine: plain-language transparency", () => {
   );
   eq(
     whyLine({ source: "system", score: 30, category: "health" }),
-    "From Cockpit — flagged as low-key.",
-    "system source → Cockpit",
+    "From Crystal — flagged as low-key.",
+    "system source → Crystal",
   );
   eq(
     whyLine({ source: null, score: null, category: null }),
-    "From Cockpit — flagged as low-key.",
+    "From Crystal — flagged as low-key.",
     "null-safe",
   );
 });

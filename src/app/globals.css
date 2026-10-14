@@ -1,23 +1,25 @@
 @import "tailwindcss";
 
-/* Cockpit design tokens — dark command deck.
-   Panels live in #05080a–#141a1f. No navy, no gray panels, no light themes. */
+/* Crystal design tokens — StarCraft command deck.
+   Deep space navy backgrounds (#070b16–#131c33), glowing cyan + mint teal
+   accents, frosted glass panels. */
 @theme {
-  --color-abyss: #04070a;
-  --color-panel: #05080a;
-  --color-panel-2: #0b1116;
-  --color-panel-3: #141a1f;
+  --color-abyss: #070b16;
+  --color-panel: #0a101f;
+  --color-panel-2: #0d1528;
+  --color-panel-3: #131c33;
   --color-line: rgb(255 255 255 / 0.1);
 
-  --color-neon-cyan: #67e8f9;
+  --color-neon-cyan: #22d3ee;
   --color-neon-teal: #5eead4;
   --color-neon-green: #86efac;
   --color-neon-amber: #fcd34d;
   --color-neon-purple: #c4b5fd;
 
-  --color-star: #eef6fa;
-  --color-stardust: #a7bcc7;
-  --color-dim: #6f8894;
+  --color-star: #f2f8fc;
+  --color-stardust: #b9d4e4;
+  --color-dim: #7d92a6;
+  --color-ash: #c3ccd4;
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
@@ -37,7 +39,7 @@ body {
 }
 
 ::selection {
-  background: rgb(94 234 212 / 0.35);
+  background: rgb(34 211 238 / 0.35);
 }
 
 /* Thin neon scrollbar for applet windows */
@@ -52,5 +54,24 @@ body {
   border-radius: 8px;
 }
 .applet-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgb(94 234 212 / 0.35);
+  background: rgb(34 211 238 / 0.35);
+}
+
+/* Frosted glass panel — the StarCraft deck's default surface: deep space
+   navy at partial opacity with a backdrop blur and a hairline neon edge. */
+.glass-panel {
+  background: rgb(13 21 40 / 0.55);
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 8px 32px rgb(0 0 0 / 0.45),
+    0 0 24px rgb(34 211 238 / 0.06);
+}
+
+/* Neon glow text for headings and readouts. */
+.glow-cyan {
+  color: var(--color-neon-cyan);
+  text-shadow: 0 0 12px rgb(34 211 238 / 0.6), 0 0 36px rgb(34 211 238 / 0.25);
 }

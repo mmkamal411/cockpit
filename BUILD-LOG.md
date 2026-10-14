@@ -9,57 +9,39 @@
 
 | Team | Branch | Scope | Status |
 |------|--------|-------|--------|
-| Theme | feature/v2-theme | Rebrand Cockpit→Crystal; StarCraft theme (deep space navy, cyan/mint teal, frosted glass, neon) | ✅ DONE (commit 16aca4c, pushed) |
-| Landing | feature/v2-landing | Pre-login landing page, hero video, auth, legal pages, sales chat | ✅ DONE (commit cc68610, pushed) |
+| Theme | feature/v2-theme | Rebrand Cockpit→Crystal; StarCraft theme (deep space navy, cyan/mint teal, frosted glass, neon) | RUNNING (agent 418ec7a5) |
+| Landing | feature/v2-landing | Pre-login landing page, hero video, auth, legal pages, sales chat | RUNNING (agent 75791d69) |
 | Mascot | feature/v2-mascot | Crystal mascot (snow-white fluffy, neon accents, animated moods) | RUNNING (agent 76dd3ba4) |
 | Toolbar | feature/v2-toolbar | StarCraft command center toolbar (ability grid, radar, alerts, sounds) | RUNNING (agent 96e06a33) |
 
 ## Progress
 
-### 2026-10-14 02:22 EDT — Team Theme complete ✅
-- Commit 16aca4c on feature/v2-theme, pushed to origin. 18 files, +159/−86.
-- Rebrand done (user-facing text only; internal identifiers untouched). Favicon verified RGBA, kept as-is.
-- StarCraft tokens in globals.css: abyss #070b16, panels #0a101f/#0d1528/#131c33, cyan #22d3ee, teal #5eead4, ash #c3ccd4; new .glass-panel + .glow-cyan utilities. Toolbar chrome restyled (CSS only).
-- tsc clean, npm run build succeeds, nudge tests 28/28.
-- ⚠️ Branch collision: shared checkout — theme's commit briefly landed on feature/v2-mascot; fixed via pointer-only branch -f. Mascot history contains theme commit as ancestor (harmless, git dedupes) but isn't clean.
-- ⚠️ Expected merge conflict in toolbar-console.tsx (theme CSS vs toolbar structure) — resolution: keep toolbar structure, keep theme chrome.
-- Note: origin remote didn't exist; added https://github.com/mmkamal411/cockpit (same as original repo). Azure app registration still named "Cockpit" (needs Azure access to rename).
+### 2026-10-14 02:15 EDT — Kickoff
+- All 4 teams spawned in parallel with clear scope briefs.
+- Each team commits to its own feature branch and pushes to origin when done.
+- Ground rules: no dead code, no console.logs, tsc --noEmit must pass, clean up as you go.
 
-### 2026-10-14 02:23 EDT — Team Landing complete ✅
-- Commit cc68610 on feature/v2-landing, pushed to origin. 16 files, +1539.
-- Landing page (/ logged out): hero with looping vista video (still frame on mobile <640px and reduced-motion), features pitch, Meet Crystal, on-page signup #signup, footer.
-- Auth: shared AuthForm (landing + /login) — emailed 6-digit OTP (auto-verify at 6 digits, magic-link fallback) + Continue with Google (existing /auth/callback untouched). Plain-English errors.
-- Sales chat: floating bubble, canned FAQ, honestly labeled "not an AI" (deliberately not wired to /api/chat which 401s pre-login).
-- Legal: /terms /privacy /cookies /accessibility /do-not-sell — real plain-language content, shared LegalPage shell, no invented contact info.
-- tsc clean, eslint 0/0, no console.logs, no blocking dialogs.
-- ⚠️ OTP email delivery untested E2E — depends on Supabase email template + sending working on cockpit project (the old stack had a "Couldn't send the code" issue). Needs live test before announcing.
-- ⚠️ Shared-checkout collision again: first commit landed on feature/v2-mascot; rebuilt cleanly via git plumbing from main + only landing files. Dangling commit 1fbce61 in reflog. Recommendation: git worktrees for parallel teams.
-- Commit 16aca4c on feature/v2-theme, pushed to origin. 18 files, +159/−86.
-- Rebrand done (user-facing text only; internal identifiers untouched). Favicon verified RGBA, kept as-is.
-- StarCraft tokens in globals.css: abyss #070b16, panels #0a101f/#0d1528/#131c33, cyan #22d3ee, teal #5eead4, ash #c3ccd4; new .glass-panel + .glow-cyan utilities. Toolbar chrome restyled (CSS only).
-- tsc clean, npm run build succeeds, nudge tests 28/28.
-- ⚠️ Branch collision: shared checkout — theme's commit briefly landed on feature/v2-mascot; fixed via pointer-only branch -f. Mascot history contains theme commit as ancestor (harmless, git dedupes) but isn't clean.
-- ⚠️ Expected merge conflict in toolbar-console.tsx (theme CSS vs toolbar structure) — resolution: keep toolbar structure, keep theme chrome.
-- Note: origin remote didn't exist; added https://github.com/mmkamal411/cockpit (same as original repo). Azure app registration still named "Cockpit" (needs Azure access to rename).
-
-### 2026-10-14 ~06:30 EDT — Team Toolbar: StarCraft command center toolbar shipped (feature/v2-toolbar)
-- New `ToolbarStarcraft` variant (`src/components/toolbar-starcraft.tsx`): 3×3 ability grid (Home/Today/Crystal/Progress/School/More/Nudges/Weather/Crew) with 1.5s conic-gradient cooldown sweeps; 360° radar sweep widget (decorative); tactical + comms feed tickers (CSS marquee, real nudges data + SIM-marked placeholders, paused under prefers-reduced-motion); squad status dots from /api/crew/members with graceful empty state; Red Alert (DEFCON 1) mode with pulsing red styling; Web Audio synth sound effects (click/open/close/alert) with master mute persisted to localStorage, OFF by default.
-- New libs: `src/lib/command-center/sound.ts` (playSound/setSoundEnabled/useSoundEnabled), `src/lib/command-center/red-alert.ts` (setRedAlert/useRedAlert + urgent-nudge auto-trigger watchdog, first check delayed so it never fires on page load).
-- Pilot seat renders Team Mascot's `CrystalCommandButton` from `src/components/pilot/crystal-mascot.tsx` (they landed mid-task; slot is theirs, sizing/mount is ours).
-- Registered `starcraft` variant in toolbar-switch/variant; TOOLBAR_VARIANT set to `starcraft`. Revert = flip flag.
-- Colors reference Team Theme CSS vars (--color-abyss/--color-neon-cyan/--color-neon-teal) with StarCraft-spec fallbacks (#0a0e1a/#22d3ee/#5eead4).
-- `npx tsc --noEmit` passes with zero errors. Mobile: tickers hide <640px, grid compresses to icon-only <480px.
-- NOTE: no `origin` remote is configured in this checkout, so the branch could not be pushed — commit 85749fc is ready locally on feature/v2-toolbar for the coordinator to push.
-
-### 2026-10-14 ~07:15 EDT — Team Mascot: fluffling mascot shipped (feature/v2-mascot)
-- New `src/components/pilot/crystal-mascot.tsx` — Crystal as a snow-white fluffling (Meheldi's pick): scalloped cloud-like fur body, neon cyan (#22d3ee) + pink (#f472b6) tuft/streak highlights, big glossy blue eyes, pink nose, blush cheeks, pink inner ears, toe beans. Replaces the robot and the orb entirely.
-- 7 SVG moods crossfaded via CSS opacity (single SVG, `.cface` groups, `data-mood` selector): happy (default), curious (hover: asymmetric eyes, raised brow, crooked smile), sleepy (closed eyes, Zzz float), excited (big eyes, open joyful mouth, twinkling sparkles), surprised (round eyes, "o" mouth), giggly (squeezed happy eyes, big grin), content (post-excitement settle).
-- Personality engine: click → excited triple-bounce (squash-and-stretch) + opens Crystal chat (same onOpen as before); hover → curious lean toward cursor + pupil tracking (guarded, compositor-only transition); idle 30s → sleepy with slow deep breathing; any interaction wakes; blink loop every ~4–7s; `crystal:celebrate` → excited+content, `crystal:notice` → surprised hop, `crystal:blush` → giggly (helpers exported, same names as the robot's API).
-- Mounting: `CrystalCommandButton` keeps the exact same props/API, `id="toolbar-crystal-orb"` (SoothingOrb drift controller unaffected — it writes the independent CSS `translate` property), data-active/data-waiting, aria-label/title. Slot orb chrome neutralized by `.crystal-mascot-mode` (kills orb background/glow/breathe; restores console variant's translate(-50%,-50%) centering on hover/active; cyan aura when active, pink aura when waiting). Mascot scales to 82% of each slot (58px console/dash/hologlass/legacy, 44px panoramic).
-- All 5 toolbar variants on this branch (console, dash, hologlass, legacy, panoramic) now import from `@/components/pilot/crystal-mascot`. `src/components/pilot/crystal-robot.tsx` DELETED (replacement fully covers its usage: same component name, same props, same mood-event helpers). `NEXT_PUBLIC_CRYSTAL_ROBOT` retired from `deploy/deploy-staging.py` REQUIRED_BUILD_ENV (flag no longer read by any code). Team Toolbar's `toolbar-starcraft.tsx` (feature/v2-toolbar) already imports from crystal-mascot per their log entry — no breakage at merge.
-- Reduced motion: static happy face, no loops/bounces; click still opens chat. No console.logs, no dead code; per-instance SVG gradient ids (useId) so multiple mounts never collide.
-- Verification: `npx tsc --noEmit` — zero errors in src (8 pre-existing errors in `.next/types/validator.ts` reference Team Landing's legal pages not present on this branch; identical count with my changes stashed). All 7 moods visually verified via SSR → cairosvg rasterization (happy/curious/sleepy/excited/surprised/giggly/content all render correctly; sparkle positions and head-tuft length refined after review).
-- ⚠️ Shared-checkout collision (2nd occurrence): while writing the component, another team's agent checked out feature/v2-toolbar mid-task and my uncommitted work was wiped. Rebuilt from scratch and committed immediately. RECOMMENDATION for coordinator: give each team its own git worktree (or serialize checkouts) — the shared working tree keeps eating uncommitted work.
+### 2026-10-14 ~03:10 EDT — Theme (feature/v2-theme) DONE
+- Rebrand Cockpit → Crystal (user-facing only; internal identifiers, file names, API paths, localStorage keys, DB tables untouched):
+  - package.json name → "crystal".
+  - Root metadata title was already "Crystal" — verified.
+  - Rewrote brand copy in: admin layout (title/description/403 page/header), error + global-error pages, invite flow (welcome + shared-list title), share-invite email templates (also rewrote the "smart assistant called Crystal" line, redundant now that Crystal is the app), Outlook permission error message, nudge source attribution ("From Crystal…", test updated), bills/shopping/subscriptions/crew applets empty-state + link-copy, station-categories blurb.
+  - Favicon: verified existing ICO is the Crystal neon robot, RGBA multi-size (16/32/48/64) — kept as-is, no rebuild needed.
+- StarCraft theme tokens (src/app/globals.css):
+  - Backgrounds → deep space navy: abyss #070b16, panels #0a101f/#0d1528/#131c33.
+  - Accents: neon-cyan now glowing cyan #22d3ee; neon-teal stays mint teal #5eead4.
+  - Text: soft white #f2f8fc, ice blue #b9d4e4, muted slate #7d92a6, new light ash gray #c3ccd4 (--color-ash).
+  - New utilities: .glass-panel (frosted glass: navy/55% + 16px backdrop blur, hairline border, neon edge) and .glow-cyan (neon text glow). Scrollbar/selection hover shifted cyan.
+- Toolbar chrome (src/components/toolbar-console.tsx, CSS only — structure/behavior/aria identical):
+  - Shelf: deep navy gradient (#0b1122→#070c18) with a faint cyan underglow.
+  - Light strip: teal → glowing cyan #22d3ee with stronger halo.
+  - Key bank: frosted glass (backdrop-blur 14px, white/10 border, neon edge).
+  - Keys: navy-machined bases, ice-blue text, cyan ignition on press/active, cyan 3px rail + engaged pips; orb reactor core kept mint teal as the brightest element.
+  - Doc comments updated to match ("Crystal Console", cyan light strip).
+- Verified: npx tsc --noEmit clean, npm run build succeeds, nudges engine test 28/28 pass.
+- No console.logs, no dead code, no commented-out blocks introduced.
+- Note: remaining "cockpit" strings are internal only (localStorage keys like cockpit.todos*, DB table cockpit_layouts, device_name cockpit-cloud, API URLs, code comments). The Azure app registration named "Cockpit" is an actual infra object — text now says "Crystal app in Azure"; renaming the registration itself is out of scope.
+- Overlap note: touched only the CSS + doc comments in toolbar-console.tsx; Team Toolbar owns structure on feature/v2-toolbar — expect a merge conflict in that file; mine is chrome-only so resolution is straightforward (keep their structure, keep my chrome, or re-apply colors after).
 
 ## Decisions
 - Original ~/workspace/cockpit is untouched; all work happens in ~/workspace/crystal-v2.

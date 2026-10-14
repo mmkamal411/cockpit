@@ -56,10 +56,10 @@ function MoreGlyph() {
 }
 
 /**
- * ToolbarConsole — "Cockpit Console" toolbar variant.
+ * ToolbarConsole — "Crystal Console" toolbar variant.
  *
- * A bottom-anchored, full-bleed black instrument shelf (#04070a) with a 2px
- * teal light strip along its top edge. Backlit machined keys sit in a
+ * A bottom-anchored, full-bleed deep space navy instrument shelf (#070c18)
+ * with a 2px glowing cyan light strip along its top edge. Backlit machined keys sit in a
  * single shared inset key bank (milled recess, engraved dividers between the
  * Home | Today·Crystal | Progress·School groups) — the School key renders
  * only when the pilot has a linked child. The 58px breathing Crystal
@@ -197,20 +197,20 @@ const CONSOLE_CSS = `
 .console-shelf {
   position: relative;
   width: 100%;
-  background: #04070a;
-  border-top: 1px solid rgb(255 255 255 / 0.05);
+  background: linear-gradient(180deg, #0b1122 0%, #070c18 100%);
+  border-top: 1px solid rgb(255 255 255 / 0.06);
   padding: 10px 12px max(10px, env(safe-area-inset-bottom));
-  box-shadow: 0 -14px 44px rgb(0 0 0 / 0.65);
+  box-shadow: 0 -14px 44px rgb(0 0 0 / 0.65), 0 -1px 12px rgb(34 211 238 / 0.08);
 }
-/* 2px teal light strip along the shelf's top edge */
+/* 2px glowing cyan light strip along the shelf's top edge */
 .console-lightstrip {
   position: absolute; top: -1px; left: 0; right: 0; height: 2px;
   background: linear-gradient(90deg,
-    rgb(94 234 212 / 0) 0%,
-    rgb(94 234 212 / 0.6) 16%,
-    rgb(94 234 212 / 0.6) 84%,
-    rgb(94 234 212 / 0) 100%);
-  box-shadow: 0 0 14px rgb(94 234 212 / 0.35), 0 1px 6px rgb(94 234 212 / 0.25);
+    rgb(34 211 238 / 0) 0%,
+    rgb(34 211 238 / 0.7) 16%,
+    rgb(34 211 238 / 0.7) 84%,
+    rgb(34 211 238 / 0) 100%);
+  box-shadow: 0 0 16px rgb(34 211 238 / 0.45), 0 1px 8px rgb(34 211 238 / 0.3);
   pointer-events: none;
 }
 /* Reactor mount: dead center, straddling the shelf's top edge so the orb
@@ -226,7 +226,7 @@ const CONSOLE_CSS = `
   border: 1px solid rgb(255 255 255 / 0.06);
   box-shadow:
     inset 0 8px 22px rgb(0 0 0 / 0.95),
-    inset 0 -3px 8px rgb(94 234 212 / 0.10),
+    inset 0 -3px 8px rgb(34 211 238 / 0.12),
     0 0 0 4px rgb(0 0 0 / 0.35);
 }
 /* The orb — a ball of divine light, brightest element on the shelf.
@@ -262,31 +262,35 @@ const CONSOLE_CSS = `
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
 }
-/* The shared inset key bank — one milled recess for all five keys */
+/* The shared inset key bank — frosted glass, one milled recess for all five keys */
 .console-keybank {
   position: relative; z-index: 0;
   margin: 0 auto; max-width: 560px;
   display: flex; align-items: stretch; gap: 2px;
   padding: 7px 8px; border-radius: 14px;
-  background: linear-gradient(180deg, #020405 0%, #050a0d 100%);
-  border: 1px solid rgb(255 255 255 / 0.05);
+  background: rgb(13 21 40 / 0.55);
+  backdrop-filter: blur(14px) saturate(1.25);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  border: 1px solid rgb(255 255 255 / 0.1);
   box-shadow:
-    inset 0 2px 12px rgb(0 0 0 / 0.85),
+    inset 0 2px 12px rgb(0 0 0 / 0.65),
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
     inset 0 -1px 0 rgb(255 255 255 / 0.04),
-    0 1px 0 rgb(255 255 255 / 0.03);
+    0 8px 24px rgb(0 0 0 / 0.4),
+    0 0 20px rgb(34 211 238 / 0.07);
 }
 .console-keycell {
   flex: 1 1 0; min-width: 48px;
   display: flex; flex-direction: column; align-items: center;
 }
-/* 6px status pip above the key: teal = engaged, amber = attention */
+/* 6px status pip above the key: cyan = engaged, amber = attention */
 .console-pip {
   width: 6px; height: 6px; margin-bottom: 4px; flex-shrink: 0;
   border-radius: 9999px; background: transparent;
 }
 .console-pip[data-state="engaged"] {
-  background: #5eead4;
-  box-shadow: 0 0 8px rgb(94 234 212 / 0.9);
+  background: #22d3ee;
+  box-shadow: 0 0 8px rgb(34 211 238 / 0.9), 0 0 20px rgb(34 211 238 / 0.4);
 }
 .console-pip[data-state="attention"] {
   background: #fbbf24;
@@ -303,61 +307,61 @@ const CONSOLE_CSS = `
   box-shadow: 1px 0 0 rgb(255 255 255 / 0.05);
 }
 /* Machined key: rectilinear (never pill), top-lit bevel, machined lip,
-   inset bottom shade, faint teal ambient halo. */
+   inset bottom shade, faint cyan ambient halo. */
 .console-key {
   position: relative;
   width: 100%; min-width: 48px; min-height: 58px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   padding: 7px 2px 6px;
   border-radius: 10px;
-  color: #93a8b3;
-  background: linear-gradient(180deg, #0d1419 0%, #060a0d 100%);
-  border: 1px solid rgb(255 255 255 / 0.09);
+  color: #8ba3b8;
+  background: linear-gradient(180deg, #101a30 0%, #080d1a 100%);
+  border: 1px solid rgb(255 255 255 / 0.1);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.10),
     inset 0 -4px 8px rgb(0 0 0 / 0.55),
-    0 0 10px rgb(94 234 212 / 0.06);
+    0 0 10px rgb(34 211 238 / 0.08);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   transition: transform 80ms ease-out, box-shadow 80ms ease-out, color 80ms ease-out, border-color 80ms ease-out, background 80ms ease-out;
 }
-.console-key:hover { color: #d9e8ee; }
+.console-key:hover { color: #d7e7f2; }
 /* Pressed: sinks 1px and ignites — glow blooms over 80ms, glyph to white,
-   label to hot teal. No scale bounce, no opacity dim. */
+   label to hot cyan. No scale bounce, no opacity dim. */
 .console-key:active {
   transform: translateY(1px);
   color: #ffffff;
-  border-color: rgb(94 234 212 / 0.6);
-  background: linear-gradient(180deg, #0a1116 0%, #05090c 100%);
+  border-color: rgb(34 211 238 / 0.6);
+  background: linear-gradient(180deg, #0d1628 0%, #070c18 100%);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.06),
     inset 0 -2px 5px rgb(0 0 0 / 0.6),
-    0 0 18px rgb(94 234 212 / 0.5),
-    0 0 44px rgb(94 234 212 / 0.20);
+    0 0 18px rgb(34 211 238 / 0.5),
+    0 0 44px rgb(34 211 238 / 0.20);
 }
-.console-key:active .console-key-label { color: #5eead4; }
+.console-key:active .console-key-label { color: #22d3ee; }
 .console-key-label {
   font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: #7e939e; line-height: 1; white-space: nowrap;
+  color: #7d92a6; line-height: 1; white-space: nowrap;
   transition: color 80ms ease-out;
 }
 /* Active (applet open): 3px neon rail on the key's top edge + steady backlight */
 .console-key[data-active="true"] {
-  color: #f2faf8;
-  border-color: rgb(94 234 212 / 0.45);
+  color: #f2f8fc;
+  border-color: rgb(34 211 238 / 0.45);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.10),
     inset 0 -4px 8px rgb(0 0 0 / 0.55),
-    0 0 16px rgb(94 234 212 / 0.30),
-    0 0 42px rgb(94 234 212 / 0.12);
+    0 0 16px rgb(34 211 238 / 0.32),
+    0 0 42px rgb(34 211 238 / 0.14);
 }
 .console-key[data-active="true"]::before {
   content: ""; position: absolute; top: -1px; left: 10px; right: 10px; height: 3px;
-  border-radius: 0 0 3px 3px; background: #5eead4;
-  box-shadow: 0 0 10px rgb(94 234 212 / 0.9), 0 0 24px rgb(94 234 212 / 0.5);
+  border-radius: 0 0 3px 3px; background: #22d3ee;
+  box-shadow: 0 0 10px rgb(34 211 238 / 0.9), 0 0 24px rgb(34 211 238 / 0.5);
 }
-.console-key[data-active="true"] .console-key-label { color: #5eead4; }
+.console-key[data-active="true"] .console-key-label { color: #22d3ee; }
 @media (prefers-reduced-motion: reduce) {
   /* Instant state swap; the light still changes (it's information), motion doesn't. */
   .console-key, .console-key-label { transition: none; }

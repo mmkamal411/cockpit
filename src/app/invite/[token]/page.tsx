@@ -31,7 +31,7 @@ function DeadEnd({ title, body }: { title: string; body: string }) {
           href="/login"
           className="mt-6 inline-block rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-5 py-2.5 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/20"
         >
-          Go to Cockpit
+          Go to Crystal
         </a>
       </div>
     </div>
@@ -81,7 +81,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
       return (
         <DeadEnd
           title="This invite was already used"
-          body="Invite links work once. If you accepted it before, the list is waiting in your Cockpit — check your shared lists."
+          body="Invite links work once. If you accepted it before, the list is waiting in Crystal — check your shared lists."
         />
       );
     }
@@ -119,7 +119,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
             Sign in to open it
           </a>
           <p className="mt-4 text-xs leading-relaxed text-dim">
-            New to Cockpit? Signing in creates your free account — the list opens right after.
+            New to Crystal? Signing in creates your free account — the list opens right after.
           </p>
         </div>
       </div>
@@ -154,7 +154,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     return (
       <DeadEnd
         title="This invite was already used"
-        body="Invite links work once. Check your shared lists in Cockpit — it should be there."
+        body="Invite links work once. Check your shared lists in Crystal — it should be there."
       />
     );
   }
@@ -174,5 +174,5 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
 
 // Re-export guard: Next.js requires a default export; named helper above.
 export async function generateMetadata() {
-  return { title: "Shared list — Cockpit" };
+  return { title: "Shared list — Crystal" };
 }

@@ -396,7 +396,7 @@ interface SweepResult {
  * Plain language: source + score tier, no jargon.
  */
 export function whyLine(nudge: { source?: string | null; score?: number | null; category?: string | null }): string {
-  const source = nudge.source && nudge.source !== "system" ? nudge.source : "Cockpit";
+  const source = nudge.source && nudge.source !== "system" ? nudge.source : "Crystal";
   const score = typeof nudge.score === "number" ? nudge.score : 0;
   const tier = score >= 85 ? "urgent" : score >= 65 ? "important" : score >= 40 ? "worth a look" : "low-key";
   return `From ${source} — flagged as ${tier}.`;

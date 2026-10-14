@@ -45,7 +45,7 @@ export default function Error({
           Something went wrong
         </h1>
         <p style={{ opacity: 0.75, marginBottom: "1.5rem", lineHeight: 1.6 }}>
-          The cockpit hit a bump. Your data is safe — nothing was lost.
+          Crystal hit a bump. Your data is safe — nothing was lost.
           {error.digest && (
             <>
               <br />
