@@ -210,6 +210,10 @@ def main():
     else:
         env = dict(os.environ)
         ensure_build_env(env)
+        # Crystal robot is the approved mascot (Meheldi 2026-10-13) — the
+        # toolbar falls back to the soothing orb without this flag. Default it
+        # on so no deploy can silently drop the robot again (2026-10-13).
+        env.setdefault("NEXT_PUBLIC_CRYSTAL_ROBOT", "true")
         build(env)
 
     # Assemble via the shared script (same versioned logic every run).
