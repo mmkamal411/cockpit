@@ -1,33 +1,63 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { planetaryVista } from "./pilot/vista-sources";
 
 /** LandingHero — the public face of the ship. Cosmic video, the Crystal
- *  brand, and one calm call to action. No mention of children or family —
- *  Crystal is the pilot's personal assistant, full stop. */
+ *  brand, and clear sign-up / log-in calls to action. No mention of
+ *  children or family — Crystal is the pilot's personal assistant,
+ *  full stop.
+ *
+ *  Motion access: the looping video only loads when the visitor has NOT
+ *  asked for reduced motion. Mobile (<640px) and reduced-motion visitors
+ *  get the still poster frame instead — a third of the weight, zero motion.
+ */
 export function LandingHero() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [motionOk, setMotionOk] = useState(false);
   const vista = planetaryVista(new Date().getHours());
 
   useEffect(() => {
-    videoRef.current?.play().catch(() => {});
-  }, [vista.src]);
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setMotionOk(!mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (motionOk) videoRef.current?.play().catch(() => {});
+    else videoRef.current?.pause();
+  }, [motionOk, vista.src]);
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
-      <video
-        ref={videoRef}
-        className="absolute inset-0 h-full w-full object-cover"
-        src={vista.src}
-        poster={vista.poster}
-        muted
-        loop
-        playsInline
-        autoPlay
+      {/* Still frame: shows when reduced-motion is requested or on small
+          screens (lighter than the 1.5MB loop). Video: desktop, motion OK. */}
+      <Image
+        src={vista.poster}
+        alt=""
         aria-hidden="true"
+        fill
+        priority
+        className="hero-still object-cover"
       />
+      {motionOk && (
+        <video
+          ref={videoRef}
+          className="hero-video absolute inset-0 h-full w-full object-cover"
+          src={vista.src}
+          poster={vista.poster}
+          muted
+          loop
+          playsInline
+          autoPlay
+          preload="auto"
+          aria-hidden="true"
+        />
+      )}
       <div
         aria-hidden="true"
         className="absolute inset-0 bg-[linear-gradient(180deg,rgb(4_7_10/0.55)_0%,rgb(4_7_10/0.2)_45%,rgb(4_7_10/0.85)_100%)]"
@@ -38,12 +68,20 @@ export function LandingHero() {
           <span aria-hidden="true" className="landing-orb" />
           <span className="text-lg font-semibold tracking-wide text-star">Crystal</span>
         </div>
-        <Link
-          href="/login"
-          className="rounded-full border border-line bg-white/5 px-5 py-2 text-sm font-medium text-star backdrop-blur-md transition-colors hover:border-neon-teal/50 hover:text-neon-teal"
-        >
-          Sign in
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/login"
+            className="rounded-full px-5 py-2 text-sm font-medium text-stardust transition-colors hover:text-star"
+          >
+            Log in
+          </Link>
+          <Link
+            href="#signup"
+            className="rounded-full border border-line bg-white/5 px-5 py-2 text-sm font-medium text-star backdrop-blur-md transition-colors hover:border-neon-teal/50 hover:text-neon-teal"
+          >
+            Sign up free
+          </Link>
+        </div>
       </header>
 
       <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 text-center">
@@ -55,21 +93,31 @@ export function LandingHero() {
         </h1>
         <p className="mt-4 max-w-xl text-base leading-relaxed text-stardust sm:text-lg">
           Crystal is the calm intelligence at the center of your life — your
-          schedule, your goals, your money, your health — quietly handled
+          tasks, school, health, and money in one cockpit, quietly handled
           while you fly.
         </p>
-        <Link
-          href="/login"
-          className="mt-8 rounded-full border border-neon-teal/50 bg-neon-teal/15 px-10 py-3.5 text-base font-semibold text-star shadow-[0_0_36px_rgb(94_234_212/0.25)] backdrop-blur-md transition-all hover:scale-[1.03] hover:bg-neon-teal/25"
-        >
-          Take command
-        </Link>
-        <p className="mt-4 text-xs text-dim">Free to board · 30 seconds to your bridge</p>
+        <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+          <Link
+            href="#signup"
+            className="rounded-full border border-neon-teal/50 bg-neon-teal/15 px-10 py-3.5 text-base font-semibold text-star shadow-[0_0_36px_rgb(94_234_212/0.25)] backdrop-blur-md transition-all hover:scale-[1.03] hover:bg-neon-teal/25"
+          >
+            Sign up free
+          </Link>
+          <Link
+            href="/login"
+            className="rounded-full border border-line bg-white/5 px-10 py-3.5 text-base font-medium text-star backdrop-blur-md transition-colors hover:border-neon-teal/40 hover:text-neon-teal"
+          >
+            Log in
+          </Link>
+        </div>
+        <p className="mt-4 text-xs text-dim">
+          Free to board · No password · 30 seconds to your bridge
+        </p>
       </main>
 
-      <footer className="relative z-10 px-6 pb-6 text-center text-xs text-dim sm:px-10">
+      <p className="relative z-10 px-6 pb-6 text-center text-xs text-dim sm:px-10">
         Crystal — a ball of light, watching over your day.
-      </footer>
+      </p>
       <style>{LANDING_CSS}</style>
     </div>
   );
@@ -83,7 +131,14 @@ const LANDING_CSS = `
     radial-gradient(circle at 50% 55%, #d8fff4 0%, #5eead4 42%, #0e7d6c 78%, #04211c 100%);
   box-shadow: 0 0 14px rgb(94 234 212 / 0.6), 0 0 34px rgb(94 234 212 / 0.25);
 }
+/* Mobile: skip the video entirely, keep the still frame. */
+.hero-video { display: block; }
+@media (max-width: 639px) {
+  .hero-video { display: none; }
+}
+/* Reduced motion: same — still frame only. */
 @media (prefers-reduced-motion: reduce) {
+  .hero-video { display: none; }
   .landing-orb { animation: none; }
 }
 `;

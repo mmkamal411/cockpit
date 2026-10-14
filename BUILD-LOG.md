@@ -21,6 +21,22 @@
 - Each team commits to its own feature branch and pushes to origin when done.
 - Ground rules: no dead code, no console.logs, tsc --noEmit must pass, clean up as you go.
 
+### 2026-10-14 ~03:00 EDT — Team Landing: pre-login experience (feature/v2-landing)
+- **Landing page (`/`, logged out):** rebuilt as a full page — hero (daypart planetary vista video, Sign up free / Log in CTAs), Features section (tasks, school, health, money, communication, one calm command deck), "Meet Crystal" section, on-page signup section (#signup) embedding the auth form, and a footer with all legal links. Signed-in pilots still redirect to /home; the session check still fails open to the public landing.
+- **Auth:** new shared `src/components/auth-form.tsx` used by both the landing signup section and `/login`. Two paths: emailed 6-digit one-time code (auto-verifies on 6 digits, `verifyOtp` type email; the same email also carries a one-click magic link as the fallback) and Continue with Google (existing Supabase OAuth → /auth/callback pattern, untouched). Signup and login are the same passwordless flow — new pilots get an account on code verify. Plain-English errors, no blank pages.
+- **Sales-support chat widget:** floating `SalesChat` bubble on the landing page. Canned FAQ answers only (pricing, features, privacy, kids-not-required, signup, devices, AI honesty, support) — the widget's header and copy explicitly say it's a guide, not an AI. Keyword-matched with suggested questions and a fallback answer. `/api/chat` was NOT reused: it 401s without a signed-in pilot.
+- **Legal pages:** `/terms`, `/privacy`, `/cookies`, `/accessibility`, `/do-not-sell` — real, plain-language content (account rules, data we collect, 14-day signal retention, no-sale pledge, CCPA rights, WCAG 2.2 AA goal, reduced-motion support), shared `LegalPage` shell, linked from the landing footer.
+- **Reduced motion:** hero renders the poster still only when `prefers-reduced-motion: reduce` (video skipped entirely, not just paused); ambient orb animation also disabled. **Mobile:** `<640px` shows the ~40KB still instead of the 1.5MB video loop; desktop-with-motion gets the video.
+- Hygiene: `npx tsc --noEmit` passes with zero errors; eslint clean (0 errors); no console.logs, no window.confirm/alert/prompt, no dead code.
+
+### 2026-10-14 ~06:30 EDT — Team Toolbar: StarCraft command center toolbar shipped (feature/v2-toolbar)
+- New `ToolbarStarcraft` variant (`src/components/toolbar-starcraft.tsx`): 3×3 ability grid (Home/Today/Crystal/Progress/School/More/Nudges/Weather/Crew) with 1.5s conic-gradient cooldown sweeps; 360° radar sweep widget (decorative); tactical + comms feed tickers (CSS marquee, real nudges data + SIM-marked placeholders, paused under prefers-reduced-motion); squad status dots from /api/crew/members with graceful empty state; Red Alert (DEFCON 1) mode with pulsing red styling; Web Audio synth sound effects (click/open/close/alert) with master mute persisted to localStorage, OFF by default.
+- New libs: `src/lib/command-center/sound.ts` (playSound/setSoundEnabled/useSoundEnabled), `src/lib/command-center/red-alert.ts` (setRedAlert/useRedAlert + urgent-nudge auto-trigger watchdog, first check delayed so it never fires on page load).
+- Pilot seat renders Team Mascot's `CrystalCommandButton` from `src/components/pilot/crystal-mascot.tsx` (they landed mid-task; slot is theirs, sizing/mount is ours).
+- Registered `starcraft` variant in toolbar-switch/variant; TOOLBAR_VARIANT set to `starcraft`. Revert = flip flag.
+- Colors reference Team Theme CSS vars (--color-abyss/--color-neon-cyan/--color-neon-teal) with StarCraft-spec fallbacks (#0a0e1a/#22d3ee/#5eead4).
+- `npx tsc --noEmit` passes with zero errors. Mobile: tickers hide <640px, grid compresses to icon-only <480px.
+
 ### 2026-10-14 ~03:10 EDT — Theme (feature/v2-theme) DONE
 - Rebrand Cockpit → Crystal (user-facing only; internal identifiers, file names, API paths, localStorage keys, DB tables untouched):
   - package.json name → "crystal".
