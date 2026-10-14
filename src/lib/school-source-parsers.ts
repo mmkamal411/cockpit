@@ -732,17 +732,20 @@ interface TableParse {
   structured: boolean; // true when headers were recognized (not guessed)
   guessedAmPm: boolean;
   skippedRows: number;
+  boilerplateStripped: number; // rows whose label came from boilerplate stripping
 }
 
 function parseTable(table: RawTable): TableParse {
-  const result: TableParse = { periods: [], structured: false, guessedAmPm: false, skippedRows: 0 };
+  const result: TableParse = { periods: [], structured: false, guessedAmPm: false, skippedRows: 0, boilerplateStripped: 0 };
   const mapping = mapColumns(table.header, table.rows);
   if (!mapping) return result;
   result.structured = table.header !== null;
 
   for (const row of table.rows) {
-    const name = (row[mapping.name] ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-    if (!name || /^\d+\s*min/i.test(name)) {
+    const extracted = extractPeriodLabel(row[mapping.name] ?? "");
+    if (extracted.boilerplate) result.boilerplateStripped++;
+    const name = extracted.label;
+    if (!name || /^\d+\s*min/i.test(name) || name.length > 80) {
       result.skippedRows++;
       continue;
     }
@@ -764,6 +767,13 @@ function parseTable(table: RawTable): TableParse {
       result.skippedRows++;
       continue;
     }
+    // Times are HH:MM 24-hour, so string comparison is chronological.
+    // A bell can't end before (or exactly when) it starts — such rows are
+    // garbage, not data.
+    if (end.time <= start.time) {
+      result.skippedRows++;
+      continue;
+    }
 
     if (start.guessedAmPm || end.guessedAmPm) result.guessedAmPm = true;
     result.periods.push({ name, start: start.time, end: end.time });
@@ -774,16 +784,18 @@ function parseTable(table: RawTable): TableParse {
 
 /** Definition lists: <dt>Period 1</dt><dd>8:00 AM to 8:30 AM</dd> (low confidence). */
 function parseDefinitionLists(chunk: string): TableParse {
-  const result: TableParse = { periods: [], structured: false, guessedAmPm: false, skippedRows: 0 };
+  const result: TableParse = { periods: [], structured: false, guessedAmPm: false, skippedRows: 0, boilerplateStripped: 0 };
   const dlRe = /<dl\b[^>]*>([\s\S]*?)<\/dl>/gi;
   let dm: RegExpExecArray | null;
   while ((dm = dlRe.exec(chunk)) !== null) {
     const pairRe = /<dt\b[^>]*>([\s\S]*?)<\/dt>\s*<dd\b[^>]*>([\s\S]*?)<\/dd>/gi;
     let pm: RegExpExecArray | null;
     while ((pm = pairRe.exec(dm[1])) !== null) {
-      const name = stripTags(pm[1]).replace(/\s+/g, " ").trim().slice(0, 80);
+      const extracted = extractPeriodLabel(stripTags(pm[1]));
+      if (extracted.boilerplate) result.boilerplateStripped++;
+      const name = extracted.label;
       const ddText = stripTags(pm[2]);
-      if (!name) {
+      if (!name || name.length > 80) {
         result.skippedRows++;
         continue;
       }
@@ -805,11 +817,47 @@ function parseDefinitionLists(chunk: string): TableParse {
         result.skippedRows++;
         continue;
       }
+      // Times are HH:MM 24-hour, so string comparison is chronological.
+      // A bell can't end before (or exactly when) it starts.
+      if (end.time <= start.time) {
+        result.skippedRows++;
+        continue;
+      }
       if (start.guessedAmPm || end.guessedAmPm) result.guessedAmPm = true;
       result.periods.push({ name, start: start.time, end: end.time });
     }
   }
   return result;
+}
+
+/** Phrases that mark a cell as page boilerplate rather than a period name. */
+const BOILERPLATE_PHRASES = ["takes place on", "please see below", "schedule"];
+
+/**
+ * Extract the real period label from a table cell that may contain page
+ * boilerplate. Founder report 2026-10-13: cells like
+ * "MASTER SCHEDULE takes place on Monday, Tuesday, and Wednesday each week.
+ *  Please see below. - 1ST PERIOD HR" were swallowed whole as period names.
+ * When boilerplate is detected, the actual label is taken after the last
+ * " - " / " – " / ":" separator; otherwise the cell is returned trimmed.
+ */
+function extractPeriodLabel(raw: string): { label: string; boilerplate: boolean } {
+  const cell = raw.replace(/\s+/g, " ").trim();
+  const lower = cell.toLowerCase();
+  const boilerplate = BOILERPLATE_PHRASES.some((p) => lower.includes(p));
+  if (!boilerplate) return { label: cell, boilerplate: false };
+  const separators = [" - ", " \u2013 ", ":"];
+  let cut = -1;
+  let cutLen = 0;
+  for (const sep of separators) {
+    const i = cell.lastIndexOf(sep);
+    if (i > cut) {
+      cut = i;
+      cutLen = sep.length;
+    }
+  }
+  if (cut < 0) return { label: cell, boilerplate: true };
+  return { label: cell.slice(cut + cutLen).trim(), boilerplate: true };
 }
 
 /** "Daily Bell Schedule" -> "Daily"; "WEB" stays "WEB". */
@@ -845,11 +893,13 @@ export function parseBellSchedulePage(html: string, url: string): ParseResult<Di
     let structured = false;
     let guessedAmPm = false;
     let skippedRows = 0;
+    let boilerplateStripped = 0;
     for (const p of parses) {
       periods.push(...p.periods);
       structured = structured || (p.periods.length > 0 && p.structured);
       guessedAmPm = guessedAmPm || p.guessedAmPm;
       skippedRows += p.skippedRows;
+      boilerplateStripped += p.boilerplateStripped;
     }
 
     if (periods.length === 0) continue;
@@ -872,13 +922,27 @@ export function parseBellSchedulePage(html: string, url: string): ParseResult<Di
 
     periods.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
 
-    const confidence: ParseResult<DigitalBellSchedule[]>["confidence"] = structured
+    let confidence: ParseResult<DigitalBellSchedule[]>["confidence"] = structured
       ? "high"
       : parses.some((p) => p.periods.length > 0 && p.structured === false && chunk.includes("<dl"))
         ? "low"
         : "medium";
     if (confidence === "medium") weakest = weakest === "high" ? "medium" : weakest;
     if (confidence === "low") weakest = "low";
+
+    // More than 30% of the rows were dropped as garbage or needed
+    // boilerplate stripping: the page shape is suspect, so the "WHAT WE
+    // READ" preview must not present what survived as fully trustworthy.
+    const attempted = periods.length + skippedRows;
+    const flagged = skippedRows + boilerplateStripped;
+    if (attempted > 0 && flagged / attempted > 0.3) {
+      confidence = confidence === "high" ? "medium" : "low";
+      if (confidence === "medium") weakest = weakest === "high" ? "medium" : weakest;
+      if (confidence === "low") weakest = "low";
+      warnings.push(
+        `"${label}": some bell times looked odd, so we left them out — check the school's page.`,
+      );
+    }
 
     if (guessedAmPm) {
       warnings.push(
