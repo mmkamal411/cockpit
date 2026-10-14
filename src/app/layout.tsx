@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Crystal — Your personal co-pilot",
+  title: "Crystal",
   description:
     "Crystal is the calm intelligence at the center of your life — your schedule, your goals, your money, your health — quietly handled while you fly.",
 };
