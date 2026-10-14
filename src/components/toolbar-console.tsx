@@ -45,6 +45,16 @@ function ProgressGlyph() {
   );
 }
 
+function MoreGlyph() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <circle cx="19" cy="12" r="1.5" />
+    </svg>
+  );
+}
+
 /**
  * ToolbarConsole — "Cockpit Console" toolbar variant.
  *
@@ -112,6 +122,14 @@ export function ToolbarConsole() {
       aria: "Open School",
       active: open?.id === "school",
     },
+    {
+      id: "more",
+      label: "More",
+      glyph: <MoreGlyph />,
+      run: () => openApplet("more"),
+      aria: "Open More — all stations and settings",
+      active: open?.id === "more",
+    },
   ];
 
   return (
@@ -161,8 +179,8 @@ export function ToolbarConsole() {
                     <span className="console-key-label">{k.label}</span>
                   </button>
                 </span>
-                {/* Engraved dividers: Home alone | Today · Crystal | Progress · School */}
-                {(i === 0 || i === 2) && (
+                {/* Engraved dividers: Home alone | Today · Crystal | Progress · School | More */}
+                {(i === 0 || i === 2 || i === 4) && (
                   <span className="console-divider" aria-hidden="true" />
                 )}
               </Fragment>

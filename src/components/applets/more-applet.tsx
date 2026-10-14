@@ -212,6 +212,66 @@ function MoreAppletLegacy() {
           })}
         </div>
       </section>
+
+      <UserSettingsSection />
     </div>
+  );
+}
+
+/** User settings — profile info and sign out. */
+function UserSettingsSection() {
+  const [email, setEmail] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const json = await res.json();
+          if (!cancelled) setEmail(json.email ?? null);
+        }
+      } catch {
+        // Leave email blank; sign out still works.
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await fetch("/api/auth/signout", { method: "POST" });
+    } catch {
+      // Even if the API call fails, clear local session and redirect.
+    }
+    window.location.href = "/login";
+  }
+
+  return (
+    <section aria-labelledby="more-settings">
+      <h3 id="more-settings" className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-dim">
+        Settings
+      </h3>
+      <div className="rounded-2xl border border-line bg-panel-2/40 p-4">
+        {email && (
+          <p className="text-sm text-stardust">
+            Signed in as <span className="font-medium text-star">{email}</span>
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={handleSignOut}
+          disabled={signingOut}
+          className="mt-3 rounded-xl border border-red-400/40 bg-red-400/10 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-400/20 disabled:opacity-50"
+        >
+          {signingOut ? "Signing out…" : "Sign out"}
+        </button>
+      </div>
+    </section>
   );
 }
