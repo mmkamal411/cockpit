@@ -1,17 +1,24 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { CockpitShell } from "@/components/cockpit-shell";
 
-const geistSans = Geist({
+// Self-hosted (2026-10-14): next/font/google downloads Geist from
+// fonts.googleapis.com AT BUILD TIME. Fresh CI/sandboxed builds with no
+// font cache fail when that fetch fails. These variable woff2 files
+// (from the `geist` npm package) make the build hermetic — same faces,
+// same --font-geist-* variables, zero network dependency.
+const geistSans = localFont({
+  src: "./fonts/Geist-Variable.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/GeistMono-Variable.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
