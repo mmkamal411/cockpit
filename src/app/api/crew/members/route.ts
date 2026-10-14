@@ -18,7 +18,7 @@ export async function GET() {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("crew_members")
-    .select("id, name, birthdate, relationship, created_at")
+    .select("id, name, birthdate, relationship, sync_preferences, created_at")
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -84,6 +84,7 @@ export async function GET() {
     members.push({
       ...g,
       via_grant: true,
+      sync_preferences: null,
       school_sync: { sync_status: "linked", last_synced_at: null },
     });
   }
@@ -95,6 +96,46 @@ interface AddMemberBody {
   name?: string;
   birthdate?: string;
   relationship?: string;
+  sync_preferences?: Record<string, boolean>;
+}
+
+/** Relationships the picker offers. School-specific logic keys on "child". */
+const RELATIONSHIPS = ["child", "spouse", "parent", "other"] as const;
+
+/** Sync-preference keys the UI offers (step 3 toggles). */
+const SYNC_PREF_KEYS = ["Grades", "Attendance", "Assignments", "School messages"] as const;
+
+/**
+ * Birthdate sanity bounds: not in the future, not more than 25 years past.
+ * Returns a plain-English error, or null when the date is fine.
+ */
+export function validateBirthdate(birthdate: string): string | null {
+  const parsed = new Date(birthdate);
+  if (Number.isNaN(parsed.getTime())) {
+    return "That birthdate doesn't look right. Try YYYY-MM-DD.";
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (parsed > today) {
+    return "That birthdate is in the future — check the year and try again.";
+  }
+  const oldest = new Date(today);
+  oldest.setFullYear(oldest.getFullYear() - 25);
+  if (parsed < oldest) {
+    return "That birthdate is more than 25 years ago — check the year and try again.";
+  }
+  return null;
+}
+
+/** Keep only known sync-preference keys; drop anything unexpected. */
+function sanitizeSyncPrefs(input: unknown): Record<string, boolean> {
+  if (!input || typeof input !== "object") return {};
+  const out: Record<string, boolean> = {};
+  for (const key of SYNC_PREF_KEYS) {
+    const v = (input as Record<string, unknown>)[key];
+    if (typeof v === "boolean") out[key] = v;
+  }
+  return out;
 }
 
 /**
@@ -132,11 +173,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Validate the birthdate parses as a real date.
-  const parsed = new Date(body.birthdate);
-  if (Number.isNaN(parsed.getTime())) {
+  // Validate the birthdate parses as a real date and is sane.
+  const birthdateError = validateBirthdate(body.birthdate);
+  if (birthdateError) {
+    return NextResponse.json({ error: birthdateError }, { status: 400 });
+  }
+
+  const relationship = (body.relationship ?? "child").trim().toLowerCase();
+  if (!(RELATIONSHIPS as readonly string[]).includes(relationship)) {
     return NextResponse.json(
-      { error: "That birthdate doesn't look right. Try YYYY-MM-DD." },
+      { error: "Pick who they're joining as — child, spouse, parent, or other." },
       { status: 400 },
     );
   }
@@ -148,9 +194,10 @@ export async function POST(request: NextRequest) {
       pilot_id: pilotId,
       name,
       birthdate: body.birthdate,
-      relationship: body.relationship?.trim() || "child",
+      relationship,
+      sync_preferences: sanitizeSyncPrefs(body.sync_preferences),
     })
-    .select("id, name, birthdate, relationship, created_at")
+    .select("id, name, birthdate, relationship, sync_preferences, created_at")
     .single();
 
   if (error) {

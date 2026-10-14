@@ -77,7 +77,7 @@ export async function fetchSourcePage(url: string): Promise<FetchSourceResult> {
       return {
         ok: false,
         error:
-          "That link doesn't open a web page (it looks like a file). Save the link to the school's calendar or bell schedule web page instead.",
+          "That link doesn't open a web page (it looks like a file). Upload the file directly below instead — a photo or PDF works.",
       };
     }
     const text = await res.text();

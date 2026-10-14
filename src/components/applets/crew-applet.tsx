@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { openApplet } from "@/lib/applet-bus";
+import { invalidateCrewRoster } from "@/lib/use-crew-roster";
 
 import { ClassDetail } from "./class-detail";
 import { DistrictCalendar } from "./district-calendar";
@@ -27,6 +28,14 @@ import {
 
 const SYNC_OPTIONS = ["Grades", "Attendance", "Assignments", "School messages"];
 
+/** Relationship options for step 1. School-specific logic keys on "child". */
+const RELATIONSHIP_OPTIONS = [
+  { value: "child", label: "Child" },
+  { value: "spouse", label: "Spouse" },
+  { value: "parent", label: "Parent" },
+  { value: "other", label: "Other" },
+] as const;
+
 type Step = 1 | 2 | 3;
 
 interface CrewMemberRow {
@@ -34,6 +43,7 @@ interface CrewMemberRow {
   name: string;
   birthdate: string | null;
   relationship: string;
+  sync_preferences?: Record<string, boolean> | null;
   created_at: string;
   /** True when this profile is linked to the pilot through someone else's
    *  live access grant (e.g. a child who claimed a steward's link code).
@@ -205,18 +215,17 @@ function syncStatusText(m: CrewMemberRow): { text: string; tone: "ok" | "warn" |
 }
 
 /**
- * Crew — the opt-in family module. Adding a child is entirely optional and
- * lives here, never in onboarding. Three steps: who they are, their school
- * login, what to keep in sync. Crew members are stored in Supabase
+ * Crew — the opt-in family module. Adding a crew member is entirely optional
+ * and lives here, never in onboarding. Three steps: who they are, their
+ * school sources, what to keep in sync. Crew members are stored in Supabase
  * (crew_members table), keyed by UUID — never by name.
  */
 export function CrewApplet() {
   const [step, setStep] = useState<Step>(1);
   const [name, setName] = useState("");
   const [birthdate, setBirthdate] = useState("");
+  const [relationship, setRelationship] = useState<string>("child");
   const [district, setDistrict] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [sync, setSync] = useState<string[]>(["Grades", "Assignments"]);
   const [added, setAdded] = useState<CrewMemberRow | null>(null);
   // Optional school calendar + bell schedules captured in step 2.
@@ -286,6 +295,9 @@ export function CrewApplet() {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
+  // Sync-preference toggles in member detail: persisted via PATCH.
+  const [prefsSaving, setPrefsSaving] = useState(false);
+  const [prefsError, setPrefsError] = useState("");
   // Link-code claim (the child's half): enter a 6-digit code minted by a
   // steward to link their crew profile to this pilot.
   const [claimCode, setClaimCode] = useState("");
@@ -385,13 +397,31 @@ export function CrewApplet() {
       setError("Add a birthdate — it helps Crystal get the details right.");
       return;
     }
+    // Sanity bounds: not in the future, not more than 25 years past.
+    const parsed = new Date(birthdate);
+    if (Number.isNaN(parsed.getTime())) {
+      setError("That birthdate doesn't look right — check it and try again.");
+      return;
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (parsed > today) {
+      setError("That birthdate is in the future — check the year and try again.");
+      return;
+    }
+    const oldest = new Date(today);
+    oldest.setFullYear(oldest.getFullYear() - 25);
+    if (parsed < oldest) {
+      setError("That birthdate is more than 25 years ago — check the year and try again.");
+      return;
+    }
     setError("");
     setStep(2);
   }
 
   function nextFromSchool() {
-    // School login is optional — the desktop sync installer handles
-    // credentials later. Advance to step 3 regardless of field state.
+    // Step 2 holds district + calendar/bell links only — credentials are
+    // never collected here. Advance regardless of field state.
     setError("");
     setStep(3);
   }
@@ -400,15 +430,30 @@ export function CrewApplet() {
     setSaving(true);
     setError("");
     try {
+      // The step-3 toggles are persisted as the member's sync preferences —
+      // they drive what the school sync collects, not just the confirmation
+      // sentence. School watch only applies to students.
+      const sync_preferences: Record<string, boolean> = {};
+      if (relationship === "child") {
+        for (const option of SYNC_OPTIONS) sync_preferences[option] = sync.includes(option);
+      }
       const res = await fetch("/api/crew/members", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), birthdate, relationship: "child" }),
+        body: JSON.stringify({
+          name: name.trim(),
+          birthdate,
+          relationship,
+          sync_preferences,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "save failed");
       const member: CrewMemberRow = json.member;
       setRoster((prev) => [...prev, member]);
+      // Bust the shared roster cache so the School tab and gated
+      // subcategories appear immediately — no reload needed.
+      invalidateCrewRoster();
       setAdded(member);
       setSourcesNote("");
       setIntakeChecks([]);
@@ -448,9 +493,9 @@ export function CrewApplet() {
           setIntakeRunning(false);
         }
       }
-      // NOTE: school credentials (district/username/password) are NOT sent
-      // to the server here. The desktop sync installer handles credential
-      // capture into the OS keychain. This flow records the roster only.
+      // NOTE: school portal credentials are never collected here. The
+      // desktop sync installer handles credential capture into the OS
+      // keychain. This flow records the roster only.
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Couldn't add them right now. Try again.",
@@ -920,9 +965,8 @@ export function CrewApplet() {
     setStep(1);
     setName("");
     setBirthdate("");
+    setRelationship("child");
     setDistrict("");
-    setUsername("");
-    setPassword("");
     setSync(["Grades", "Assignments"]);
     setNewCalendarUrl("");
     setNewBellRows([{ label: "Daily", url: "" }]);
@@ -1018,6 +1062,9 @@ export function CrewApplet() {
         ok: true,
         text: "Linked. Opening their school life…",
       });
+      // A claimed profile is a new roster member for the toolbar's
+      // benefit too — bust the shared cache.
+      invalidateCrewRoster();
       await refreshRoster();
       if (member?.id) openMemberDetail(member.id);
     } catch {
@@ -1611,11 +1658,47 @@ export function CrewApplet() {
         return;
       }
       setRoster((prev) => prev.filter((m) => m.id !== memberId));
+      // Bust the shared roster cache so the School tab hides immediately
+      // when the last child is removed — no reload needed.
+      invalidateCrewRoster();
       closeMemberDetail();
     } catch {
       setRemoveError("We couldn't reach the server. Check your connection and try again.");
     } finally {
       setRemoving(false);
+    }
+  }
+
+  /**
+   * Toggle one "what Crystal watches" preference for a member. Persists
+   * immediately via PATCH — the toggles are real settings, not decoration.
+   */
+  async function toggleSyncPref(memberId: string, option: string) {
+    const current = roster.find((m) => m.id === memberId);
+    if (!current || prefsSaving) return;
+    const next: Record<string, boolean> = {};
+    for (const key of SYNC_OPTIONS) {
+      next[key] = key === option
+        ? !((current.sync_preferences?.[key] ?? false) === true)
+        : ((current.sync_preferences?.[key] ?? false) === true);
+    }
+    setPrefsSaving(true);
+    setPrefsError("");
+    try {
+      const res = await fetch(`/api/crew/members/${memberId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_preferences: next }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "save failed");
+      setRoster((prev) =>
+        prev.map((m) => (m.id === memberId ? { ...m, sync_preferences: next } : m)),
+      );
+    } catch {
+      setPrefsError("Couldn't save that change. Try again.");
+    } finally {
+      setPrefsSaving(false);
     }
   }
 
@@ -1701,6 +1784,10 @@ export function CrewApplet() {
     const status = syncStatusText(member);
     const attention = needsAttention(member);
     const gpaPick = pickGpa(gpa);
+    // School-specific sections (sync, classes, attendance, messages,
+    // calendar) only make sense for students. A spouse/parent/other gets
+    // the profile without school surfaces.
+    const isStudent = member.relationship === "child";
     const dotColor =
       status.tone === "ok"
         ? "bg-neon-green"
@@ -1772,6 +1859,10 @@ export function CrewApplet() {
           </div>
         )}
 
+        {/* School sections — students only. A spouse, parent, or other
+            crew member has no school sync, classes, or attendance. */}
+        {isStudent && (
+        <>
         {/* School sync status */}
         <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
           <div className="flex items-center justify-between">
@@ -2625,6 +2716,55 @@ export function CrewApplet() {
           )}
         </div>
 
+        </>
+        )}
+
+        {/* What Crystal watches — the member's saved sync preferences,
+            editable. Students only: the options are school-scoped. */}
+        {isStudent && !member.via_grant && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-dim">
+            What Crystal watches
+          </p>
+          <div className="space-y-2">
+            {SYNC_OPTIONS.map((option) => {
+              const on = (member.sync_preferences?.[option] ?? false) === true;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => void toggleSyncPref(member.id, option)}
+                  aria-pressed={on}
+                  disabled={prefsSaving}
+                  className={`flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left text-sm transition-colors disabled:opacity-50 ${
+                    on
+                      ? "border-neon-green/40 bg-neon-green/10 text-star"
+                      : "border-line bg-panel-2/60 text-stardust hover:border-neon-green/25"
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-5 w-5 items-center justify-center rounded-md border transition-colors ${
+                      on
+                        ? "border-neon-green bg-neon-green/25 text-neon-green"
+                        : "border-dim/60 text-transparent"
+                    }`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 12.5l5 5L20 6.5" />
+                    </svg>
+                  </span>
+                  {option}
+                </button>
+              );
+            })}
+          </div>
+          {prefsError && (
+            <p role="alert" className="text-xs text-neon-amber">{prefsError}</p>
+          )}
+        </div>
+        )}
+
         {/* Manage — link code + remove. Steward only: a linked family member
             can't mint codes or remove the profile. */}
         {!member.via_grant && (
@@ -2775,11 +2915,15 @@ export function CrewApplet() {
         <div>
           <h2 className="text-xl font-semibold text-star">{added.name} is aboard</h2>
           <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-stardust">
-            {added.name}&apos;s crew profile is saved to your cockpit. School sync
-            will pick up{" "}
-            {sync.length > 0 ? sync.join(", ").toLowerCase() : "nothing yet"}
-            {district ? ` from ${district}` : ""} once the school connection is
-            switched on.
+            {added.name}&apos;s crew profile is saved to your cockpit.
+            {added.relationship === "child" && (
+              <>
+                {" "}School sync will pick up{" "}
+                {sync.length > 0 ? sync.join(", ").toLowerCase() : "nothing yet"}
+                {district ? ` from ${district}` : ""} once the school connection
+                is switched on.
+              </>
+            )}
           </p>
         </div>
         {sourcesNote && (
@@ -2985,12 +3129,12 @@ export function CrewApplet() {
           {step === 1
             ? "Who's joining your crew?"
             : step === 2
-              ? "School login"
+              ? "School sources"
               : "What should Crystal watch?"}
         </h2>
         <p className="mt-1 text-sm text-stardust">
           {step === 1 && "Just the basics — Crystal handles the rest."}
-          {step === 2 && "Their school portal login, so grades and assignments can sync."}
+          {step === 2 && "District, calendar, and bell schedules. Logins connect later through the desktop app."}
           {step === 3 && "Pick what Crystal keeps an eye on for them."}
         </p>
       </div>
@@ -3127,6 +3271,32 @@ export function CrewApplet() {
               className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star focus:border-neon-green/60 focus:outline-none"
             />
           </label>
+          <div>
+            <span className="mb-1 block text-xs font-medium text-stardust">
+              Who&apos;s joining?
+            </span>
+            <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Relationship">
+              {RELATIONSHIP_OPTIONS.map((opt) => {
+                const selected = relationship === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setRelationship(opt.value)}
+                    className={`rounded-xl border px-3 py-2.5 text-sm transition-colors ${
+                      selected
+                        ? "border-neon-green/60 bg-neon-green/15 font-medium text-star"
+                        : "border-line bg-panel-2/60 text-stardust hover:border-neon-green/30 hover:text-star"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -3175,40 +3345,19 @@ export function CrewApplet() {
               />
             </div>
           </div>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-stardust">
-              Student portal username
-            </span>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Student username or ID"
-              autoComplete="off"
-              className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-stardust">
-              Student portal password
-            </span>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Portal password"
-              autoComplete="new-password"
-              className="w-full rounded-xl border border-line bg-panel-2 px-4 py-2.5 text-sm text-star placeholder:text-dim focus:border-neon-green/60 focus:outline-none"
-            />
-          </label>
-          <p className="text-xs leading-relaxed text-dim">
-            Use the desktop sync installer to connect school logins securely —
-            passwords stay in your computer&apos;s keychain and never reach our
-            servers. You can also skip this and connect later.
-          </p>
+          <div className="rounded-xl border border-neon-teal/30 bg-neon-teal/[0.06] px-4 py-3">
+            <p className="text-sm font-medium text-star">Connect their school login</p>
+            <p className="mt-1 text-xs leading-relaxed text-stardust">
+              School logins connect through the desktop sync app — the username
+              and password stay in your computer&apos;s keychain and never
+              reach our servers. You can set this up right after adding them;
+              nothing here will ask for a password.
+            </p>
+          </div>
         </div>
       )}
 
-      {step === 3 && (
+      {step === 3 && relationship === "child" && (
         <div className="space-y-2">
           {SYNC_OPTIONS.map((option) => {
             const on = sync.includes(option);
@@ -3249,6 +3398,16 @@ export function CrewApplet() {
               </button>
             );
           })}
+        </div>
+      )}
+
+      {step === 3 && relationship !== "child" && (
+        <div className="rounded-xl border border-line bg-panel-2/60 px-4 py-3">
+          <p className="text-sm leading-relaxed text-stardust">
+            School watch options are for students — {name.trim() || "they're"}{" "}
+            joining as your {relationship}, so there&apos;s nothing to tune
+            here. You&apos;re all set.
+          </p>
         </div>
       )}
 
