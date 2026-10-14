@@ -9,6 +9,10 @@ export interface StationSubcategory {
   /** Target applet id, or null when the module isn't built yet. */
   appletId: string | null;
   params?: AppletParams;
+  /** Only rendered when the pilot has ≥1 linked child. Lets the parent
+      category stay visible (so the add-child path is reachable) while
+      child-specific entries stay hidden for childless pilots. */
+  childrenOnly?: boolean;
   /** Honest "why not yet" copy for null-applet entries — never blank. */
   soonNote?: string;
 }
@@ -104,9 +108,12 @@ export const STATION_CATEGORIES: StationCategory[] = [
     id: "family-school",
     label: "Family & School",
     glow: "#86efac",
-    childrenOnly: true,
+    // NOTE: the category itself is NEVER childrenOnly — it holds the only
+    // add-a-child path (Family settings → Crew applet). Hiding it until a
+    // child exists makes the first child un-addable (catch-22, 2026-10-13).
+    // Child-specific entries are gated individually below instead.
     subcategories: [
-      { id: "school-station", label: "School station", blurb: "Grades, today's mission, and school life.", appletId: "school" },
+      { id: "school-station", label: "School station", blurb: "Grades, today's mission, and school life.", appletId: "school", childrenOnly: true },
       { id: "family", label: "Family settings", blurb: "Your crew, school logins, and sync.", appletId: "crew" },
       {
         id: "sharing",
@@ -115,7 +122,7 @@ export const STATION_CATEGORIES: StationCategory[] = [
         appletId: null,
         soonNote: "The Sharing screen arrives with the next build — who can see what, and your say over it, will live here. You can already manage your crew under Family settings.",
       },
-      { id: "sync", label: "Sync", blurb: "School connections and last-synced times.", appletId: "crew" },
+      { id: "sync", label: "Sync", blurb: "School connections and last-synced times.", appletId: "crew", childrenOnly: true },
     ],
   },
   {

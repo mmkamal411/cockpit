@@ -253,6 +253,13 @@ export function HomeStations() {
 
 export function StationCategoryOverlay({ params }: { params: AppletParams }) {
   const category = getCategory(params.category);
+  const { members, loading: rosterLoading } = useCrewRoster();
+  const hasChildren = !rosterLoading && members.length > 0;
+  // Child-specific entries stay hidden for childless pilots (user-first),
+  // but the category itself is always reachable so the add-child path works.
+  const visibleSubs = (category?.subcategories ?? []).filter(
+    (s) => !s.childrenOnly || hasChildren,
+  );
 
   if (!category) {
     return (
@@ -334,7 +341,7 @@ export function StationCategoryOverlay({ params }: { params: AppletParams }) {
       </div>
 
       <ul className="space-y-2">
-        {category.subcategories.map((s) => (
+        {visibleSubs.map((s) => (
           <li key={s.id}>
             <button
               type="button"
