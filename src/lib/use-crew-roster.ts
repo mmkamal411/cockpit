@@ -19,6 +19,16 @@ interface RosterState {
 // (does the pilot have linked children?), so they share one fetch.
 let inflight: Promise<CrewRosterMember[]> | null = null;
 
+/**
+ * Clear the shared in-flight roster cache. Call this after any action that
+ * changes crew membership (add/remove a child, claim a link code) so every
+ * toolbar variant and station re-fetches on next render instead of serving
+ * the stale module-level cache.
+ */
+export function invalidateCrewRoster(): void {
+  inflight = null;
+}
+
 function fetchRoster(): Promise<CrewRosterMember[]> {
   if (!inflight) {
     inflight = (async () => {
