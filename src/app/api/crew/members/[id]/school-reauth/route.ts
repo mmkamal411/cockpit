@@ -29,9 +29,37 @@ import { encryptToken } from "@/lib/token-crypto";
 const PARENTVUE_HOST = "parentvue.cobbk12.org";
 const LOGIN_URL = `https://${PARENTVUE_HOST}/api/v1/mobile/PXPWebServices/AttemptLogin`;
 
-interface AttemptLoginResult {
-  ok: boolean;
-  authFailed: boolean;
+// NOTE (verified 2026-10-13): an unauthenticated probe of the mobile
+// AttemptLogin endpoint returns HTTP 401 in ~1s, so the endpoint IS alive.
+// Persistent "couldn't confirm" (indeterminate) results with known-good
+// credentials likely mean the token ENVELOPE shape changed on the school
+// side — see the shape-logging in the indeterminate branch below, which
+// records only top-level keys (never values, never the password).
+
+/**
+ * Three outcomes — deliberately NOT a boolean:
+ * - ok: a token was found in the response envelope. The login is valid.
+ * - authFailed: the server explicitly rejected the credentials (HTTP 401,
+ *   or an envelope with an explicit error field).
+ * - indeterminate: anything else — 200 without a recognizable token,
+ *   unexpected shape, network error, timeout. The credentials MAY be fine;
+ *   we just couldn't confirm them. Never retry (account lockout risk).
+ */
+type AttemptLoginResult =
+  | { ok: true }
+  | { ok: false; kind: "auth_failed" }
+  | { ok: false; kind: "indeterminate" };
+
+interface ParsedEnvelope {
+  keys: string[]; // top-level keys only — never values
+}
+
+function shapeOf(parsed: unknown): ParsedEnvelope {
+  const keys =
+    parsed && typeof parsed === "object"
+      ? Object.keys(parsed as Record<string, unknown>)
+      : [];
+  return { keys };
 }
 
 async function testParentVue(username: string, password: string): Promise<AttemptLoginResult> {
@@ -49,11 +77,11 @@ async function testParentVue(username: string, password: string): Promise<Attemp
       body: JSON.stringify({ arguments: { request: JSON.stringify({ userID: null }) } }),
       signal: controller.signal,
     });
-    if (res.status === 401) return { ok: false, authFailed: true };
-    if (!res.ok) return { ok: false, authFailed: false };
+    if (res.status === 401) return { ok: false, kind: "auth_failed" };
+    if (!res.ok) return { ok: false, kind: "indeterminate" };
     const parsed = (await res.json()) as Record<string, unknown>;
     if (parsed && typeof parsed === "object" && parsed.error) {
-      return { ok: false, authFailed: true };
+      return { ok: false, kind: "auth_failed" };
     }
     // Look for a token anywhere in the envelope (top-level or nested).
     const hasToken = (o: unknown): boolean => {
@@ -67,9 +95,20 @@ async function testParentVue(username: string, password: string): Promise<Attemp
       }
       return false;
     };
-    return { ok: hasToken(parsed), authFailed: !hasToken(parsed) };
+    if (hasToken(parsed)) return { ok: true };
+    // 200 but no recognizable token: honest unknown, not a wrong password.
+    // Log only the response SHAPE (top-level keys) so a changed envelope
+    // can be diagnosed without ever storing values or credentials.
+    console.error(
+      JSON.stringify({
+        route: "POST /api/crew/members/[id]/school-reauth",
+        operation: "testParentVue indeterminate",
+        envelope_shape: shapeOf(parsed),
+      }),
+    );
+    return { ok: false, kind: "indeterminate" };
   } catch {
-    return { ok: false, authFailed: false };
+    return { ok: false, kind: "indeterminate" };
   } finally {
     clearTimeout(timeout);
   }
@@ -118,10 +157,14 @@ export async function POST(
   const result = await testParentVue(username, password);
 
   if (!result.ok) {
-    const message = result.authFailed
-      ? "That login didn't work — the username or password didn't match. Check for typos (capital letters matter), or use the school's \"Forgot password\" link, then try again."
-      : "We couldn't reach the school portal right now. Check your internet connection and try again in a few minutes.";
-    return NextResponse.json({ error: message }, { status: result.authFailed ? 401 : 502 });
+    const message =
+      result.kind === "auth_failed"
+        ? "That login didn't work — the username or password didn't match. Check for typos (capital letters matter), or use the school's \"Forgot password\" link, then try again."
+        : "We couldn't confirm that login with the school portal right now — your password may be fine. Try again in a few minutes.";
+    return NextResponse.json(
+      { error: message },
+      { status: result.kind === "auth_failed" ? 401 : 502 },
+    );
   }
 
   // Credentials are good. Encrypt and queue for the vault-sync process.
