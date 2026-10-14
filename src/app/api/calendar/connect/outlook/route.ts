@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 const MICROSOFT_AUTH_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
-const SCOPE = "Calendars.ReadWrite offline_access openid profile email";
+const SCOPE = "Calendars.ReadWrite Mail.Read offline_access openid profile email";
 // Azure app registrations require an exact redirect-URI match, so the
 // default is the canonical production URL (not the request origin).
 const DEFAULT_REDIRECT_URI = "https://cockpit-10c.pages.dev/api/calendar/callback/outlook";

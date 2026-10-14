@@ -9,7 +9,11 @@
     "lint": "eslint",
     "postinstall": "patch-package",
     "test:producers": "esbuild src/lib/nudges/producers/producers.test.ts --bundle --platform=node --format=esm --outfile=/tmp/cockpit-producers.test.mjs --log-level=error && node /tmp/cockpit-producers.test.mjs",
+<<<<<<< HEAD
     "test": "node src/lib/bills/logic.test.ts && node src/lib/bill-scan.test.ts && node src/lib/health/glucose.test.ts && node src/lib/chat/mode.test.ts && node src/lib/chat/sse.test.ts && node src/lib/nudges/engine.test.ts && node src/lib/subscriptions/logic.test.ts && node src/lib/auth/ensure-pilot.test.ts && node src/lib/recurrence.test.ts && node src/lib/parse-todo.test.ts && esbuild src/lib/nudges/producers/producers.test.ts --bundle --platform=node --format=esm --outfile=/tmp/cockpit-producers.test.mjs --log-level=error && node /tmp/cockpit-producers.test.mjs && node src/lib/sync-review.test.ts"
+=======
+    "test": "node src/lib/bills/logic.test.ts && node src/lib/bill-scan.test.ts && node src/lib/health/glucose.test.ts && node src/lib/chat/mode.test.ts && node src/lib/chat/sse.test.ts && node src/lib/nudges/engine.test.ts && node src/lib/subscriptions/logic.test.ts && node src/lib/auth/ensure-pilot.test.ts && node src/lib/recurrence.test.ts && node src/lib/parse-todo.test.ts && node src/lib/graph-mail.test.ts && esbuild src/lib/nudges/producers/producers.test.ts --bundle --platform=node --format=esm --outfile=/tmp/cockpit-producers.test.mjs --log-level=error && node /tmp/cockpit-producers.test.mjs"
+>>>>>>> 8a17e49 (Graph mail sync: Mail.Read scope + school-email sync engine)
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.10",

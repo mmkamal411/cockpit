@@ -36,7 +36,7 @@ import {
 
 const TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-const TOKEN_SCOPE = "Calendars.ReadWrite offline_access openid profile email";
+const TOKEN_SCOPE = "Calendars.ReadWrite Mail.Read offline_access openid profile email";
 
 const GRAPH_FETCH_HEADERS = {
   Prefer: 'outlook.timezone="UTC"',

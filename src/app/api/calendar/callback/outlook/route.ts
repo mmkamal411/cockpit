@@ -6,6 +6,8 @@ import { encryptToken } from "@/lib/token-crypto";
 const TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const GRAPH_ME_URL = "https://graph.microsoft.com/v1.0/me";
 const DEFAULT_REDIRECT_URI = "https://cockpit-10c.pages.dev/api/calendar/callback/outlook";
+// Must match the scope requested in /api/calendar/connect/outlook.
+const SCOPE_REQUESTED = "Calendars.ReadWrite Mail.Read offline_access openid profile email";
 
 type PendingCookie = { name: string; value: string; options?: object };
 
@@ -103,6 +105,14 @@ export async function GET(req: NextRequest) {
     const me = meRes.ok ? await meRes.json() : {};
     const email = ((me.mail as string | null) ?? (me.userPrincipalName as string | null) ?? null);
 
+    // Persist the granted scopes: the mail sync flags connections whose
+    // grant predates Mail.Read as needs_reconsent. Microsoft echoes the
+    // granted scopes in the token response; fall back to what we asked for.
+    const grantedScopes =
+      typeof tokens.scope === "string" && tokens.scope.trim()
+        ? tokens.scope.trim().split(/\s+/)
+        : SCOPE_REQUESTED.split(/\s+/);
+
     const { data: conn, error: connErr } = await supabase
       .from("calendar_connections")
       .upsert(
@@ -111,6 +121,7 @@ export async function GET(req: NextRequest) {
           provider: "outlook",
           provider_account_email: email,
           refresh_token_enc: refreshTokenEnc,
+          granted_scopes: grantedScopes,
           status: "active",
           last_synced_at: null,
         },

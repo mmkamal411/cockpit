@@ -12,6 +12,11 @@ interface CalendarConnection {
   status: string;
   last_synced_at: string | null;
   last_sync_error?: string | null;
+  mail?: {
+    state: "synced" | "never_synced" | "needs_reconsent";
+    last_synced_at: string | null;
+    needs_reconnect: boolean;
+  } | null;
 }
 
 function providerLabel(provider: string): string {
@@ -147,6 +152,8 @@ function ConnectedAccounts({
 }) {
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [mailSyncing, setMailSyncing] = useState(false);
+  const [mailNote, setMailNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function disconnect(id: string) {
@@ -160,6 +167,36 @@ function ConnectedAccounts({
       setError("Couldn\u2019t disconnect that account — try again in a bit.");
     } finally {
       setDisconnectingId(null);
+    }
+  }
+
+  async function syncMail() {
+    setMailSyncing(true);
+    setMailNote(null);
+    try {
+      const r = await fetch("/api/mail/sync/outlook", { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error ?? `mail sync ${r.status}`);
+      const first = Array.isArray(d.results) && d.results.length > 0 ? d.results[0] : null;
+      if (first?.outcome === "needs_reconsent") {
+        setMailNote(first.message ?? "Reconnect your Outlook account and approve email access.");
+      } else if (first?.outcome === "permission_missing") {
+        setMailNote(first.message ?? "Email permission isn't granted yet.");
+      } else if (first && first.outcome !== "synced") {
+        setMailNote(first.message ?? "Couldn't sync school mail right now.");
+      } else {
+        const n = typeof d.synced_emails === "number" ? d.synced_emails : 0;
+        setMailNote(n === 1 ? "School mail is up to date — 1 email." : `School mail is up to date — ${n} emails.`);
+      }
+      onChanged();
+    } catch (e) {
+      setMailNote(
+        e instanceof Error && e.message
+          ? e.message
+          : "Couldn't sync school mail right now — try again in a bit.",
+      );
+    } finally {
+      setMailSyncing(false);
     }
   }
 
@@ -224,21 +261,54 @@ function ConnectedAccounts({
                 <p className="truncate text-xs text-dim">{c.provider_account_email}</p>
               )}
               <p className="mt-0.5 text-xs text-dim">{lastSyncedLabel(c.last_synced_at)}</p>
+              {c.provider === "outlook" && c.mail && (
+                <p className="mt-0.5 text-xs text-dim">
+                  School mail:{" "}
+                  {c.mail.state === "synced"
+                    ? lastSyncedLabel(c.mail.last_synced_at)
+                    : c.mail.state === "needs_reconsent"
+                      ? "needs a fresh permission"
+                      : "not synced yet"}
+                  {c.mail.needs_reconnect && (
+                    <>
+                      {" — "}
+                      <a href="/api/calendar/connect/outlook" className="underline hover:text-star">
+                        reconnect to enable
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
               {c.last_sync_error && (
                 <p className="mt-0.5 text-xs text-neon-amber">{c.last_sync_error}</p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => disconnect(c.id)}
-              disabled={disconnectingId === c.id}
-              className="shrink-0 rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-xs text-stardust hover:text-star disabled:opacity-50"
-            >
-              {disconnectingId === c.id ? "Removing…" : "Disconnect"}
-            </button>
+            <div className="flex shrink-0 flex-col items-end gap-1.5">
+              {c.provider === "outlook" && (
+                <button
+                  type="button"
+                  onClick={syncMail}
+                  disabled={mailSyncing}
+                  className="rounded-lg border border-neon-cyan/40 bg-neon-cyan/10 px-3 py-1.5 text-xs text-neon-cyan hover:bg-neon-cyan/20 disabled:opacity-50"
+                >
+                  {mailSyncing ? "Syncing…" : "Sync mail"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => disconnect(c.id)}
+                disabled={disconnectingId === c.id}
+                className="rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-xs text-stardust hover:text-star disabled:opacity-50"
+              >
+                {disconnectingId === c.id ? "Removing…" : "Disconnect"}
+              </button>
+            </div>
           </li>
         ))}
       </ul>
+      {mailNote && (
+        <p role="status" className="mt-2 text-xs text-stardust">{mailNote}</p>
+      )}
       {error && (
         <p role="alert" className="mt-2 text-xs text-neon-amber">{error}</p>
       )}
