@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
-import { useHasLinkedChildren } from "@/lib/use-crew-roster";
 import { SchoolGlyph } from "./school-glyph";
 import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 
@@ -63,7 +62,6 @@ interface Station {
 export function ToolbarHologlass() {
   const router = useRouter();
   const { open } = useAppletBus();
-  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
@@ -77,15 +75,11 @@ export function ToolbarHologlass() {
     { id: "today", label: "Today", glyph: <TodayGlyph /> },
     { id: "crystal", label: "Crystal", glyph: <ChatGlyph /> },
     { id: "progress", label: "Progress", glyph: <ProgressGlyph /> },
-    ...(showSchool
-      ? [
-          {
-            id: "school" as const,
-            label: "School",
-            glyph: <SchoolGlyph size={19} strokeWidth={1.9} />,
-          },
-        ]
-      : []),
+    {
+      id: "school" as const,
+      label: "School",
+      glyph: <SchoolGlyph size={19} strokeWidth={1.9} />,
+    },
   ];
 
   function runStation(id: Station["id"]) {

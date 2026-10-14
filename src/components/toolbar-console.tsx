@@ -3,7 +3,6 @@
 import { Fragment } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
-import { useHasLinkedChildren } from "@/lib/use-crew-roster";
 import { SchoolGlyph } from "./school-glyph";
 import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 
@@ -66,7 +65,6 @@ export function ToolbarConsole() {
   const { open, minimized } = useAppletBus();
   // The School key renders iff the pilot has ≥1 linked child (D4: on child
   // add, not after first sync). Childless pilots see zero parenting pixels.
-  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
@@ -106,18 +104,14 @@ export function ToolbarConsole() {
       aria: "Open Progress",
       active: open?.id === "progress",
     },
-    ...(showSchool
-      ? [
-          {
-            id: "school",
-            label: "School",
-            glyph: <SchoolGlyph size={22} strokeWidth={1.5} />,
-            run: () => openApplet("school"),
-            aria: "Open School",
-            active: open?.id === "school",
-          },
-        ]
-      : []),
+    {
+      id: "school",
+      label: "School",
+      glyph: <SchoolGlyph size={22} strokeWidth={1.5} />,
+      run: () => openApplet("school"),
+      aria: "Open School",
+      active: open?.id === "school",
+    },
   ];
 
   return (

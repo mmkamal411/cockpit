@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
 import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 import { createClient } from "@/lib/supabase/client";
-import { useHasLinkedChildren } from "@/lib/use-crew-roster";
 import { SchoolGlyph } from "./school-glyph";
 
 /* Glyphs — same 24px line icons as the other variants. Icon + word label. */
@@ -252,7 +251,6 @@ export function ToolbarPanoramic() {
   // School renders iff the pilot has ≥1 linked child (D4) — zero parenting
   // pixels for childless pilots. More is dead: the 6 home-station buttons
   // are the module hub now.
-  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
@@ -287,19 +285,15 @@ export function ToolbarPanoramic() {
       active: open?.id === "progress",
       arc: "inner" as const,
     },
-    ...(showSchool
-      ? [
-          {
-            id: "school",
-            label: "School",
-            glyph: <SchoolGlyph size={22} strokeWidth={1.5} />,
-            run: () => openApplet("school"),
-            aria: "Open School",
-            active: open?.id === "school",
-            arc: "outer" as const,
-          },
-        ]
-      : []),
+    {
+      id: "school",
+      label: "School",
+      glyph: <SchoolGlyph size={22} strokeWidth={1.5} />,
+      run: () => openApplet("school"),
+      aria: "Open School",
+      active: open?.id === "school",
+      arc: "outer" as const,
+    },
   ];
 
   const crystalActive = open?.id === "crystal";

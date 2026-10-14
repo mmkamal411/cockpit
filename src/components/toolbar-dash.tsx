@@ -3,7 +3,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
-import { useHasLinkedChildren } from "@/lib/use-crew-roster";
 import { SchoolGlyph } from "./school-glyph";
 import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 
@@ -58,25 +57,22 @@ interface DashStation {
  * - nav px-2 leaves 304px at a 320px viewport → no overflow either way.
  * - Tilts and lifts are pure transforms (never affect layout), and the SVG
  *   arch uses preserveAspectRatio="none", so the arc cannot break at any width.
- * The School key (right flank) renders only when the pilot has a linked child.
+ * The School key (right flank) always renders — the school station handles
+ * the childless empty state.
  */
-function buildStations(showSchool: boolean): DashStation[] {
+function buildStations(): DashStation[] {
   return [
     { id: "home", label: "Home", glyph: <HomeGlyph />, tilt: "-3deg", lift: "6px", accent: "#eef6fa" },
     { id: "today", label: "Today", glyph: <TodayGlyph />, tilt: "-1.5deg", lift: "2.5px", accent: "#22d3ee" },
     { id: "progress", label: "Progress", glyph: <ProgressGlyph />, tilt: "1.5deg", lift: "2.5px", accent: "#34d399" },
-    ...(showSchool
-      ? [
-          {
-            id: "school" as const,
-            label: "School",
-            glyph: <SchoolGlyph size={19} strokeWidth={1.9} />,
-            tilt: "3deg",
-            lift: "6px",
-            accent: "#86efac",
-          },
-        ]
-      : []),
+    {
+      id: "school" as const,
+      label: "School",
+      glyph: <SchoolGlyph size={19} strokeWidth={1.9} />,
+      tilt: "3deg",
+      lift: "6px",
+      accent: "#86efac",
+    },
   ];
 }
 
@@ -94,14 +90,13 @@ function buildStations(showSchool: boolean): DashStation[] {
 export function ToolbarDash() {
   const router = useRouter();
   const { open } = useAppletBus();
-  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
     router.push("/home");
   }
 
-  const STATIONS = buildStations(showSchool);
+  const STATIONS = buildStations();
 
   // Chrome-only active state: whichever applet is open (home when none).
   const activeId = (open?.id as StationId | undefined) ?? "home";

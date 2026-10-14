@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet } from "@/lib/applet-bus";
-import { useHasLinkedChildren } from "@/lib/use-crew-roster";
 import { SchoolGlyph } from "./school-glyph";
 import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
 
@@ -51,7 +50,6 @@ function ProgressGlyph() {
  */
 export function ToolbarLegacy() {
   const router = useRouter();
-  const showSchool = useHasLinkedChildren();
 
   function goHome() {
     closeAllApplets();
@@ -62,15 +60,11 @@ export function ToolbarLegacy() {
     { label: "Today", glyph: <TodayGlyph />, run: () => openApplet("today") },
     { label: "Crystal", glyph: <ChatGlyph />, run: () => openApplet("crystal") },
     { label: "Progress", glyph: <ProgressGlyph />, run: () => openApplet("progress") },
-    ...(showSchool
-      ? [
-          {
-            label: "School",
-            glyph: <SchoolGlyph size={19} strokeWidth={1.9} />,
-            run: () => openApplet("school"),
-          },
-        ]
-      : []),
+    {
+      label: "School",
+      glyph: <SchoolGlyph size={19} strokeWidth={1.9} />,
+      run: () => openApplet("school"),
+    },
   ];
 
   return (
