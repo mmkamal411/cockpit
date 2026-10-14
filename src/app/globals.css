@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/* Cockpit design tokens — dark command deck.
+   Panels live in #05080a–#141a1f. No navy, no gray panels, no light themes. */
+@theme {
+  --color-abyss: #04070a;
+  --color-panel: #05080a;
+  --color-panel-2: #0b1116;
+  --color-panel-3: #141a1f;
+  --color-line: rgb(255 255 255 / 0.1);
+
+  --color-neon-cyan: #67e8f9;
+  --color-neon-teal: #5eead4;
+  --color-neon-green: #86efac;
+  --color-neon-amber: #fcd34d;
+  --color-neon-purple: #c4b5fd;
+
+  --color-star: #eef6fa;
+  --color-stardust: #a7bcc7;
+  --color-dim: #6f8894;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-abyss);
+  color: var(--color-star);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgb(94 234 212 / 0.35);
+}
+
+/* Thin neon scrollbar for applet windows */
+.applet-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.applet-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.applet-scroll::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.14);
+  border-radius: 8px;
+}
+.applet-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(94 234 212 / 0.35);
+}

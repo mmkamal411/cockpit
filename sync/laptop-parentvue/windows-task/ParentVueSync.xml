@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  ParentVueSync — ParentVUE backup grade pull on the Windows laptop.
+  Runs hourly on school days (Mon-Fri, 6 AM - 10 PM ET).
+
+  Install (on the Windows laptop, admin PowerShell):
+    1. Copy this whole parentvue/ directory to C:\Users\muse\parentvue-sync\
+    2. Store credentials:
+         cmdkey /generic:cockpit-parentvue /user:<username> /pass:<password>
+       Then verify the CredentialManager PowerShell module is available:
+         Install-Module -Name CredentialManager -Force
+    3. Fill in parentvue-config.json
+    4. schtasks /create /tn "Cockpit ParentVueSync" /xml ParentVueSync.xml
+       (edit the XML first: replace C:\Users\REPLACE_ME with the real path)
+
+  To update: schtasks /delete /tn "Cockpit ParentVueSync" /f, then re-create.
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Cockpit ParentVUE backup grade pull (hourly, school days)</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-10-14T06:15:00</StartBoundary>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Users\REPLACE_ME\parentvue-sync\run-hourly.bat</Command>
+      <WorkingDirectory>C:\Users\REPLACE_ME\parentvue-sync</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

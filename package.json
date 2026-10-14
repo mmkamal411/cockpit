@@ -1,0 +1,35 @@
+{
+  "name": "cockpit",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "postinstall": "patch-package",
+    "test:producers": "esbuild src/lib/nudges/producers/producers.test.ts --bundle --platform=node --format=esm --outfile=/tmp/cockpit-producers.test.mjs --log-level=error && node /tmp/cockpit-producers.test.mjs",
+    "test": "node src/lib/bills/logic.test.ts && node src/lib/bill-scan.test.ts && node src/lib/health/glucose.test.ts && node src/lib/chat/mode.test.ts && node src/lib/chat/sse.test.ts && node src/lib/nudges/engine.test.ts && node src/lib/subscriptions/logic.test.ts && node src/lib/auth/ensure-pilot.test.ts && node src/lib/recurrence.test.ts && node src/lib/parse-todo.test.ts && node src/lib/graph-mail.test.ts && esbuild src/lib/nudges/producers/producers.test.ts --bundle --platform=node --format=esm --outfile=/tmp/cockpit-producers.test.mjs --log-level=error && node /tmp/cockpit-producers.test.mjs && node src/lib/sync-review.test.ts"
+  },
+  "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.10",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.3",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tesseract.js": "^7.0.0",
+    "wrangler": "^4.149.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.0",
+    "patch-package": "^8.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
