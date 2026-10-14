@@ -11,8 +11,8 @@ import { getPilotId, unauthorized } from "@/lib/crew/auth";
  * 036) burns the code and creates the child's own access grant. The caller
  * can never insert a grant under their own RLS, so the RPC does it.
  *
- * Contract: request { code }; response { ok: true, crew_member_id, already? }
- * or { error }. Every failure is plain English with a next step — never a
+ * Contract: request { code }; response { member: { id } } on success or
+ * { error }. Every failure is plain English with a next step — never a
  * 500, never a stack trace, and never a signal that distinguishes an
  * invalid / expired / used code (the code is a bearer token).
  */
@@ -116,12 +116,26 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json(
-    {
-      ok: true,
-      crew_member_id: result.crew_member_id,
-      already: result.already === true,
-    },
-    { status: 200 },
-  );
+  const crewMemberId =
+    typeof result.crew_member_id === "string" ? result.crew_member_id : null;
+  if (!crewMemberId) {
+    // Shouldn't happen (ok:true always carries crew_member_id), but if the
+    // RPC shape ever changes we must not send the UI a broken success.
+    console.error(
+      JSON.stringify({
+        route: "POST /api/crew/link-codes/claim",
+        operation: "rpc result shape",
+        error: "ok:true without crew_member_id",
+      }),
+    );
+    return NextResponse.json(
+      {
+        error:
+          "We couldn't confirm that link right now. Try the code again in a few minutes.",
+      },
+      { status: 503 },
+    );
+  }
+
+  return NextResponse.json({ member: { id: crewMemberId } }, { status: 200 });
 }
