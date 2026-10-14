@@ -148,7 +148,7 @@ function messageSourceLabel(source: "synergy" | "outlook"): string {
  * render honest "coming soon" notes — never "syncing", never blank.
  */
 export function SchoolStation() {
-  const { members, loading: rosterLoading } = useCrewRoster();
+  const { members, loading: rosterLoading, viewerIsFamilyMember } = useCrewRoster();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [dueNext, setDueNext] = useState<UpcomingItem[]>([]);
@@ -237,6 +237,22 @@ export function SchoolStation() {
   if (members.length === 0) {
     // Defensive — the School tab only renders with ≥1 linked child, but a
     // direct applet open shouldn't ever blank.
+    // Family members (children) never see "Add a child" — that's a
+    // steward-only action. They get a pointer to their steward instead.
+    if (viewerIsFamilyMember) {
+      return (
+        <div className="space-y-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-green">
+            School
+          </p>
+          <h2 className="text-xl font-semibold text-star">No school life here yet</h2>
+          <p className="text-sm leading-relaxed text-stardust">
+            Your school life shows up here once your parent links your
+            profile — ask them for a link code from their Crew section.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="space-y-4">
         <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-green">

@@ -116,7 +116,24 @@ export async function GET() {
     });
   }
 
-  return NextResponse.json({ members });
+  // Viewer role: a pilot who holds a live access grant as grantee is a
+  // linked family member (usually a child who claimed their steward's link
+  // code), not the steward. Parent-only actions like "Add a child" must be
+  // hidden from them — they manage nothing, they participate.
+  let viewer_is_family_member = false;
+  try {
+    const { count, error: grantErr } = await supabase
+      .from("crew_access_grants")
+      .select("id", { count: "exact", head: true })
+      .eq("grantee_pilot_id", pilotId)
+      .is("revoked_at", null);
+    if (!grantErr) viewer_is_family_member = (count ?? 0) > 0;
+  } catch {
+    // Grant table missing (migration not run) — default to steward view.
+    viewer_is_family_member = false;
+  }
+
+  return NextResponse.json({ members, viewer_is_family_member });
 }
 
 interface AddMemberBody {

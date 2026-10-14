@@ -96,6 +96,7 @@ export function SchoolOverviewApplet({
   const [data, setData] = useState<OverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [viewerIsFamilyMember, setViewerIsFamilyMember] = useState(false);
   const [toggling, setToggling] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -112,6 +113,7 @@ export function SchoolOverviewApplet({
         }
         const json = await res.json();
         const members: CrewMemberRow[] = json.members ?? [];
+        setViewerIsFamilyMember(json.viewer_is_family_member === true);
         if (members.length === 0) {
           setLoadError("no-crew");
           return;
@@ -229,7 +231,22 @@ export function SchoolOverviewApplet({
   }
 
   // -- No crew member --------------------------------------------------------
+  // Family members (children) never see "Add a crew member" — steward-only.
   if (loadError === "no-crew") {
+    if (viewerIsFamilyMember) {
+      return (
+        <div className="space-y-3">
+          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-cyan">
+            School
+          </p>
+          <h2 className="text-xl font-semibold text-star">School overview</h2>
+          <p className="text-sm leading-relaxed text-stardust">
+            Your school overview shows up here once your parent links your
+            profile — ask them for a link code from their Crew section.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="space-y-3">
         <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-neon-cyan">

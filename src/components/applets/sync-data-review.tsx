@@ -229,7 +229,7 @@ interface ReviewResponse {
 /* ------------------------------------------------------------------ */
 
 export function SyncDataReview({ memberId }: { memberId?: string }) {
-  const { members, loading: rosterLoading } = useCrewRoster();
+  const { members, loading: rosterLoading, viewerIsFamilyMember } = useCrewRoster();
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [data, setData] = useState<ReviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -336,6 +336,19 @@ export function SyncDataReview({ memberId }: { memberId?: string }) {
   }
 
   if (members.length === 0) {
+    // Family members (children) never see "Add a child" — steward-only.
+    if (viewerIsFamilyMember) {
+      return (
+        <div className="space-y-4">
+          <Kicker>Sync data review</Kicker>
+          <h2 className="text-xl font-semibold text-star">No school life here yet</h2>
+          <p className="text-sm leading-relaxed text-stardust">
+            Your school data shows up here once your parent links your
+            profile — ask them for a link code from their Crew section.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="space-y-4">
         <Kicker>Sync data review</Kicker>

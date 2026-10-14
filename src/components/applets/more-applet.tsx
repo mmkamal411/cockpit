@@ -50,6 +50,7 @@ export function MoreApplet() {
 /** The original More list — preserved untouched as the instant-revert target. */
 function MoreAppletLegacy() {
   const [crew, setCrew] = useState<CrewMember[]>([]);
+  const [viewerIsFamilyMember, setViewerIsFamilyMember] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +59,10 @@ function MoreAppletLegacy() {
         const res = await fetch("/api/crew/members");
         if (res.status === 401) return;
         const json = await res.json();
-        if (res.ok && !cancelled) setCrew(json.members ?? []);
+        if (res.ok && !cancelled) {
+          setCrew(json.members ?? []);
+          setViewerIsFamilyMember(json.viewer_is_family_member === true);
+        }
       } catch {
         // Leave crew empty; the onboarding prompt stays.
       }
@@ -131,13 +135,23 @@ function MoreAppletLegacy() {
                   </li>
                 ))}
               </ul>
-              <button
-                type="button"
-                onClick={() => openApplet("crew", {}, { replace: true })}
-                className="mt-3 rounded-xl border border-line px-4 py-2 text-sm text-stardust transition-colors hover:border-neon-green/40 hover:text-star"
-              >
-                Add another child
-              </button>
+              {!viewerIsFamilyMember && (
+                <button
+                  type="button"
+                  onClick={() => openApplet("crew", {}, { replace: true })}
+                  className="mt-3 rounded-xl border border-line px-4 py-2 text-sm text-stardust transition-colors hover:border-neon-green/40 hover:text-star"
+                >
+                  Add another child
+                </button>
+              )}
+            </>
+          ) : viewerIsFamilyMember ? (
+            <>
+              <p className="text-sm font-semibold text-star">Your school life lives here.</p>
+              <p className="mt-1 text-xs leading-relaxed text-stardust">
+                Once your parent links your profile with a link code, your
+                school overview will show up here.
+              </p>
             </>
           ) : (
             <>

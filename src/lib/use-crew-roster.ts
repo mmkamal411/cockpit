@@ -12,12 +12,18 @@ export interface CrewRosterMember {
 interface RosterState {
   members: CrewRosterMember[];
   loading: boolean;
+  /**
+   * True when the viewer holds a live access grant as grantee — i.e. they
+   * are a linked family member (usually a child), not the steward.
+   * Parent-only actions ("Add a child") must be hidden when true.
+   */
+  viewerIsFamilyMember: boolean;
 }
 
 // One shared in-flight request per page load — every toolbar variant, the
 // home stations grid, and the school station all ask the same question
 // (does the pilot have linked children?), so they share one fetch.
-let inflight: Promise<CrewRosterMember[]> | null = null;
+let inflight: Promise<{ members: CrewRosterMember[]; viewerIsFamilyMember: boolean }> | null = null;
 
 /**
  * Clear the shared in-flight roster cache. Call this after any action that
@@ -29,18 +35,21 @@ export function invalidateCrewRoster(): void {
   inflight = null;
 }
 
-function fetchRoster(): Promise<CrewRosterMember[]> {
+function fetchRoster(): Promise<{ members: CrewRosterMember[]; viewerIsFamilyMember: boolean }> {
   if (!inflight) {
     inflight = (async () => {
       try {
         const res = await fetch("/api/crew/members");
-        if (!res.ok) return [];
+        if (!res.ok) return { members: [], viewerIsFamilyMember: false };
         const json = await res.json();
-        return Array.isArray(json.members) ? (json.members as CrewRosterMember[]) : [];
+        return {
+          members: Array.isArray(json.members) ? (json.members as CrewRosterMember[]) : [],
+          viewerIsFamilyMember: json.viewer_is_family_member === true,
+        };
       } catch {
         // Unreachable / signed out: treat as no linked children. The
         // surfaces that need data show their own honest states.
-        return [];
+        return { members: [], viewerIsFamilyMember: false };
       }
     })();
   }
@@ -49,11 +58,11 @@ function fetchRoster(): Promise<CrewRosterMember[]> {
 
 /** The pilot's linked children (crew members). Shared + cached per page load. */
 export function useCrewRoster(): RosterState {
-  const [state, setState] = useState<RosterState>({ members: [], loading: true });
+  const [state, setState] = useState<RosterState>({ members: [], loading: true, viewerIsFamilyMember: false });
   useEffect(() => {
     let alive = true;
-    fetchRoster().then((members) => {
-      if (alive) setState({ members, loading: false });
+    fetchRoster().then(({ members, viewerIsFamilyMember }) => {
+      if (alive) setState({ members, loading: false, viewerIsFamilyMember });
     });
     return () => {
       alive = false;
