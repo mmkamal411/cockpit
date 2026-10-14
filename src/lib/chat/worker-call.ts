@@ -41,9 +41,10 @@ export async function askCrystal(prompt: string, timezone?: string | null): Prom
     },
     mode: "crystal",
   };
+  const workerUrl = `${CRYSTAL_URL}/chat`;
   let res: Response;
   try {
-    res = await fetch(`${CRYSTAL_URL}/chat`, {
+    res = await fetch(workerUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -52,10 +53,51 @@ export async function askCrystal(prompt: string, timezone?: string | null): Prom
       signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
       body: JSON.stringify(body),
     });
-  } catch {
+  } catch (err) {
+    // The worker never answered: network error or the 30s timeout fired.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        event: "chat_worker_unreachable",
+        route: "askCrystal",
+        url: workerUrl,
+        timeout_ms: WORKER_TIMEOUT_MS,
+        reason: err instanceof Error ? err.name : typeof err,
+        detail: err instanceof Error ? err.message.slice(0, 200) : null,
+        at: new Date().toISOString(),
+      }),
+    );
     throw new WorkerDown("worker unreachable");
   }
-  if (!res.ok) throw new WorkerDown(`worker ${res.status}`);
+  if (!res.ok) {
+    // The worker answered with an error (e.g. 502 {error:"ai_error"} from
+    // the Workers AI call). Keep the worker's own detail for diagnosis.
+    let workerDetail: string | null = null;
+    try {
+      const errBody = (await res.json()) as { error?: unknown; detail?: unknown };
+      const detail =
+        typeof errBody?.detail === "string"
+          ? errBody.detail
+          : typeof errBody?.error === "string"
+            ? errBody.error
+            : null;
+      workerDetail = detail?.slice(0, 300) ?? null;
+    } catch {
+      workerDetail = null;
+    }
+    console.error(
+      JSON.stringify({
+        level: "error",
+        event: "chat_worker_error",
+        route: "askCrystal",
+        url: workerUrl,
+        status: res.status,
+        worker_detail: workerDetail,
+        at: new Date().toISOString(),
+      }),
+    );
+    throw new WorkerDown(`worker ${res.status}`);
+  }
   const data: unknown = await res.json().catch(() => null);
   try {
     return toWireResponse(data, "crystal").reply;
