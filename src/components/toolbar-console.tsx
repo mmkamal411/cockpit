@@ -4,7 +4,7 @@ import { Fragment } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
 import { SchoolGlyph } from "./school-glyph";
-import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
+import { CrystalCommandButton } from "@/components/pilot/crystal-mascot";
 
 /* Glyphs — copied from toolbar-legacy.tsx, resized to the console spec
    (22px, 1.5px stroke). Icon + word label, always. */

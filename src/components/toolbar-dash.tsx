@@ -4,7 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
 import { SchoolGlyph } from "./school-glyph";
-import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
+import { CrystalCommandButton } from "@/components/pilot/crystal-mascot";
 
 /* Glyphs copied verbatim from toolbar-legacy.tsx — the ship's station icons. */
 function HomeGlyph() {

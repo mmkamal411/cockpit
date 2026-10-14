@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
 import { SchoolGlyph } from "./school-glyph";
-import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
+import { CrystalCommandButton } from "@/components/pilot/crystal-mascot";
 
 function HomeGlyph() {
   return (

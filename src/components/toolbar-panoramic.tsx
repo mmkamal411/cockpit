@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { closeAllApplets, openApplet, useAppletBus } from "@/lib/applet-bus";
-import { CrystalCommandButton } from "@/components/pilot/crystal-robot";
+import { CrystalCommandButton } from "@/components/pilot/crystal-mascot";
 import { createClient } from "@/lib/supabase/client";
 import { SchoolGlyph } from "./school-glyph";
 

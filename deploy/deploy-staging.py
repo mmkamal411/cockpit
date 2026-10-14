@@ -58,10 +58,12 @@ PREVIEW_PROPS_BRANCH = 'endsWith("/server/preview-props.json")'
 
 # Build-time env vars baked into the Next.js bundle. Missing ones mean a
 # build that does not match the intended staging config — fail loudly.
+# NEXT_PUBLIC_CRYSTAL_ROBOT retired 2026-10-14 (Team Mascot): the flag-gated
+# robot/orb switch is gone — CrystalCommandButton now always renders the
+# fluffling mascot, so the flag is no longer read by any code.
 REQUIRED_BUILD_ENV = ["NEXT_PUBLIC_SUPABASE_URL",
                       "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-                      "NEXT_PUBLIC_CRYSTAL_URL",
-                      "NEXT_PUBLIC_CRYSTAL_ROBOT"]
+                      "NEXT_PUBLIC_CRYSTAL_URL"]
 
 
 def run(cmd, env=None, check=True):
