@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { encryptToken } from "@/lib/token-crypto";
+import { googleCalendarClientId } from "@/lib/env-fallbacks";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -26,7 +27,7 @@ export async function GET(req: Request) {
     return NextResponse.redirect(`${appUrl}/?cal=error`);
   }
 
-  const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID;
+  const clientId = googleCalendarClientId();
   const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
   const redirectUri = process.env.GOOGLE_CALENDAR_REDIRECT_URI ?? `${origin}/api/calendar/callback`;
   if (!clientId || !clientSecret) {

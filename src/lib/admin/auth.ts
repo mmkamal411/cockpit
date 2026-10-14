@@ -1,5 +1,6 @@
 import { createClient } from "../supabase/server";
 import { createAdminClient } from "./serviceClient";
+import { adminEmails } from "../env-fallbacks";
 
 /**
  * Layer 1 of the admin gate: check the signed-in user's email against the
@@ -10,7 +11,8 @@ import { createAdminClient } from "./serviceClient";
  */
 export function isAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
-  const allowlist = (process.env.ADMIN_EMAILS ?? "")
+  // Fallback for direct-upload deploys that don't receive env vars at runtime.
+  const allowlist = adminEmails()
     .split(",")
     .map((entry) => entry.trim().toLowerCase())
     .filter(Boolean);

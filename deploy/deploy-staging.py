@@ -60,7 +60,8 @@ PREVIEW_PROPS_BRANCH = 'endsWith("/server/preview-props.json")'
 # build that does not match the intended staging config — fail loudly.
 REQUIRED_BUILD_ENV = ["NEXT_PUBLIC_SUPABASE_URL",
                       "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-                      "NEXT_PUBLIC_CRYSTAL_URL"]
+                      "NEXT_PUBLIC_CRYSTAL_URL",
+                      "NEXT_PUBLIC_CRYSTAL_ROBOT"]
 
 
 def run(cmd, env=None, check=True):

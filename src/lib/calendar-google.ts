@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { googleCalendarClientId } from "@/lib/env-fallbacks";
 import { decryptToken, encryptToken } from "@/lib/token-crypto";
 import {
   registerCalendarProvider,
@@ -121,7 +122,7 @@ export function mapGoogleCalendar(entry: GoogleCalendarListEntry): SyncCalendar 
 // ---------------------------------------------------------------------------
 
 function googleConfig(): { clientId: string; clientSecret: string } {
-  const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID;
+  const clientId = googleCalendarClientId();
   const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     throw new Error(

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { googleCalendarClientId } from "@/lib/env-fallbacks";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const SCOPES = [
@@ -24,7 +25,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Sign in first, then connect your calendar." }, { status: 401 });
   }
 
-  const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID;
+  const clientId = googleCalendarClientId();
   const redirectUri =
     process.env.GOOGLE_CALENDAR_REDIRECT_URI ?? `${new URL(req.url).origin}/api/calendar/callback`;
   if (!clientId) {
