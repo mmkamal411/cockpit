@@ -1,0 +1,64 @@
+# Crystal v2 — Build Log
+
+**Project:** Complete rebuild of Cockpit as "Crystal" (StarCraft-style cockpit theme)
+**Source:** Copy of ~/workspace/cockpit (initial commit 91673e6)
+**Started:** 2026-10-14 ~02:15 EDT
+**Coordinator:** Build Coordinator (subagent session 3ebed03b)
+
+## Teams
+
+| Team | Branch | Scope | Status |
+|------|--------|-------|--------|
+| Theme | feature/v2-theme | Rebrand Cockpit→Crystal; StarCraft theme (deep space navy, cyan/mint teal, frosted glass, neon) | RUNNING (agent 418ec7a5) |
+| Landing | feature/v2-landing | Pre-login landing page, hero video, auth, legal pages, sales chat | RUNNING (agent 75791d69) |
+| Mascot | feature/v2-mascot | Crystal mascot (snow-white fluffy, neon accents, animated moods) | RUNNING (agent 76dd3ba4) |
+| Toolbar | feature/v2-toolbar | StarCraft command center toolbar (ability grid, radar, alerts, sounds) | RUNNING (agent 96e06a33) |
+
+## Progress
+
+### 2026-10-14 02:15 EDT — Kickoff
+- All 4 teams spawned in parallel with clear scope briefs.
+- Each team commits to its own feature branch and pushes to origin when done.
+- Ground rules: no dead code, no console.logs, tsc --noEmit must pass, clean up as you go.
+
+### 2026-10-14 ~03:00 EDT — Team Landing: pre-login experience (feature/v2-landing)
+- **Landing page (`/`, logged out):** rebuilt as a full page — hero (daypart planetary vista video, Sign up free / Log in CTAs), Features section (tasks, school, health, money, communication, one calm command deck), "Meet Crystal" section, on-page signup section (#signup) embedding the auth form, and a footer with all legal links. Signed-in pilots still redirect to /home; the session check still fails open to the public landing.
+- **Auth:** new shared `src/components/auth-form.tsx` used by both the landing signup section and `/login`. Two paths: emailed 6-digit one-time code (auto-verifies on 6 digits, `verifyOtp` type email; the same email also carries a one-click magic link as the fallback) and Continue with Google (existing Supabase OAuth → /auth/callback pattern, untouched). Signup and login are the same passwordless flow — new pilots get an account on code verify. Plain-English errors, no blank pages.
+- **Sales-support chat widget:** floating `SalesChat` bubble on the landing page. Canned FAQ answers only (pricing, features, privacy, kids-not-required, signup, devices, AI honesty, support) — the widget's header and copy explicitly say it's a guide, not an AI. Keyword-matched with suggested questions and a fallback answer. `/api/chat` was NOT reused: it 401s without a signed-in pilot.
+- **Legal pages:** `/terms`, `/privacy`, `/cookies`, `/accessibility`, `/do-not-sell` — real, plain-language content (account rules, data we collect, 14-day signal retention, no-sale pledge, CCPA rights, WCAG 2.2 AA goal, reduced-motion support), shared `LegalPage` shell, linked from the landing footer.
+- **Reduced motion:** hero renders the poster still only when `prefers-reduced-motion: reduce` (video skipped entirely, not just paused); ambient orb animation also disabled. **Mobile:** `<640px` shows the ~40KB still instead of the 1.5MB video loop; desktop-with-motion gets the video.
+- Hygiene: `npx tsc --noEmit` passes with zero errors; eslint clean (0 errors); no console.logs, no window.confirm/alert/prompt, no dead code.
+
+### 2026-10-14 ~06:30 EDT — Team Toolbar: StarCraft command center toolbar shipped (feature/v2-toolbar)
+- New `ToolbarStarcraft` variant (`src/components/toolbar-starcraft.tsx`): 3×3 ability grid (Home/Today/Crystal/Progress/School/More/Nudges/Weather/Crew) with 1.5s conic-gradient cooldown sweeps; 360° radar sweep widget (decorative); tactical + comms feed tickers (CSS marquee, real nudges data + SIM-marked placeholders, paused under prefers-reduced-motion); squad status dots from /api/crew/members with graceful empty state; Red Alert (DEFCON 1) mode with pulsing red styling; Web Audio synth sound effects (click/open/close/alert) with master mute persisted to localStorage, OFF by default.
+- New libs: `src/lib/command-center/sound.ts` (playSound/setSoundEnabled/useSoundEnabled), `src/lib/command-center/red-alert.ts` (setRedAlert/useRedAlert + urgent-nudge auto-trigger watchdog, first check delayed so it never fires on page load).
+- Pilot seat renders Team Mascot's `CrystalCommandButton` from `src/components/pilot/crystal-mascot.tsx` (they landed mid-task; slot is theirs, sizing/mount is ours).
+- Registered `starcraft` variant in toolbar-switch/variant; TOOLBAR_VARIANT set to `starcraft`. Revert = flip flag.
+- Colors reference Team Theme CSS vars (--color-abyss/--color-neon-cyan/--color-neon-teal) with StarCraft-spec fallbacks (#0a0e1a/#22d3ee/#5eead4).
+- `npx tsc --noEmit` passes with zero errors. Mobile: tickers hide <640px, grid compresses to icon-only <480px.
+
+### 2026-10-14 ~03:10 EDT — Theme (feature/v2-theme) DONE
+- Rebrand Cockpit → Crystal (user-facing only; internal identifiers, file names, API paths, localStorage keys, DB tables untouched):
+  - package.json name → "crystal".
+  - Root metadata title was already "Crystal" — verified.
+  - Rewrote brand copy in: admin layout (title/description/403 page/header), error + global-error pages, invite flow (welcome + shared-list title), share-invite email templates (also rewrote the "smart assistant called Crystal" line, redundant now that Crystal is the app), Outlook permission error message, nudge source attribution ("From Crystal…", test updated), bills/shopping/subscriptions/crew applets empty-state + link-copy, station-categories blurb.
+  - Favicon: verified existing ICO is the Crystal neon robot, RGBA multi-size (16/32/48/64) — kept as-is, no rebuild needed.
+- StarCraft theme tokens (src/app/globals.css):
+  - Backgrounds → deep space navy: abyss #070b16, panels #0a101f/#0d1528/#131c33.
+  - Accents: neon-cyan now glowing cyan #22d3ee; neon-teal stays mint teal #5eead4.
+  - Text: soft white #f2f8fc, ice blue #b9d4e4, muted slate #7d92a6, new light ash gray #c3ccd4 (--color-ash).
+  - New utilities: .glass-panel (frosted glass: navy/55% + 16px backdrop blur, hairline border, neon edge) and .glow-cyan (neon text glow). Scrollbar/selection hover shifted cyan.
+- Toolbar chrome (src/components/toolbar-console.tsx, CSS only — structure/behavior/aria identical):
+  - Shelf: deep navy gradient (#0b1122→#070c18) with a faint cyan underglow.
+  - Light strip: teal → glowing cyan #22d3ee with stronger halo.
+  - Key bank: frosted glass (backdrop-blur 14px, white/10 border, neon edge).
+  - Keys: navy-machined bases, ice-blue text, cyan ignition on press/active, cyan 3px rail + engaged pips; orb reactor core kept mint teal as the brightest element.
+  - Doc comments updated to match ("Crystal Console", cyan light strip).
+- Verified: npx tsc --noEmit clean, npm run build succeeds, nudges engine test 28/28 pass.
+- No console.logs, no dead code, no commented-out blocks introduced.
+- Note: remaining "cockpit" strings are internal only (localStorage keys like cockpit.todos*, DB table cockpit_layouts, device_name cockpit-cloud, API URLs, code comments). The Azure app registration named "Cockpit" is an actual infra object — text now says "Crystal app in Azure"; renaming the registration itself is out of scope.
+- Overlap note: touched only the CSS + doc comments in toolbar-console.tsx; Team Toolbar owns structure on feature/v2-toolbar — expect a merge conflict in that file; mine is chrome-only so resolution is straightforward (keep their structure, keep my chrome, or re-apply colors after).
+
+## Decisions
+- Original ~/workspace/cockpit is untouched; all work happens in ~/workspace/crystal-v2.
+- Merge strategy TBD: teams merge to main after coordinator review of each branch.
