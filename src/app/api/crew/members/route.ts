@@ -9,6 +9,22 @@ import { getPilotId, unauthorized } from "@/lib/crew/auth";
  * `via_grant: true`. Grant-scoped rows come from the my_granted_crew
  * definer RPC because crew_members RLS is steward-only.
  */
+const ROSTER_COLUMNS_WITH_PREFS =
+  "id, name, birthdate, relationship, sync_preferences, created_at";
+const ROSTER_COLUMNS_BASE = "id, name, birthdate, relationship, created_at";
+
+/**
+ * True when a PostgREST error means a column is missing from the table
+ * (migration not run yet). The roster must degrade gracefully, not 500.
+ */
+function isMissingColumnError(error: { code?: string; message?: string }) {
+  return (
+    error?.code === "42703" || // Postgres undefined_column
+    error?.code === "PGRST204" || // PostgREST unknown column
+    /column .* does not exist/i.test(error?.message ?? "")
+  );
+}
+
 export async function GET() {
   const pilotId = await getPilotId();
   if (!pilotId) {
@@ -16,10 +32,21 @@ export async function GET() {
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase
+  // Prefer the full column set; fall back to the base set when migration
+  // 041 (sync_preferences) has not been applied yet.
+  let { data, error } = await supabase
     .from("crew_members")
-    .select("id, name, birthdate, relationship, sync_preferences, created_at")
+    .select(ROSTER_COLUMNS_WITH_PREFS)
     .order("created_at", { ascending: true });
+
+  if (error && isMissingColumnError(error)) {
+    const retry = await supabase
+      .from("crew_members")
+      .select(ROSTER_COLUMNS_BASE)
+      .order("created_at", { ascending: true });
+    data = (retry.data ?? []).map((m) => ({ ...m, sync_preferences: null }));
+    error = retry.error;
+  }
 
   if (error) {
     console.error(
@@ -188,7 +215,9 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase
+  // Insert with sync preferences; if migration 041 has not been applied
+  // yet, retry without the column instead of failing the whole add.
+  let { data, error } = await supabase
     .from("crew_members")
     .insert({
       pilot_id: pilotId,
@@ -197,8 +226,23 @@ export async function POST(request: NextRequest) {
       relationship,
       sync_preferences: sanitizeSyncPrefs(body.sync_preferences),
     })
-    .select("id, name, birthdate, relationship, sync_preferences, created_at")
+    .select(ROSTER_COLUMNS_WITH_PREFS)
     .single();
+
+  if (error && isMissingColumnError(error)) {
+    const retry = await supabase
+      .from("crew_members")
+      .insert({
+        pilot_id: pilotId,
+        name,
+        birthdate: body.birthdate,
+        relationship,
+      })
+      .select(ROSTER_COLUMNS_BASE)
+      .single();
+    data = retry.data ? { ...retry.data, sync_preferences: null } : retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.error(

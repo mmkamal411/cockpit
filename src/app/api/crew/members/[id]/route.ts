@@ -6,6 +6,22 @@ import { getPilotId, unauthorized } from "@/lib/crew/auth";
  * GET /api/crew/members/[id] — one crew member's profile.
  * RLS scopes to the pilot's own crew; a stranger's UUID 404s.
  */
+const MEMBER_COLUMNS_WITH_PREFS =
+  "id, name, birthdate, relationship, sync_preferences, created_at";
+const MEMBER_COLUMNS_BASE = "id, name, birthdate, relationship, created_at";
+
+/**
+ * True when a PostgREST error means a column is missing from the table
+ * (migration not run yet). The profile must degrade gracefully, not 404.
+ */
+function isMissingColumnError(error: { code?: string; message?: string }) {
+  return (
+    error?.code === "42703" || // Postgres undefined_column
+    error?.code === "PGRST204" || // PostgREST unknown column
+    /column .* does not exist/i.test(error?.message ?? "")
+  );
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -17,11 +33,23 @@ export async function GET(
   const { id } = await params;
 
   const supabase = await createClient();
-  const { data, error } = await supabase
+  // Prefer the full column set; fall back when migration 041
+  // (sync_preferences) has not been applied yet.
+  let { data, error } = await supabase
     .from("crew_members")
-    .select("id, name, birthdate, relationship, sync_preferences, created_at")
+    .select(MEMBER_COLUMNS_WITH_PREFS)
     .eq("id", id)
     .single();
+
+  if (error && isMissingColumnError(error)) {
+    const retry = await supabase
+      .from("crew_members")
+      .select(MEMBER_COLUMNS_BASE)
+      .eq("id", id)
+      .single();
+    data = retry.data ? { ...retry.data, sync_preferences: null } : retry.data;
+    error = retry.error;
+  }
 
   if (error || !data) {
     return NextResponse.json(
@@ -78,6 +106,17 @@ export async function PATCH(
     .single();
 
   if (error || !data) {
+    // Migration 041 (sync_preferences column) not applied yet — say so
+    // plainly instead of a generic 500.
+    if (isMissingColumnError(error ?? {})) {
+      return NextResponse.json(
+        {
+          error:
+            "Sync preferences aren't ready yet — the database update hasn't been applied. Your other settings still work.",
+        },
+        { status: 503 },
+      );
+    }
     console.error(
       JSON.stringify({
         route: "PATCH /api/crew/members/[id]",
