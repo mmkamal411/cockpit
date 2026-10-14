@@ -33,7 +33,7 @@ export default function GlobalError({
             Something went wrong
           </h1>
           <p style={{ opacity: 0.75, marginBottom: "1.5rem", lineHeight: 1.6 }}>
-            The cockpit needs a fresh start. Your data is safe.
+            Crystal needs a fresh start. Your data is safe.
             {error.digest && (
               <>
                 <br />

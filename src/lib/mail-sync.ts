@@ -123,7 +123,7 @@ export async function syncOutlookMailConnection(
         accountEmail,
         outcome: "permission_missing",
         message:
-          "Microsoft didn't allow reading email. If you approved email access when connecting, your admin still needs to add the Mail.Read permission to the Cockpit app in Azure — then reconnect.",
+          "Microsoft didn't allow reading email. If you approved email access when connecting, your admin still needs to add the Mail.Read permission to the Crystal app in Azure — then reconnect.",
       };
     }
     await db

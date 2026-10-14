@@ -412,7 +412,7 @@ export function SubscriptionsApplet() {
             <div className="rounded-2xl border border-line bg-panel-2/60 p-6 text-center">
               <p className="text-sm font-medium text-star">No subscriptions tracked yet.</p>
               <p className="mt-1 text-xs leading-relaxed text-stardust">
-                Add your first subscription and the cockpit will show what they cost —
+                Add your first subscription and Crystal will show what they cost —
                 per month and per year, side by side.
               </p>
               <button

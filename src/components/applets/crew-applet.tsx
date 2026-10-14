@@ -196,7 +196,7 @@ function syncStatusText(m: CrewMemberRow): { text: string; tone: "ok" | "warn" |
   // Linked profiles: the steward's sync status isn't visible to the grantee
   // under RLS — say exactly that instead of "Not connected yet" (a lie).
   if (m.via_grant) {
-    return { text: "Linked to your cockpit", tone: "ok" };
+    return { text: "Linked to Crystal", tone: "ok" };
   }
   if (!s || !s.last_synced_at) {
     return { text: "Not connected yet", tone: "idle" };
@@ -2915,7 +2915,7 @@ export function CrewApplet() {
         <div>
           <h2 className="text-xl font-semibold text-star">{added.name} is aboard</h2>
           <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-stardust">
-            {added.name}&apos;s crew profile is saved to your cockpit.
+            {added.name}&apos;s crew profile is saved to Crystal.
             {added.relationship === "child" && (
               <>
                 {" "}School sync will pick up{" "}
@@ -3160,7 +3160,7 @@ export function CrewApplet() {
           </p>
           <p className="mt-1 text-xs leading-relaxed text-stardust">
             {roster.length === 0
-              ? "If a parent gave you a 6-digit link code, enter it here and their crew profile — classes, grades, the works — links to your cockpit."
+              ? "If a parent gave you a 6-digit link code, enter it here and their crew profile — classes, grades, the works — links to Crystal."
               : "Enter a 6-digit code someone shared to link their profile here."}
           </p>
           <div className="mt-3 flex gap-2">

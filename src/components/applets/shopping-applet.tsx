@@ -861,7 +861,7 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
             {activeList.permission === "edit"
               ? "You can add items and check things off together — changes show up for both of you."
               : "You can follow along as it updates."}{" "}
-            Take a look around Cockpit whenever you like.
+            Take a look around Crystal whenever you like.
           </p>
           <button
             type="button"
@@ -1169,7 +1169,7 @@ export function ShoppingApplet({ params }: { params?: AppletParams }) {
         <div className="rounded-2xl border border-line bg-panel-2/60 p-4">
           <h3 className="text-sm font-semibold text-star">Share &ldquo;{activeList.name}&rdquo;</h3>
           <p className="mt-1 text-xs leading-relaxed text-stardust">
-            They&apos;ll get an invite link. If they don&apos;t have Cockpit yet, the link walks
+            They&apos;ll get an invite link. If they don&apos;t have Crystal yet, the link walks
             them through signing up and opens this list first.
           </p>
 

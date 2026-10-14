@@ -42,7 +42,7 @@ export function InviteWelcome({
       <div className="w-full max-w-md rounded-2xl border border-line bg-panel-2/60 p-8 text-center">
         <p aria-hidden="true" className="text-5xl">🎉</p>
         <h1 className="mt-4 text-xl font-semibold text-star">
-          {already ? "Welcome back" : "Welcome to Cockpit"}
+          {already ? "Welcome back" : "Welcome to Crystal"}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-stardust">
           <strong className="text-star">{ownerName}</strong> shared their{" "}
@@ -52,7 +52,7 @@ export function InviteWelcome({
             : " — you can follow along as it updates."}
         </p>
         <p className="mt-3 text-xs leading-relaxed text-dim">
-          Cockpit is your personal command center — lists, bills, health, and more.
+          Crystal is your personal command center — lists, bills, health, and more.
           Take a look around whenever you like.
         </p>
         <button

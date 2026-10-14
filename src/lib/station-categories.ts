@@ -41,7 +41,7 @@ export const STATION_CATEGORIES: StationCategory[] = [
       { id: "briefing", label: "Today's briefing", blurb: "Your attention, right now.", appletId: "today" },
       { id: "calendar", label: "Calendar", blurb: "Meetings, events, and what's next.", appletId: "calendar" },
       { id: "tasks", label: "Tasks & to-dos", blurb: "The list that keeps you honest.", appletId: "today" },
-      { id: "nudges", label: "Nudges", blurb: "Gentle reminders from your cockpit.", appletId: "nudges" },
+      { id: "nudges", label: "Nudges", blurb: "Gentle reminders from Crystal.", appletId: "nudges" },
       { id: "weather", label: "Weather", blurb: "The skies above your home port.", appletId: "weather" },
     ],
   },

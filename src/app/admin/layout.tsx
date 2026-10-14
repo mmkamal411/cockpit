@@ -12,8 +12,8 @@ import { Pill } from "@/components/admin/ui";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Admin — Cockpit",
-  description: "Cockpit administration command center.",
+  title: "Admin — Crystal",
+  description: "Crystal administration command center.",
 };
 
 /** 403-style access-denied page — never a redirect loop. */
@@ -24,7 +24,7 @@ function AccessDenied() {
         <Pill tone="red">403</Pill>
         <h1 className="mt-4 text-lg font-semibold text-star">Access denied</h1>
         <p className="mt-2 text-sm text-dim">
-          This area is restricted to Cockpit administrators. If you believe you
+          This area is restricted to Crystal administrators. If you believe you
           should have access, ask the founder to add your email to the admin
           list.
         </p>
@@ -32,7 +32,7 @@ function AccessDenied() {
           href="/home"
           className="mt-6 inline-block rounded-lg border border-cyan-400/40 px-4 py-2 text-sm font-medium text-cyan-200 hover:bg-cyan-400/10"
         >
-          Back to Cockpit
+          Back to Crystal
         </Link>
       </div>
     </div>
@@ -56,7 +56,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <div className="flex items-center gap-3">
             <Pill tone="red">ADMIN</Pill>
             <span className="text-sm font-semibold tracking-tight">
-              Cockpit Command Center
+              Crystal Command Center
             </span>
           </div>
           <div className="flex items-center gap-4">

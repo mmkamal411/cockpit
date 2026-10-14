@@ -106,14 +106,14 @@ export function buildShareInvite(email: ShareInviteEmail): {
   const text = [
     `Hi there,`,
     ``,
-    `${from} shared their "${email.listName}" ${kindNoun} with you on Cockpit.`,
+    `${from} shared their "${email.listName}" ${kindNoun} with you on Crystal.`,
     ``,
     `Open it here:`,
     email.inviteUrl,
     ``,
     `This link works once and expires in 30 days. If ${from} shares more lists with you later, you'll get a fresh link each time.`,
     ``,
-    `What is Cockpit? It's your personal command center — lists, bills, health, and more, with a smart assistant called Crystal to help through the day.`,
+    `What is Crystal? It's your personal command center — lists, bills, health, and more — with a smart AI assistant to help through the day.`,
     ``,
     `Didn't expect this? You can safely ignore this email — nothing was shared until you open the link and sign in.`,
   ].join("\n");
@@ -121,11 +121,11 @@ export function buildShareInvite(email: ShareInviteEmail): {
   const html = `<!doctype html>
 <html><body style="font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 560px; margin: 0 auto; padding: 24px;">
 <p>Hi there,</p>
-<p><strong>${escapeHtml(from)}</strong> shared their &ldquo;${escapeHtml(email.listName)}&rdquo; ${kindNoun} with you on Cockpit.</p>
+<p><strong>${escapeHtml(from)}</strong> shared their &ldquo;${escapeHtml(email.listName)}&rdquo; ${kindNoun} with you on Crystal.</p>
 <p><a href="${escapeHtml(email.inviteUrl)}" style="display: inline-block; background: #16a34a; color: #fff; padding: 12px 24px; border-radius: 10px; text-decoration: none; font-weight: 600;">Open the shared list</a></p>
 <p style="color: #555; font-size: 14px;">This link works once and expires in 30 days.</p>
 <hr style="border: none; border-top: 1px solid #ddd; margin: 24px 0;" />
-<p style="color: #555; font-size: 14px;"><strong>What is Cockpit?</strong> Your personal command center &mdash; lists, bills, health, and more, with a smart assistant called Crystal to help through the day.</p>
+<p style="color: #555; font-size: 14px;"><strong>What is Crystal?</strong> Your personal command center &mdash; lists, bills, health, and more &mdash; with a smart AI assistant to help through the day.</p>
 <p style="color: #888; font-size: 13px;">Didn&rsquo;t expect this? You can safely ignore this email &mdash; nothing was shared until you open the link and sign in.</p>
 </body></html>`;
 
